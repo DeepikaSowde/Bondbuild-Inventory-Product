@@ -1,6 +1,17 @@
 // frontend/src/pages/StockPage.jsx
 // Stock Page with Role-Based Permissions from Database
-// FINAL FIX: Correct nested data access + price formatting
+// FIXES IN THIS VERSION:
+//   1. Table wrapper: overflow "hidden" → "auto" + table minWidth,
+//      so the table scrolls inside its own card instead of stretching
+//      the whole page (this is what was pushing "Add Item" off-screen)
+//   2. Search box now actually filters the table (code / name / location)
+//   3. "undefined" stripped out of item_name display (band-aid — real fix
+//      is in the backend where the name string is built)
+//   4. Stats row wraps on narrow screens instead of forcing page width
+//
+// NOTE: Also add `minWidth: 0` to the <main> content area in your
+// Layout/Sidebar component (the flex child that wraps this page),
+// otherwise the page can still stretch. See note at bottom of file.
 
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -85,7 +96,6 @@ export default function StockPage() {
   const [inventory, setInventory] = useState([]);
   const [permissions, setPermissions] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [filterRole, setFilterRole] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
 
   // ── Fetch inventory data and permissions on mount ──
@@ -97,14 +107,9 @@ export default function StockPage() {
     try {
       setLoading(true);
 
-      // Fetch inventory - FIXED: Access nested data.data
-      const inventoryRes = await api.get("/inventory");
-      console.log("📦 Inventory Response:", inventoryRes.data);
-      console.log("📊 Is success?", inventoryRes.data.success);
-      console.log("📈 Data array length:", inventoryRes.data.data?.length || 0);
-
       // The API returns { success: true, data: [...], count: 165 }
       // So we need inventoryRes.data.data (nested!)
+      const inventoryRes = await api.get("/inventory");
       const inventoryData = inventoryRes.data.data || [];
       setInventory(Array.isArray(inventoryData) ? inventoryData : []);
 
@@ -113,13 +118,11 @@ export default function StockPage() {
         try {
           const permRes = await api.get(`/permissions/${user.role}`);
           setPermissions(permRes.data);
-          console.log("✅ Permissions loaded from API:", permRes.data);
         } catch (err) {
           console.log(
             "⚠️ Permissions API failed, using defaults for",
             user.role,
           );
-          // Use default permissions if API fails
           const defaultPerms =
             DEFAULT_PERMISSIONS[user.role] || DEFAULT_PERMISSIONS.Drafter;
           setPermissions(defaultPerms);
@@ -128,7 +131,6 @@ export default function StockPage() {
     } catch (err) {
       console.error("❌ Error fetching data:", err);
       setInventory([]);
-      // Set default permissions on error
       const defaultPerms =
         DEFAULT_PERMISSIONS[user?.role] || DEFAULT_PERMISSIONS.Drafter;
       setPermissions(defaultPerms);
@@ -170,7 +172,38 @@ export default function StockPage() {
 
   const visibleColumns = columns.filter((col) => col.show);
 
-  // ── Safe calculation functions ──
+  const showActions =
+    permissions.edit_quantity ||
+    permissions.edit_location ||
+    permissions.delete_item;
+
+  // ── FIX #3: clean "undefined" out of item names (backend band-aid) ──
+  const cleanName = (name) => {
+    if (!name) return "—";
+    const cleaned = String(name)
+      .replace(/\s*undefined\s*/gi, "")
+      .trim();
+    return cleaned || "—";
+  };
+
+  // ── FIX #2: search now actually filters the inventory ──
+  const q = searchTerm.trim().toLowerCase();
+  const filteredInventory = !q
+    ? inventory
+    : inventory.filter(
+        (item) =>
+          String(item.item_code || "")
+            .toLowerCase()
+            .includes(q) ||
+          String(item.item_name || "")
+            .toLowerCase()
+            .includes(q) ||
+          String(item.location_code || "")
+            .toLowerCase()
+            .includes(q),
+      );
+
+  // ── Safe calculation functions (stats stay based on FULL inventory) ──
   const getTotalQty = () => {
     if (!Array.isArray(inventory)) return 0;
     return inventory.reduce(
@@ -205,6 +238,8 @@ export default function StockPage() {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          flexWrap: "wrap",
+          gap: 12,
           marginBottom: 24,
         }}
       >
@@ -223,7 +258,7 @@ export default function StockPage() {
             All materials currently in factory storage
           </p>
         </div>
-        <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
           {/* Export button - visible to all */}
           {permissions.export_excel && (
             <button
@@ -236,6 +271,7 @@ export default function StockPage() {
                 fontSize: 13,
                 fontWeight: 700,
                 cursor: "pointer",
+                whiteSpace: "nowrap",
               }}
             >
               📥 Export Excel
@@ -254,6 +290,7 @@ export default function StockPage() {
                 fontSize: 13,
                 fontWeight: 700,
                 cursor: "pointer",
+                whiteSpace: "nowrap",
               }}
             >
               ➕ Add Item
@@ -262,8 +299,15 @@ export default function StockPage() {
         </div>
       </div>
 
-      {/* Stats */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+      {/* Stats — FIX #4: flexWrap so cards never force page width */}
+      <div
+        style={{
+          display: "flex",
+          gap: 12,
+          marginBottom: 20,
+          flexWrap: "wrap",
+        }}
+      >
         {[
           [
             "Total Items",
@@ -282,7 +326,8 @@ export default function StockPage() {
               padding: "12px 20px",
               boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
               borderLeft: `4px solid ${color}`,
-              flex: 1,
+              flex: "1 1 150px",
+              minWidth: 150,
             }}
           >
             <div style={{ fontSize: 20, fontWeight: 800, color }}>{value}</div>
@@ -293,7 +338,7 @@ export default function StockPage() {
         ))}
       </div>
 
-      {/* Search and filters */}
+      {/* Search */}
       <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
         <input
           type="text"
@@ -327,18 +372,32 @@ export default function StockPage() {
         <strong>{visibleColumns.length}</strong> | Can Edit Qty:{" "}
         <strong>{permissions.edit_quantity ? "✅ Yes" : "❌ No"}</strong> | Can
         Add Items: <strong>{permissions.add_item ? "✅ Yes" : "❌ No"}</strong>
+        {q && (
+          <>
+            {" "}
+            | Showing: <strong>{filteredInventory.length}</strong> of{" "}
+            <strong>{inventory.length}</strong> items
+          </>
+        )}
       </div>
 
-      {/* Table */}
+      {/* Table — FIX #1: overflowX auto so the table scrolls in its own
+          card instead of stretching the whole page */}
       <div
         style={{
           background: "#fff",
           borderRadius: 14,
           boxShadow: "0 1px 4px rgba(0,0,0,0.07)",
-          overflow: "hidden",
+          overflowX: "auto",
         }}
       >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table
+          style={{
+            width: "100%",
+            minWidth: 1100,
+            borderCollapse: "collapse",
+          }}
+        >
           <thead>
             <tr style={{ background: "#1E1B4B" }}>
               {visibleColumns.map((col) => (
@@ -351,15 +410,14 @@ export default function StockPage() {
                     fontWeight: 700,
                     color: "#A5B4FC",
                     textTransform: "uppercase",
+                    whiteSpace: "nowrap",
                   }}
                 >
                   {col.label}
                 </th>
               ))}
               {/* Actions column - only if user has edit permissions */}
-              {(permissions.edit_quantity ||
-                permissions.edit_location ||
-                permissions.delete_item) && (
+              {showActions && (
                 <th
                   style={{
                     padding: "12px 16px",
@@ -376,8 +434,9 @@ export default function StockPage() {
             </tr>
           </thead>
           <tbody>
-            {Array.isArray(inventory) && inventory.length > 0 ? (
-              inventory.map((item, i) => (
+            {Array.isArray(filteredInventory) &&
+            filteredInventory.length > 0 ? (
+              filteredInventory.map((item, i) => (
                 <tr
                   key={item.id}
                   style={{
@@ -399,6 +458,7 @@ export default function StockPage() {
                           style={{
                             fontSize: 11,
                             fontWeight: 700,
+                            whiteSpace: "nowrap",
                             color:
                               item[col.key] === "OK"
                                 ? "#059669"
@@ -426,6 +486,8 @@ export default function StockPage() {
                         <span style={{ fontWeight: 700, fontSize: 13 }}>
                           {item[col.key]}
                         </span>
+                      ) : col.key === "item_name" ? (
+                        cleanName(item[col.key])
                       ) : (
                         item[col.key]
                       )}
@@ -433,9 +495,7 @@ export default function StockPage() {
                   ))}
 
                   {/* Actions - show based on permissions */}
-                  {(permissions.edit_quantity ||
-                    permissions.edit_location ||
-                    permissions.delete_item) && (
+                  {showActions && (
                     <td
                       style={{
                         padding: "12px 16px",
@@ -462,6 +522,7 @@ export default function StockPage() {
                               fontWeight: 700,
                               color: "#6366F1",
                               cursor: "pointer",
+                              whiteSpace: "nowrap",
                             }}
                           >
                             ✏️ Edit
@@ -493,10 +554,12 @@ export default function StockPage() {
             ) : (
               <tr>
                 <td
-                  colSpan={visibleColumns.length + 1}
+                  colSpan={visibleColumns.length + (showActions ? 1 : 0)}
                   style={{ padding: 40, textAlign: "center", color: "#9CA3AF" }}
                 >
-                  No items in inventory
+                  {q
+                    ? `No items match "${searchTerm}"`
+                    : "No items in inventory"}
                 </td>
               </tr>
             )}
@@ -526,3 +589,22 @@ export default function StockPage() {
     </div>
   );
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+   IMPORTANT — ONE MORE CHANGE NEEDED IN YOUR LAYOUT COMPONENT
+   (the file that renders the Sidebar next to the page content)
+
+   The content area is a flex child, and flex children refuse to shrink
+   below their content width unless you set minWidth: 0. Without this,
+   the table can still stretch the page. It should look like:
+
+   <div style={{ display: "flex" }}>
+     <Sidebar />
+     <main style={{ flex: 1, minWidth: 0 }}>   // ← minWidth: 0 is the key
+       <Outlet />   // or {children}
+     </main>
+   </div>
+
+   If your layout uses CSS Grid instead:
+   gridTemplateColumns: "280px minmax(0, 1fr)"
+   ───────────────────────────────────────────────────────────────────── */
