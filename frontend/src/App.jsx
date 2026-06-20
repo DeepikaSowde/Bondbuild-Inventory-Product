@@ -155,8 +155,11 @@ function AppContent() {
 
       {/* Main content area - has left margin to account for sidebar */}
       <main
-        className={
-          showSidebar ? "ml-56 min-w-0 w-[calc(100%-14rem)]" : "w-full min-w-0"
+        className="min-w-0"
+        style={
+          showSidebar
+            ? { marginLeft: "14rem", width: "calc(100% - 14rem)" }
+            : { width: "100%" }
         }
       >
         <AppRoutes />
