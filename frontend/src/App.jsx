@@ -20,17 +20,14 @@ import StockPage from "./pages/StockPage";
 import UserManagement from "./pages/UserManagement";
 import SetupDashboard from "./pages/Setup/SetupDashboard";
 import ProjectProgressModule from "./pages/ProjectProgressModule";
+import Procurement from "./pages/Procurement";
 // Placeholder pages (create these later)
 const Dashboard = () => (
   <div className="p-8">
     <h1>📊 Dashboard</h1>
   </div>
 );
-const Procurement = () => (
-  <div className="p-8">
-    <h1>📋 Procurement</h1>
-  </div>
-);
+
 const ProjectProgress = () => (
   <div className="p-8">
     <h1>🏗️ Project Progress</h1>
@@ -157,7 +154,7 @@ function AppContent() {
       )}
 
       {/* Main content area - has left margin to account for sidebar */}
-      <main className={showSidebar ? "flex-1 ml-56" : "w-full"}>
+      <main className={showSidebar ? "flex-1 ml-56 min-w-0" : "w-full min-w-0"}>
         <AppRoutes />
       </main>
     </div>

@@ -128,17 +128,16 @@ router.post("/seed", async (req, res) => {
 
           await pool.query(
             `INSERT INTO inventory (
-              item_code, item_name, location_id, location_code, profile_id, 
+              item_code, location_id, location_code, profile_id, 
               profile_name, size, length, quantity_in_stock, unit_price, 
               total_value, stock_status, low_stock_threshold, reorder_quantity, 
               remarks, is_active, created_at, updated_at
             ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW()
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW()
             )
             ON CONFLICT (item_code) DO NOTHING`,
             [
               item.item_code,
-              item.item_code + " " + item.profile_name,
               locationId,
               item.location_code,
               profileId,

@@ -72,7 +72,10 @@ app.use("/api/permissions", permissionsRoutes);
 // ============================================================
 const projectsRoutes = require("./routes/projects");
 app.use("/api/projects", projectsRoutes);
-
+// PR / PO module
+app.use("/api", require("./routes/poReference"));
+app.use("/api/purchase-requests", require("./routes/purchaseRequests"));
+app.use("/api/purchase-orders", require("./routes/purchaseOrders"));
 // ============================================================
 // Health Check Endpoint
 // ============================================================
