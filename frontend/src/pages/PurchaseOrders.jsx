@@ -49,7 +49,7 @@ export default function PurchaseOrders({ user, notify, refreshInbox }) {
             <Td mono bold className="!text-[#6366F1]">{p.po_no}</Td>
             <Td mono>{p.pr_no || "—"}</Td>
             <Td>{p.project_name || "—"}</Td>
-            <Td>{p.supplier_name}</Td>
+            <Td>{p.po_type === "STOCK" ? <span className="text-[#6366F1]">From stock <span className="text-[11px] text-[#9CA3AF]">@ {p.source_location}</span></span> : p.supplier_name}</Td>
             <Td>{p.po_date?.slice(0, 10)}</Td>
             <Td align="right">{money(p.amount)}</Td>
             <Td><Badge status={p.status} /></Td>

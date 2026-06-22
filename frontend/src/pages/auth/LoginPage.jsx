@@ -100,11 +100,8 @@ export default function LoginPage() {
             Welcome to
           </div>
           <div className="text-4xl font-black text-white leading-tight tracking-tighter mb-2.5">
-            Inventory
+            InventoryOpz
             <br />
-            <span className="bg-gradient-to-r from-indigo-400 to-indigo-200 bg-clip-text text-transparent">
-              Opz
-            </span>
           </div>
           <div className="text-xs text-indigo-200 leading-relaxed max-w-xs">
             Track stock, manage POs, coordinate between site and factory.

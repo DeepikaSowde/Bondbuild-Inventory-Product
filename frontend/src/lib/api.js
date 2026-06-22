@@ -32,17 +32,16 @@ export const api = {
   reduceStock: (itemId) => data(axiosClient.post(`/purchase-requests/items/${itemId}/reduce-stock`)),
   generatePOs: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/generate-pos`)),
 
-  // attachments (per PR item) — upload uses multipart/form-data
-  listAttachments: (itemId) => data(axiosClient.get(`/purchase-requests/items/${itemId}/attachments`)),
-  uploadAttachments: (itemId, fileList) => {
+  // attachments (whole-PR) — upload uses multipart/form-data
+  listAttachments: (prNo) => data(axiosClient.get(`/purchase-requests/${enc(prNo)}/attachments`)),
+  uploadAttachments: (prNo, fileList) => {
     const fd = new FormData();
     Array.from(fileList).forEach((f) => fd.append("files", f));
-    return data(axiosClient.post(`/purchase-requests/items/${itemId}/attachments`, fd, {
+    return data(axiosClient.post(`/purchase-requests/${enc(prNo)}/attachments`, fd, {
       headers: { "Content-Type": "multipart/form-data" },
     }));
   },
   deleteAttachment: (id) => data(axiosClient.delete(`/purchase-requests/attachments/${id}`)),
-  // full URL for download (axios baseURL + path); the browser opens it with the token via a fetch
   attachmentDownloadPath: (id) => `/purchase-requests/attachments/${id}/download`,
 
   // purchase orders
