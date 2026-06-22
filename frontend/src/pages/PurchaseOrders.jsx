@@ -4,7 +4,7 @@ import { api, apiError } from "../lib/api";
 import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money } from "../components/ui";
 import { Table, Td } from "../components/Table";
 
-export default function PurchaseOrders({ user, notify, refreshInbox }) {
+export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox }) {
   const [pos, setPOs] = useState([]);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
@@ -12,9 +12,11 @@ export default function PurchaseOrders({ user, notify, refreshInbox }) {
   const [view, setView] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const canManage = user.role === "Purchaser" || user.role === "Admin";
-  const canReceive = canManage || user.role === "Supervisor" || user.role === "Factory In-charge";
-  const canTrack = user.role === "Factory In-charge" || user.role === "Supervisor" || user.role === "Admin";
+  const isAdmin = user.role === "Admin";
+  const canManage = !!perms.generate_po || isAdmin;
+  const canReceive = !!perms.receive_po || isAdmin;
+  const canTrack = !!perms.set_delivery || isAdmin;
+  const canCancel = !!perms.cancel_po || isAdmin;
 
   const load = () => api.pos({ status, job, q }).then(setPOs).catch((e) => notify(apiError(e), "error"));
   useEffect(() => { load(); }, [status, job]);
@@ -60,14 +62,14 @@ export default function PurchaseOrders({ user, notify, refreshInbox }) {
       </Table>
 
       {view && (
-        <POView po={view} canManage={canManage} canReceive={canReceive} canTrack={canTrack} busy={busy} setBusy={setBusy} notify={notify}
+        <POView po={view} canManage={canManage} canReceive={canReceive} canTrack={canTrack} canCancel={canCancel} busy={busy} setBusy={setBusy} notify={notify}
           onChanged={(fresh) => { setView(fresh); refresh(); }} onClose={() => setView(null)} />
       )}
     </div>
   );
 }
 
-function POView({ po, canManage, canReceive, canTrack, busy, setBusy, notify, onChanged, onClose }) {
+function POView({ po, canManage, canReceive, canTrack, canCancel, busy, setBusy, notify, onChanged, onClose }) {
   const [d, setD] = useState({
     delivery_method: po.delivery_method || "",
     delivery_address: po.delivery_address || "",
@@ -159,10 +161,10 @@ function POView({ po, canManage, canReceive, canTrack, busy, setBusy, notify, on
 
       <div className="mt-5 flex justify-end gap-2.5">
         {canManage && po.status === "OPEN" && (
-          <>
-            <Btn variant="soft" disabled={busy} onClick={() => act(() => api.updatePO(po.po_no, d), "Saved")}>Save details</Btn>
-            <Btn variant="danger" disabled={busy} onClick={() => act(() => api.cancelPO(po.po_no, ""), "PO cancelled")}>Cancel PO</Btn>
-          </>
+          <Btn variant="soft" disabled={busy} onClick={() => act(() => api.updatePO(po.po_no, d), "Saved")}>Save details</Btn>
+        )}
+        {canCancel && po.status === "OPEN" && (
+          <Btn variant="danger" disabled={busy} onClick={() => act(() => api.cancelPO(po.po_no, ""), "PO cancelled")}>Cancel PO</Btn>
         )}
         {canReceive && po.status === "OPEN" && (
           <Btn variant="success" disabled={busy} onClick={() => act(() => api.receivePO(po.po_no, ""), "Goods received — PO closed")}>Receive goods (close)</Btn>

@@ -7,6 +7,7 @@ const express = require("express");
 const db = require("../config/db");
 const { protect, roles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
+const { canDo } = require("../utils/canDo");
 const { Email } = require("../utils/notifyEmail");
 
 const router = express.Router();
@@ -88,7 +89,7 @@ router.get("/:prNo", async (req, res) => {
 });
 
 // ── Create (Drafter) ──
-router.post("/", roles("Drafter", "Admin"), async (req, res) => {
+router.post("/", canDo("raise_pr"), async (req, res) => {
   const f = req.body || {};
   if (!f.job_no || !f.requested_by) return fail(res, 400, "Job No and Requested By are required");
   const items = (f.items || []).filter((it) => it.description?.trim());
@@ -140,7 +141,7 @@ router.post("/", roles("Drafter", "Admin"), async (req, res) => {
 });
 
 // ── Edit / resubmit (Drafter; only PENDING or SEND_BACK) ──
-router.put("/:prNo", roles("Drafter", "Admin"), async (req, res) => {
+router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
@@ -191,7 +192,7 @@ router.put("/:prNo", roles("Drafter", "Admin"), async (req, res) => {
 });
 
 // ── Approve (Manager) ──
-router.post("/:prNo/approve", roles("Manager", "Admin"), async (req, res) => {
+router.post("/:prNo/approve", canDo("approve_pr"), async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
@@ -217,7 +218,7 @@ router.post("/:prNo/approve", roles("Manager", "Admin"), async (req, res) => {
 });
 
 // ── Reject / send back (Manager) ──
-router.post("/:prNo/reject", roles("Manager", "Admin"), async (req, res) => {
+router.post("/:prNo/reject", canDo("reject_pr"), async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
@@ -244,7 +245,7 @@ router.post("/:prNo/reject", roles("Manager", "Admin"), async (req, res) => {
 });
 
 // ── Purchaser assigns supplier + price on the BUY portion ──
-router.put("/:prNo/items", roles("Purchaser", "Admin"), async (req, res) => {
+router.put("/:prNo/items", canDo("assign_supplier"), async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
@@ -272,7 +273,7 @@ router.put("/:prNo/items", roles("Purchaser", "Admin"), async (req, res) => {
 
 // ── Purchaser sends stock info to the FIC (flips stock items to PENDING_FIC) ──
 // This is the step where the Purchaser tells the FIC which item + location to issue.
-router.post("/:prNo/send-to-fic", roles("Purchaser", "Admin"), async (req, res) => {
+router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
@@ -344,7 +345,7 @@ router.post("/:prNo/send-to-fic", roles("Purchaser", "Admin"), async (req, res) 
 // ── FIC reduces stock for one PR item (PR→inventory action) ──
 // Calls the DB function fn_fic_reduce_stock() which (atomically) lowers
 // inventory.quantity_in_stock AND writes an 'OUT' row to stock_movements.
-router.post("/items/:itemId/reduce-stock", roles("Factory In-charge", "Admin"), async (req, res) => {
+router.post("/items/:itemId/reduce-stock", canDo("issue_stock"), async (req, res) => {
   try {
     const r = await db.query("SELECT fn_fic_reduce_stock($1,$2) AS movement_id", [
       req.params.itemId, req.user.name,
@@ -379,7 +380,7 @@ router.post("/items/:itemId/reduce-stock", roles("Factory In-charge", "Admin"), 
 });
 
 // ── Generate POs from the BUY portion (one PO per supplier) ──
-router.post("/:prNo/generate-pos", roles("Purchaser", "Admin"), async (req, res) => {
+router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");

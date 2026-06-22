@@ -6,6 +6,7 @@ const express = require("express");
 const db = require("../config/db");
 const { protect, roles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
+const { canDo } = require("../utils/canDo");
 const { Email } = require("../utils/notifyEmail");
 const STAGE_LABEL = { WITH_VENDOR: "With Vendor", SHIPPED: "In Transit", ARRIVED_HUB: "Arrived at Hub", RECEIVED_FACTORY: "Received" };
 
@@ -57,7 +58,7 @@ router.get("/:poNo", async (req, res) => {
 });
 
 // ── Manual PO ──
-router.post("/", roles("Purchaser", "Admin"), async (req, res) => {
+router.post("/", canDo("generate_po"), async (req, res) => {
   const f = req.body || {};
   const items = (f.items || []).filter((i) => i.description?.trim());
   if (!f.job_no || !f.supplier_id || !items.length)
@@ -91,7 +92,7 @@ router.post("/", roles("Purchaser", "Admin"), async (req, res) => {
 });
 
 // ── Update delivery / lead times ──
-router.put("/:poNo", roles("Purchaser", "Admin"), async (req, res) => {
+router.put("/:poNo", canDo("generate_po"), async (req, res) => {
   try {
     const po = await getPO(req.params.poNo);
     if (!po) return fail(res, 404, "PO not found");
@@ -131,7 +132,7 @@ router.put("/:poNo", roles("Purchaser", "Admin"), async (req, res) => {
 
 // ── Receive goods = close PO (NO inventory write, per spec) ──
 // ── Set delivery stage (FIC / Supervisor click the tracker) ──
-router.put("/:poNo/delivery-stage", roles("Factory In-charge", "Supervisor", "Admin"), async (req, res) => {
+router.put("/:poNo/delivery-stage", canDo("set_delivery"), async (req, res) => {
   try {
     const po = await getPO(req.params.poNo);
     if (!po) return fail(res, 404, "PO not found");
@@ -152,7 +153,7 @@ router.put("/:poNo/delivery-stage", roles("Factory In-charge", "Supervisor", "Ad
   } catch (e) { fail(res, 500, e.message); }
 });
 
-router.post("/:poNo/receive", roles("Purchaser", "Supervisor", "Factory In-charge", "Admin"), async (req, res) => {
+router.post("/:poNo/receive", canDo("receive_po"), async (req, res) => {
   try {
     const po = await getPO(req.params.poNo);
     if (!po) return fail(res, 404, "PO not found");
@@ -175,7 +176,7 @@ router.post("/:poNo/receive", roles("Purchaser", "Supervisor", "Factory In-charg
 });
 
 // ── Cancel ──
-router.post("/:poNo/cancel", roles("Purchaser", "Admin"), async (req, res) => {
+router.post("/:poNo/cancel", canDo("cancel_po"), async (req, res) => {
   try {
     const po = await getPO(req.params.poNo);
     if (!po) return fail(res, 404, "PO not found");

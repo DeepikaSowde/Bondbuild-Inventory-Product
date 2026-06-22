@@ -90,14 +90,48 @@ const PERM_GROUPS = [
   },
 ];
 
+// PR/PO permission groups — saved to /pr-po-permissions (separate table)
+const PRPO_PERM_GROUPS = [
+  {
+    group: "📝 Purchase Requests",
+    perms: [
+      { key: "raise_pr", label: "Raise PR", desc: "Can create purchase requests" },
+      { key: "approve_pr", label: "Approve PR", desc: "Can approve purchase requests" },
+      { key: "reject_pr", label: "Reject / Send back", desc: "Can reject or return PRs" },
+      { key: "assign_supplier", label: "Assign Supplier & Price", desc: "Can set vendor and buy price" },
+      { key: "send_to_fic", label: "Send Stock to FIC", desc: "Can send stock items to Factory In-charge" },
+      { key: "issue_stock", label: "Issue Stock", desc: "Can reduce inventory for a PR" },
+    ],
+  },
+  {
+    group: "🛒 Purchase Orders",
+    perms: [
+      { key: "generate_po", label: "Generate Buy PO", desc: "Can create purchase orders" },
+      { key: "set_delivery", label: "Set Delivery Stage", desc: "Can update the delivery tracker" },
+      { key: "receive_po", label: "Receive / Close PO", desc: "Can mark goods received" },
+      { key: "cancel_po", label: "Cancel PO", desc: "Can cancel a purchase order" },
+    ],
+  },
+  {
+    group: "👁️ PR/PO Visibility",
+    perms: [
+      { key: "see_pr_price", label: "See PR Price", desc: "Can see PR prices" },
+      { key: "see_po_price", label: "See PO Price", desc: "Can see PO unit prices" },
+      { key: "see_po_amount", label: "See PO Amount", desc: "Can see PO totals" },
+    ],
+  },
+];
+
 export default function RolePermissions({ showNotify }) {
   const [permissions, setPermissions] = useState({});
+  const [prpoPermissions, setPrpoPermissions] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null); // Track which role is being saved
 
   // ── Fetch permissions from database on mount ──
   useEffect(() => {
     fetchPermissions();
+    fetchPrpoPermissions();
   }, []);
 
   const fetchPermissions = async () => {
@@ -117,6 +151,17 @@ export default function RolePermissions({ showNotify }) {
       showNotify("Failed to load permissions", "error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPrpoPermissions = async () => {
+    try {
+      const response = await api.get("/pr-po-permissions");
+      const obj = {};
+      response.data.forEach((perm) => { obj[perm.role] = perm; });
+      setPrpoPermissions(obj);
+    } catch (err) {
+      console.error("Error fetching PR/PO permissions:", err);
     }
   };
 
@@ -153,6 +198,26 @@ export default function RolePermissions({ showNotify }) {
       );
       // Refetch to sync with server
       fetchPermissions();
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  // ── Toggle PR/PO permission and save ──
+  const togglePrpo = async (role, key) => {
+    try {
+      setSaving(role);
+      const newValue = !prpoPermissions[role]?.[key];
+      const response = await api.put(`/pr-po-permissions/${role}`, {
+        ...prpoPermissions[role],
+        [key]: newValue,
+      });
+      setPrpoPermissions((prev) => ({ ...prev, [role]: response.data }));
+      showNotify(`${role} - ${key} ${newValue ? "Allowed" : "Denied"} ✅`);
+    } catch (err) {
+      console.error("Error updating PR/PO permission:", err);
+      showNotify(err.response?.data?.error || "Failed to update permission", "error");
+      fetchPrpoPermissions();
     } finally {
       setSaving(null);
     }
@@ -291,6 +356,171 @@ export default function RolePermissions({ showNotify }) {
                         >
                           <button
                             onClick={() => togglePermission(role, perm.key)}
+                            disabled={isSaving}
+                            style={{
+                              width: 52,
+                              height: 28,
+                              borderRadius: 14,
+                              border: "none",
+                              cursor: isSaving ? "wait" : "pointer",
+                              position: "relative",
+                              background: perm_value ? clr : "#E5E7EB",
+                              transition: "background 0.2s",
+                            }}
+                          >
+                            {/* Toggle knob */}
+                            <div
+                              style={{
+                                position: "absolute",
+                                top: 3,
+                                left: perm_value ? 26 : 3,
+                                width: 22,
+                                height: 22,
+                                borderRadius: "50%",
+                                background: "#fff",
+                                boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                                transition: "left 0.2s",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontSize: 10,
+                              }}
+                            >
+                              {isSaving ? "⟳" : perm_value ? "✓" : "✗"}
+                            </div>
+                          </button>
+                          <div
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              color: perm_value ? clr : "#9CA3AF",
+                              marginTop: 4,
+                            }}
+                          >
+                            {perm_value ? "Allowed" : "Denied"}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+
+      <div style={{ margin: "28px 0 8px", fontSize: 16, fontWeight: 800, color: "#1E1B4B" }}>
+        PR / PO Permissions
+      </div>
+
+      {PRPO_PERM_GROUPS.map((group) => (
+        <div
+          key={group.group}
+          style={{
+            background: "#fff",
+            borderRadius: 14,
+            boxShadow: "0 1px 4px rgba(0,0,0,0.07)",
+            marginBottom: 20,
+            overflow: "hidden",
+          }}
+        >
+          {/* Group header */}
+          <div style={{ background: "#1E1B4B", padding: "12px 20px" }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>
+              {group.group}
+            </div>
+          </div>
+
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: 900,
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#F8F7FF" }}>
+                  <th
+                    style={{
+                      padding: "10px 20px",
+                      textAlign: "left",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "#6B7280",
+                      textTransform: "uppercase",
+                      width: 250,
+                    }}
+                  >
+                    Permission
+                  </th>
+                  {ROLES.map((role) => (
+                    <th
+                      key={role}
+                      style={{
+                        padding: "10px 14px",
+                        textAlign: "center",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: ROLE_CLR[role] || "#6366F1",
+                        textTransform: "uppercase",
+                        minWidth: 100,
+                      }}
+                    >
+                      <div>{ROLE_ICON[role]}</div>
+                      <div style={{ fontSize: 9, marginTop: 2 }}>
+                        {role.replace("Factory In-charge", "Factory")}
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {group.perms.map((perm, pi) => (
+                  <tr
+                    key={perm.key}
+                    style={{
+                      borderBottom: "1px solid #F3F4F6",
+                      background: pi % 2 === 0 ? "#fff" : "#FAFAFA",
+                    }}
+                  >
+                    <td style={{ padding: "14px 20px" }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: "#1E1B4B",
+                        }}
+                      >
+                        {perm.label}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: "#9CA3AF",
+                          marginTop: 2,
+                        }}
+                      >
+                        {perm.desc}
+                      </div>
+                    </td>
+                    {ROLES.map((role) => {
+                      const perm_value = prpoPermissions[role]?.[perm.key] ?? false;
+                      const clr = ROLE_CLR[role] || "#6366F1";
+                      const isSaving = saving === role;
+
+                      return (
+                        <td
+                          key={role}
+                          style={{
+                            padding: "14px",
+                            textAlign: "center",
+                            opacity: isSaving ? 0.6 : 1,
+                          }}
+                        >
+                          <button
+                            onClick={() => togglePrpo(role, perm.key)}
                             disabled={isSaving}
                             style={{
                               width: 52,

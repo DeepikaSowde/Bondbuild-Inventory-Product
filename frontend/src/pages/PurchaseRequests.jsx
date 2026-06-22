@@ -9,7 +9,7 @@ const emptyItem = () => ({
   remarks: "", stock_qty: "", inventory_id: "", stock_location: "", buy_qty: "",
 });
 
-export default function PurchaseRequests({ user, notify, refreshInbox }) {
+export default function PurchaseRequests({ user, perms = {}, notify, refreshInbox }) {
   const [prs, setPRs] = useState([]);
   const [filter, setFilter] = useState("All");
   const [showCreate, setShowCreate] = useState(false);
@@ -21,10 +21,10 @@ export default function PurchaseRequests({ user, notify, refreshInbox }) {
   const [busy, setBusy] = useState(false);
 
   const role = user.role, isAdmin = role === "Admin";
-  const canCreate = role === "Drafter" || isAdmin;
-  const canApprove = role === "Manager" || isAdmin;
-  const canPurchase = role === "Purchaser" || isAdmin;
-  const canFIC = role === "Factory In-charge" || isAdmin;
+  const canCreate = !!perms.raise_pr || isAdmin;
+  const canApprove = !!perms.approve_pr || !!perms.reject_pr || isAdmin;
+  const canPurchase = !!perms.assign_supplier || !!perms.generate_po || !!perms.send_to_fic || isAdmin;
+  const canFIC = !!perms.issue_stock || isAdmin;
 
   const load = () => api.prs(filter).then(setPRs).catch((e) => notify(apiError(e), "error"));
   useEffect(() => { load(); }, [filter]);
@@ -78,7 +78,7 @@ export default function PurchaseRequests({ user, notify, refreshInbox }) {
           onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); refresh(); }} />
       )}
       {viewPR && (
-        <PRView pr={viewPR} user={user} suppliers={suppliers}
+        <PRView pr={viewPR} user={user} suppliers={suppliers} perms={perms}
           canApprove={canApprove} canPurchase={canPurchase} canFIC={canFIC} canCreate={canCreate}
           busy={busy} setBusy={setBusy} notify={notify}
           onReject={() => setRejecting(viewPR)}
@@ -350,11 +350,18 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   );
 }
 
-function PRView({ pr, user, suppliers, canApprove, canPurchase, canFIC, canCreate, busy, setBusy, notify, onReject, onEdit, onChanged, onClose }) {
+function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canFIC, canCreate, busy, setBusy, notify, onReject, onEdit, onChanged, onClose }) {
+  const isAdmin = user.role === "Admin";
+  const pApprove = !!perms.approve_pr || isAdmin;
+  const pReject = !!perms.reject_pr || isAdmin;
+  const pAssign = !!perms.assign_supplier || isAdmin;
+  const pGenerate = !!perms.generate_po || isAdmin;
+  const pSendFic = !!perms.send_to_fic || isAdmin;
+  const pIssue = !!perms.issue_stock || isAdmin;
   const [items, setItems] = useState(pr.items.map((it) => ({ ...it })));
   useEffect(() => { setItems(pr.items.map((it) => ({ ...it }))); }, [pr]);
-  const assignMode = canPurchase && pr.status === "APPROVED";
-  const ficMode = canFIC && ["APPROVED", "PO_RAISED"].includes(pr.status);
+  const assignMode = (pAssign || pGenerate || pSendFic) && pr.status === "APPROVED";
+  const ficMode = pIssue && ["APPROVED", "PO_RAISED"].includes(pr.status);
 
   const setIt = (i, key, val) => setItems((arr) => arr.map((it, x) => {
     if (x !== i) return it;
@@ -481,10 +488,10 @@ function PRView({ pr, user, suppliers, canApprove, canPurchase, canFIC, canCreat
       </div>
 
       <div className="mt-5 flex justify-end gap-2.5">
-        {canApprove && pr.status === "PENDING" && (
+        {(pApprove || pReject) && pr.status === "PENDING" && (
           <>
-            <Btn variant="danger" onClick={onReject} disabled={busy}>Reject / send back</Btn>
-            <Btn variant="success" disabled={busy} onClick={() => act(() => api.approvePR(pr.pr_no, user.name), `${pr.pr_no} approved`)}>Approve</Btn>
+            {pReject && <Btn variant="danger" onClick={onReject} disabled={busy}>Reject / send back</Btn>}
+            {pApprove && <Btn variant="success" disabled={busy} onClick={() => act(() => api.approvePR(pr.pr_no, user.name), `${pr.pr_no} approved`)}>Approve</Btn>}
           </>
         )}
         {canCreate && pr.status === "SEND_BACK" && <Btn onClick={onEdit} disabled={busy}>Edit &amp; resubmit</Btn>}
@@ -497,10 +504,10 @@ function PRView({ pr, user, suppliers, canApprove, canPurchase, canFIC, canCreat
           return (
             <>
               <Btn variant="soft" disabled={busy} onClick={() => act(saveAssign, "Saved")}>Save prices</Btn>
-              {hasStock && anyAwaiting && (
+              {pSendFic && hasStock && anyAwaiting && (
                 <Btn variant="warning" disabled={busy} onClick={() => act(async () => { await saveAssign(); await api.sendToFic(pr.pr_no); }, "Stock info sent to Factory In-charge — Stock PO created")}>Send stock to FIC</Btn>
               )}
-              {hasBuy && (
+              {pGenerate && hasBuy && (
                 <Btn disabled={busy || !allBuyHaveSupplier}
                   title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first" : ""}
                   onClick={() => act(async () => {

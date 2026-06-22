@@ -16,6 +16,9 @@ export const api = {
   notifications: () => data(axiosClient.get("/notifications")),
   markRead: (id) => raw(axiosClient.post(`/notifications/${id}/read`)),
 
+  // current user's effective PR/PO permissions (for showing/hiding UI)
+  myPermissions: () => axiosClient.get("/pr-po-permissions/me/effective").then((r) => r.data.permissions),
+
   // YOUR existing inventory endpoint ({success,data}); no ?q — filter client-side
   inventory: () => data(axiosClient.get("/inventory")),
 

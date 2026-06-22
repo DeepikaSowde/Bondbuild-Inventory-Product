@@ -11,6 +11,7 @@ export default function Procurement() {
   const { user } = useAuth();
   const [tab, setTab] = useState("pr");
   const [toasts, setToasts] = useState([]);
+  const [perms, setPerms] = useState(null);
 
   const notify = useCallback((msg, type = "success") => {
     const id = Math.random();
@@ -20,8 +21,10 @@ export default function Procurement() {
 
   const refreshInbox = useCallback(() => { api.notifications().catch(() => {}); }, []);
   useEffect(() => { refreshInbox(); }, []);
+  useEffect(() => { api.myPermissions().then(setPerms).catch(() => setPerms({})); }, []);
 
   if (!user) return null;
+  if (perms === null) return <div className="p-8 text-[#9CA3AF]">Loading…</div>;
 
   const tabBtn = (key, label) => (
     <button onClick={() => setTab(key)}
@@ -46,8 +49,8 @@ export default function Procurement() {
       </div>
 
       {tab === "pr"
-        ? <PurchaseRequests user={user} notify={notify} refreshInbox={refreshInbox} />
-        : <PurchaseOrders user={user} notify={notify} refreshInbox={refreshInbox} />}
+        ? <PurchaseRequests user={user} perms={perms} notify={notify} refreshInbox={refreshInbox} />
+        : <PurchaseOrders user={user} perms={perms} notify={notify} refreshInbox={refreshInbox} />}
 
       <Toasts items={toasts} />
     </div>

@@ -76,6 +76,7 @@ app.use("/api/projects", projectsRoutes);
 app.use("/api", require("./routes/poReference"));
 app.use("/api/purchase-requests", require("./routes/purchaseRequests"));
 app.use("/api/purchase-orders", require("./routes/purchaseOrders"));
+app.use("/api/pr-po-permissions", require("./routes/prPoPermissions"));
 // ============================================================
 // Health Check Endpoint
 // ============================================================
