@@ -7,6 +7,7 @@ const express = require("express");
 const db = require("../config/db");
 const { protect, roles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
+const { Email } = require("../utils/notifyEmail");
 
 const router = express.Router();
 router.use(protect);
@@ -22,23 +23,23 @@ async function getPR(prNo, client = db) {
   const { rows } = await client.query("SELECT * FROM purchase_requests WHERE pr_no = $1", [prNo]);
   if (!rows[0]) return null;
   const items = await client.query(
-    "SELECT * FROM pr_items WHERE pr_id = $1 ORDER BY line_no, id", [rows[0].id]
+    `SELECT pi.*,
+            COALESCE(NULLIF(pi.stock_unit_price,0), inv.unit_price, 0) AS stock_unit_price,
+            inv.unit_price AS inventory_unit_price
+     FROM pr_items pi
+     LEFT JOIN inventory inv ON inv.id = pi.inventory_id
+     WHERE pi.pr_id = $1 ORDER BY pi.line_no, pi.id`, [rows[0].id]
   );
-  // attach the file list to each item (best-effort; ignore if table not present yet)
-  let attByItem = {};
+  // attach PR-level files (best-effort; ignore if table not present yet)
+  let attachments = [];
   try {
-    const itemIds = items.rows.map((it) => it.id);
-    if (itemIds.length) {
-      const att = await client.query(
-        `SELECT id, pr_item_id, original_name, mime_type, size_bytes, created_at
-         FROM pr_item_attachments WHERE pr_item_id = ANY($1) ORDER BY id`,
-        [itemIds]
-      );
-      for (const a of att.rows) (attByItem[a.pr_item_id] ||= []).push(a);
-    }
+    const att = await client.query(
+      `SELECT id, pr_id, original_name, mime_type, size_bytes, uploaded_by, created_at
+       FROM pr_attachments WHERE pr_id = $1 ORDER BY id`, [rows[0].id]
+    );
+    attachments = att.rows;
   } catch { /* attachments table optional */ }
-  const withAtt = items.rows.map((it) => ({ ...it, attachments: attByItem[it.id] || [] }));
-  return { ...rows[0], items: withAtt };
+  return { ...rows[0], items: items.rows, attachments };
 }
 
 async function notify(client, rolesList, title, body, type, refPr = null, refPo = null) {
@@ -129,7 +130,9 @@ router.post("/", roles("Drafter", "Admin"), async (req, res) => {
         `${f.requested_by} submitted a PR for ${f.project_name || f.job_no}. Please review.`, "info", prNo);
       return prNo;
     });
-    res.status(201).json({ success: true, data: await getPR(prNo) });
+    const created = await getPR(prNo);
+    Email.prSubmitted(created);           // non-blocking notification
+    res.status(201).json({ success: true, data: created });
   } catch (e) {
     fail(res, e.code === "23503" ? 400 : 500,
       e.code === "23503" ? "Job No does not exist in po_projects" : e.message);
@@ -207,7 +210,9 @@ router.post("/:prNo/approve", roles("Manager", "Admin"), async (req, res) => {
       await notify(c, ["Purchaser"], `Assign suppliers: ${pr.pr_no}`,
         `PR ${pr.pr_no} is approved. Assign suppliers to the buy items, then generate POs.`, "info", pr.pr_no);
     });
-    ok(res, await getPR(pr.pr_no));
+    const approvedPR = await getPR(pr.pr_no);
+    Email.prApproved(approvedPR);
+    ok(res, approvedPR);
   } catch (e) { fail(res, 500, e.message); }
 });
 
@@ -232,7 +237,9 @@ router.post("/:prNo/reject", roles("Manager", "Admin"), async (req, res) => {
         sendBack ? `PR sent back: ${pr.pr_no}` : `PR rejected: ${pr.pr_no}`,
         (sendBack ? "Please edit and resubmit. " : "") + reason, sendBack ? "warning" : "error", pr.pr_no);
     });
-    ok(res, await getPR(pr.pr_no));
+    const rejectedPR = await getPR(pr.pr_no);
+    Email.prRejected(rejectedPR, sendBack, reason);
+    ok(res, rejectedPR);
   } catch (e) { fail(res, 500, e.message); }
 });
 
@@ -241,7 +248,7 @@ router.put("/:prNo/items", roles("Purchaser", "Admin"), async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
-    if (pr.status !== "APPROVED") return fail(res, 409, "Suppliers can only be assigned on APPROVED PRs");
+    if (!["APPROVED","PO_RAISED"].includes(pr.status)) return fail(res, 409, "Suppliers can only be assigned after approval");
     const items = req.body?.items || [];
     await withTransaction(async (c) => {
       for (const it of items) {
@@ -269,7 +276,7 @@ router.post("/:prNo/send-to-fic", roles("Purchaser", "Admin"), async (req, res) 
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
-    if (pr.status !== "APPROVED") return fail(res, 409, "PR must be APPROVED first");
+    if (!["APPROVED","PO_RAISED"].includes(pr.status)) return fail(res, 409, "PR must be approved first");
     const stockItems = pr.items.filter((it) => Number(it.stock_qty) > 0);
     if (!stockItems.length) return fail(res, 400, "This PR has no from-stock items");
     await withTransaction(async (c) => {
@@ -283,11 +290,54 @@ router.post("/:prNo/send-to-fic", roles("Purchaser", "Admin"), async (req, res) 
            AND pi.stock_qty > 0 AND pi.stock_status = 'AWAITING_PURCHASER'`,
         [pr.id]
       );
+
+      // Create the STOCK PO(s) — one per source pallet/location, value = inventory price.
+      // Only if not already created (re-send safe).
+      const fresh = await c.query(
+        `SELECT id, profile_code, description, unit, stock_qty, stock_location,
+                COALESCE(stock_unit_price,0) AS stock_unit_price
+         FROM pr_items WHERE pr_id = $1 AND stock_qty > 0`, [pr.id]
+      );
+      const existingStockPO = await c.query(
+        "SELECT 1 FROM purchase_orders WHERE pr_id = $1 AND po_type = 'STOCK' LIMIT 1", [pr.id]
+      );
+      if (!existingStockPO.rows.length) {
+        const groups = {};
+        for (const it of fresh.rows) {
+          const key = it.stock_location || "Stock";
+          (groups[key] ||= []).push(it);
+        }
+        for (const [location, lines] of Object.entries(groups)) {
+          const num = await c.query("SELECT next_stock_po_no($1,$2) AS po_no", [pr.job_no, pr.pr_no]);
+          const poNo = num.rows[0].po_no;
+          const amount = lines.reduce((s, l) => s + Number(l.stock_qty) * Number(l.stock_unit_price), 0);
+          const po = await c.query(
+            `INSERT INTO purchase_orders
+             (po_no, job_no, pr_id, pr_no, project_name, po_type, source_location,
+              supplier_id, supplier_name, supplier_type, requested_by, prepared_by, amount)
+             VALUES ($1,$2,$3,$4,$5,'STOCK',$6, NULL, NULL, 'Local', $7, $8, $9) RETURNING id`,
+            [poNo, pr.job_no, pr.id, pr.pr_no, pr.project_name, location, pr.requested_by, req.user.name, amount]
+          );
+          let ln = 1;
+          for (const l of lines)
+            await c.query(
+              "INSERT INTO po_items (po_id, line_no, profile_code, description, qty, unit, unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+              [po.rows[0].id, ln++, l.profile_code, l.description, Number(l.stock_qty), l.unit, Number(l.stock_unit_price)]
+            );
+          await c.query(
+            "INSERT INTO po_approvals (po_id, action, to_status, actor, actor_role) VALUES ($1,'CREATE_STOCK','OPEN',$2,$3)",
+            [po.rows[0].id, req.user.name, req.user.role]
+          );
+        }
+      }
+
       await notify(c, ["Factory In-charge"], `Stock to issue: ${pr.pr_no}`,
         `Purchaser sent stock items for ${pr.project_name || pr.job_no}. Please issue from the listed locations.`,
         "info", pr.pr_no);
     });
-    ok(res, await getPR(pr.pr_no));
+    const sentPR = await getPR(pr.pr_no);
+    Email.stockToFic(sentPR);
+    ok(res, sentPR);
   } catch (e) { fail(res, 500, e.message); }
 });
 
@@ -299,6 +349,28 @@ router.post("/items/:itemId/reduce-stock", roles("Factory In-charge", "Admin"), 
     const r = await db.query("SELECT fn_fic_reduce_stock($1,$2) AS movement_id", [
       req.params.itemId, req.user.name,
     ]);
+    // notify Purchaser that stock is issued + close the Stock PO if all its items are reduced
+    try {
+      const link = await db.query(
+        "SELECT pr.id AS pr_id, pr.pr_no FROM pr_items i JOIN purchase_requests pr ON pr.id = i.pr_id WHERE i.id = $1",
+        [req.params.itemId]
+      );
+      if (link.rows[0]) {
+        const prId = link.rows[0].pr_id;
+        // if no stock items remain un-reduced, close the STOCK PO(s) for this PR
+        const remaining = await db.query(
+          "SELECT COUNT(*)::int n FROM pr_items WHERE pr_id = $1 AND stock_qty > 0 AND stock_status <> 'STOCK_REDUCED'",
+          [prId]
+        );
+        if (remaining.rows[0].n === 0) {
+          await db.query(
+            "UPDATE purchase_orders SET status='CLOSED', goods_received_date=CURRENT_DATE WHERE pr_id=$1 AND po_type='STOCK' AND status='OPEN'",
+            [prId]
+          );
+        }
+        Email.stockIssued(await getPR(link.rows[0].pr_no));
+      }
+    } catch { /* non-blocking */ }
     ok(res, { movement_id: r.rows[0].movement_id });
   } catch (e) {
     // surface the friendly message from the DB function (e.g. "Not enough stock…")
@@ -311,17 +383,19 @@ router.post("/:prNo/generate-pos", roles("Purchaser", "Admin"), async (req, res)
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
-    if (pr.status !== "APPROVED") return fail(res, 409, `POs come from APPROVED PRs (current: ${pr.status})`);
+    if (!["APPROVED","PO_RAISED"].includes(pr.status)) return fail(res, 409, `POs come from approved PRs (current: ${pr.status})`);
     const buyItems = pr.items.filter((it) => Number(it.buy_qty) > 0);
     if (!buyItems.length) return fail(res, 400, "No buy-quantity items on this PR");
     for (const it of buyItems)
       if (!it.supplier_id) return fail(res, 400, `Assign a supplier to "${it.description}" first`);
 
-    // Per the flow, FIC issues stock BEFORE POs are generated.
-    const pendingStock = pr.items.filter((it) => Number(it.stock_qty) > 0 && it.stock_status !== "STOCK_REDUCED");
-    if (pendingStock.length)
-      return fail(res, 409, `Stock not issued yet for ${pendingStock.length} item(s) — the Factory In-charge must reduce stock first`);
+    // don't create buy POs twice
+    const existingBuy = await db.query(
+      "SELECT 1 FROM purchase_orders WHERE pr_id = $1 AND po_type = 'BUY' LIMIT 1", [pr.id]
+    );
+    if (existingBuy.rows.length) return fail(res, 409, "Buy PO already generated for this PR");
 
+    // Buy PO is independent of the stock side (stock has its own Stock PO created at send-to-FIC).
     const created = await withTransaction(async (c) => {
       const groups = {};
       for (const it of buyItems)
@@ -358,7 +432,9 @@ router.post("/:prNo/generate-pos", roles("Purchaser", "Admin"), async (req, res)
         `${poNos.length} PO(s) generated: ${poNos.join(", ")}`, "success", pr.pr_no, poNos[0]);
       return poNos;
     });
-    ok(res, { created_pos: created, pr: await getPR(pr.pr_no) });
+    const result = { created_pos: created, pr: await getPR(pr.pr_no) };
+    Email.posCreated(result.pr, created);
+    ok(res, result);
   } catch (e) { fail(res, 500, e.message); }
 });
 

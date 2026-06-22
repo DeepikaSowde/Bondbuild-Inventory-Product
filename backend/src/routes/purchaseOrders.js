@@ -6,6 +6,8 @@ const express = require("express");
 const db = require("../config/db");
 const { protect, roles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
+const { Email } = require("../utils/notifyEmail");
+const STAGE_LABEL = { WITH_VENDOR: "With Vendor", SHIPPED: "In Transit", ARRIVED_HUB: "Arrived at Hub", RECEIVED_FACTORY: "Received" };
 
 const router = express.Router();
 router.use(protect);
@@ -144,7 +146,9 @@ router.put("/:poNo/delivery-stage", roles("Factory In-charge", "Supervisor", "Ad
         [po.id, req.user.name, req.user.role, stage || "cleared"]
       );
     });
-    ok(res, await getPO(po.po_no));
+    const updatedPO = await getPO(po.po_no);
+    if (stage) Email.deliveryStage(updatedPO, STAGE_LABEL[stage] || stage);
+    ok(res, updatedPO);
   } catch (e) { fail(res, 500, e.message); }
 });
 
@@ -164,7 +168,9 @@ router.post("/:poNo/receive", roles("Purchaser", "Supervisor", "Factory In-charg
       await notify(c, ["Purchaser", "Manager"], `PO closed: ${po.po_no}`,
         `Goods received from ${po.supplier_name}.`, "success", po.pr_no, po.po_no);
     });
-    ok(res, await getPO(po.po_no));
+    const closedPO = await getPO(po.po_no);
+    Email.poClosed(closedPO);
+    ok(res, closedPO);
   } catch (e) { fail(res, 500, e.message); }
 });
 
