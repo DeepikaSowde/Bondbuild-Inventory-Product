@@ -36,6 +36,49 @@ const RISK_LEVELS = [
   { v: "low", l: "Low" },
 ];
 
+// Parse a month key like "July'26" -> { year, idx } for "up to today" comparison
+const MONTH_IDX = {
+  Jan: 0,
+  Feb: 1,
+  Mar: 2,
+  Apr: 3,
+  May: 4,
+  Jun: 5,
+  June: 5,
+  Jul: 6,
+  July: 6,
+  Aug: 7,
+  Sep: 8,
+  Sept: 8,
+  Oct: 9,
+  Nov: 10,
+  Dec: 11,
+};
+function monthMeta(key) {
+  const m = String(key).match(/^([A-Za-z]+)'(\d{2})$/);
+  if (!m) return null;
+  return { year: 2000 + parseInt(m[2], 10), idx: MONTH_IDX[m[1]] ?? 0 };
+}
+// Site Progress % = cumulative achieved % up to and including TODAY's month.
+// achievedObj values are whole-number percents here (e.g. 20 for 20%).
+function cumulativeAchievedPct(achievedObj) {
+  const now = new Date();
+  const cy = now.getFullYear();
+  const ci = now.getMonth();
+  let sum = 0;
+  Object.entries(achievedObj || {}).forEach(([k, v]) => {
+    const meta = monthMeta(k);
+    if (!meta) return;
+    const pastOrCurrent =
+      meta.year < cy || (meta.year === cy && meta.idx <= ci);
+    if (pastOrCurrent) {
+      const x = parseFloat(v);
+      if (!isNaN(x)) sum += x;
+    }
+  });
+  return Math.min(Math.max(sum, 0), 100); // clamp 0..100
+}
+
 const C = {
   bg: "#0f1117",
   card: "#1a1d27",
@@ -88,6 +131,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
   const [target, setTarget] = useState({}); // {month: decimal}
   const [claimed, setClaimed] = useState({});
   const [received, setReceived] = useState({}); // {month: dollars}
+  const [achieved, setAchieved] = useState({}); // {month: decimal} actual site progress %
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
@@ -108,6 +152,15 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setTarget(project.target_monthly || project.targetMonthly || {});
       setClaimed(project.claimed_monthly || project.claimedMonthly || {});
       setReceived(project.received_monthly || project.receivedMonthly || {});
+      // achieved is stored as decimals (0-1) in DB; show as whole percents in the form
+      const rawAchieved =
+        project.achieved_monthly || project.achievedMonthly || {};
+      const achievedPct = {};
+      Object.entries(rawAchieved).forEach(([m, v]) => {
+        const x = parseFloat(v);
+        if (!isNaN(x)) achievedPct[m] = x <= 1 ? x * 100 : x;
+      });
+      setAchieved(achievedPct);
     }
   }, [project]);
 
@@ -124,14 +177,24 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     const sumT = Object.values(target).reduce((s, v) => s + num(v) / 100, 0);
     const sumC = Object.values(claimed).reduce((s, v) => s + num(v) / 100, 0);
     const sumR = Object.values(received).reduce((s, v) => s + num(v), 0);
+    // Site progress = cumulative achieved % up to today (whole-percent number)
+    const autoSitePct = cumulativeAchievedPct(achieved);
     return {
-      totalTarget: Math.min(downPct + sumT, 1),
+      totalTarget: Math.min(sumT, 1), // targets only (down payment excluded)
       totalClaimed: Math.min(downPct + sumC, 1),
       totalReceived: downAmt + sumR,
       balance: contract - (downAmt + sumR),
       downPct,
+      autoSitePct, // 0..100
     };
-  }, [form.contract_sum, form.down_payment, target, claimed, received]);
+  }, [
+    form.contract_sum,
+    form.down_payment,
+    target,
+    claimed,
+    received,
+    achieved,
+  ]);
 
   const setMonth = (setter) => (month, val) =>
     setter((prev) => {
@@ -167,12 +230,13 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       status: form.status,
       contract_sum: num(form.contract_sum),
       down_payment: num(form.down_payment),
-      site_progress: num(form.site_progress) / 100,
+      site_progress: calc.autoSitePct / 100, // auto = cumulative achieved up to today
       claim_till_date: calc.totalClaimed,
       risk_level: form.risk_level,
       target_monthly: toDecimal(target),
       claimed_monthly: toDecimal(claimed),
       received_monthly: receivedClean,
+      achieved_monthly: toDecimal(achieved),
     };
 
     try {
@@ -333,15 +397,18 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
               />
             </div>
             <div>
-              <label style={lbl}>Site Progress %</label>
+              <label style={lbl}>Site Progress % (auto)</label>
               <input
-                style={inp}
-                type="number"
-                value={form.site_progress}
-                onChange={(e) =>
-                  setForm({ ...form, site_progress: e.target.value })
-                }
-                placeholder="0-100"
+                style={{
+                  ...inp,
+                  background: "#10131c",
+                  color: C.green,
+                  cursor: "not-allowed",
+                }}
+                type="text"
+                value={`${calc.autoSitePct.toFixed(1)}%`}
+                readOnly
+                title="Auto = sum of monthly Achieved % up to today's month"
               />
             </div>
             <div>
@@ -389,8 +456,9 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
             Monthly Breakdown
           </div>
           <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10 }}>
-            Target % and Claimed % as numbers (e.g. 25 for 25%). Received in
-            dollars. Leave blank for no activity.
+            Target %, Claimed % and Achieved % as numbers (e.g. 25 for 25%).
+            Received in dollars. Achieved % = actual site progress that month.
+            Leave blank for no activity.
           </div>
 
           <div
@@ -403,7 +471,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "80px 1fr 1fr 1fr",
+                gridTemplateColumns: "70px 1fr 1fr 1fr 1fr",
                 background: C.cardAlt,
                 padding: "8px 12px",
                 fontSize: 10,
@@ -415,6 +483,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
             >
               <div>Month</div>
               <div style={{ color: C.blue }}>Target %</div>
+              <div style={{ color: C.amber }}>Achieved %</div>
               <div style={{ color: C.purple }}>Claimed %</div>
               <div style={{ color: C.green }}>Received $</div>
             </div>
@@ -424,7 +493,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                   key={m}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "80px 1fr 1fr 1fr",
+                    gridTemplateColumns: "70px 1fr 1fr 1fr 1fr",
                     gap: 8,
                     padding: "5px 12px",
                     alignItems: "center",
@@ -439,6 +508,13 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                     placeholder="—"
                     value={target[m] ?? ""}
                     onChange={(e) => setMonth(setTarget)(m, e.target.value)}
+                  />
+                  <input
+                    style={{ ...inp, padding: "5px 8px" }}
+                    type="number"
+                    placeholder="—"
+                    value={achieved[m] ?? ""}
+                    onChange={(e) => setMonth(setAchieved)(m, e.target.value)}
                   />
                   <input
                     style={{ ...inp, padding: "5px 8px" }}

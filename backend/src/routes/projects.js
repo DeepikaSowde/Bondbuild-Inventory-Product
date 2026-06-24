@@ -75,6 +75,46 @@ const COL = {
 };
 const MONTH_START = 11; // column L
 
+// Map a month KEY like "July'26" -> { year, idx } so we can compare against today.
+const MONTH_IDX = {
+  Jan: 0,
+  Feb: 1,
+  Mar: 2,
+  Apr: 3,
+  May: 4,
+  Jun: 5,
+  June: 5,
+  Jul: 6,
+  July: 6,
+  Aug: 7,
+  Sep: 8,
+  Sept: 8,
+  Oct: 9,
+  Nov: 10,
+  Dec: 11,
+};
+function monthKeyMeta(key) {
+  const m = String(key).match(/^([A-Za-z]+)'(\d{2})$/);
+  if (!m) return null;
+  return { year: 2000 + parseInt(m[2], 10), idx: MONTH_IDX[m[1]] ?? 0 };
+}
+// Site progress = sum of achieved % for all months up to and including TODAY's month.
+// Future months are ignored (they haven't happened yet).
+function computeSiteProgress(achievedMonthly) {
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curIdx = now.getMonth(); // 0-11
+  let sum = 0;
+  for (const [key, val] of Object.entries(achievedMonthly || {})) {
+    const meta = monthKeyMeta(key);
+    if (!meta) continue;
+    const isPastOrCurrent =
+      meta.year < curYear || (meta.year === curYear && meta.idx <= curIdx);
+    if (isPastOrCurrent) sum += n(val);
+  }
+  return Math.min(Math.max(sum, 0), 1); // clamp 0..1
+}
+
 // ============================================================
 // Helpers
 // ============================================================
@@ -415,12 +455,15 @@ router.post("/", async (req, res) => {
     const status = normalizeStatus(b.status);
     const contractSum = n(b.contract_sum);
     const downAmt = n(b.down_payment);
-    const site = pct(b.site_progress);
     const claimTill = pct(b.claim_till_date);
 
     const targetMonthly = b.target_monthly || {};
     const claimedMonthly = b.claimed_monthly || {};
     const receivedMonthly = b.received_monthly || {};
+    const achievedMonthly = b.achieved_monthly || {};
+
+    // Site progress is now AUTO: cumulative achieved % up to today's month.
+    const site = computeSiteProgress(achievedMonthly);
 
     const downPct = contractSum > 0 ? Math.min(downAmt / contractSum, 1) : 0;
     const sumTarget = Object.values(targetMonthly).reduce(
@@ -436,7 +479,8 @@ router.post("/", async (req, res) => {
       0,
     );
 
-    const totalTargetPct = Math.min(downPct + sumTarget, 1);
+    // Total Target % = sum of monthly targets ONLY (down payment excluded).
+    const totalTargetPct = Math.min(sumTarget, 1);
     const totalClaimedPct = Math.min(downPct + sumClaimed, 1);
     const totalReceived = downAmt + sumReceived;
     const riskLevel = normalizeRisk(b.risk_level);
@@ -445,9 +489,9 @@ router.post("/", async (req, res) => {
       `INSERT INTO projects (
         project_name, status, contract_sum, total_received, down_payment,
         site_progress, claim_till_date, total_target_pct, total_claimed_pct,
-        target_monthly, claimed_monthly, received_monthly,
+        target_monthly, claimed_monthly, received_monthly, achieved_monthly,
         risk_level, uploaded_by, excel_source
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
       RETURNING *`,
       [
         name,
@@ -462,22 +506,27 @@ router.post("/", async (req, res) => {
         JSON.stringify(targetMonthly),
         JSON.stringify(claimedMonthly),
         JSON.stringify(receivedMonthly),
+        JSON.stringify(achievedMonthly),
         riskLevel,
         "dashboard",
         "manual-entry",
       ],
     );
-    res.status(201).json({
-      success: true,
-      message: "Project created",
-      data: result.rows[0],
-    });
+    res
+      .status(201)
+      .json({
+        success: true,
+        message: "Project created",
+        data: result.rows[0],
+      });
   } catch (error) {
     if (error.code === "23505")
-      return res.status(409).json({
-        success: false,
-        message: "A project with this name already exists",
-      });
+      return res
+        .status(409)
+        .json({
+          success: false,
+          message: "A project with this name already exists",
+        });
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -498,12 +547,15 @@ router.put("/:id", async (req, res) => {
     const status = normalizeStatus(b.status);
     const contractSum = n(b.contract_sum);
     const downAmt = n(b.down_payment);
-    const site = pct(b.site_progress);
     const claimTill = pct(b.claim_till_date);
 
     const targetMonthly = b.target_monthly || {};
     const claimedMonthly = b.claimed_monthly || {};
     const receivedMonthly = b.received_monthly || {};
+    const achievedMonthly = b.achieved_monthly || {};
+
+    // Site progress is now AUTO: cumulative achieved % up to today's month.
+    const site = computeSiteProgress(achievedMonthly);
 
     const downPct = contractSum > 0 ? Math.min(downAmt / contractSum, 1) : 0;
     const sumTarget = Object.values(targetMonthly).reduce(
@@ -519,7 +571,8 @@ router.put("/:id", async (req, res) => {
       0,
     );
 
-    const totalTargetPct = Math.min(downPct + sumTarget, 1);
+    // Total Target % = sum of monthly targets ONLY (down payment excluded).
+    const totalTargetPct = Math.min(sumTarget, 1);
     const totalClaimedPct = Math.min(downPct + sumClaimed, 1);
     const totalReceived = downAmt + sumReceived;
     const riskLevel = normalizeRisk(b.risk_level);
@@ -528,9 +581,9 @@ router.put("/:id", async (req, res) => {
       `UPDATE projects SET
         project_name=$1, status=$2, contract_sum=$3, total_received=$4, down_payment=$5,
         site_progress=$6, claim_till_date=$7, total_target_pct=$8, total_claimed_pct=$9,
-        target_monthly=$10, claimed_monthly=$11, received_monthly=$12,
-        risk_level=$13, updated_at=CURRENT_TIMESTAMP
-      WHERE id=$14 RETURNING *`,
+        target_monthly=$10, claimed_monthly=$11, received_monthly=$12, achieved_monthly=$13,
+        risk_level=$14, updated_at=CURRENT_TIMESTAMP
+      WHERE id=$15 RETURNING *`,
       [
         name,
         status,
@@ -544,6 +597,7 @@ router.put("/:id", async (req, res) => {
         JSON.stringify(targetMonthly),
         JSON.stringify(claimedMonthly),
         JSON.stringify(receivedMonthly),
+        JSON.stringify(achievedMonthly),
         riskLevel,
         req.params.id,
       ],
@@ -552,17 +606,21 @@ router.put("/:id", async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Project not found" });
-    res.status(200).json({
-      success: true,
-      message: "Project updated",
-      data: result.rows[0],
-    });
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "Project updated",
+        data: result.rows[0],
+      });
   } catch (error) {
     if (error.code === "23505")
-      return res.status(409).json({
-        success: false,
-        message: "A project with this name already exists",
-      });
+      return res
+        .status(409)
+        .json({
+          success: false,
+          message: "A project with this name already exists",
+        });
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -580,11 +638,13 @@ router.delete("/:id", async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Project not found" });
-    res.status(200).json({
-      success: true,
-      message: "Project deleted",
-      data: result.rows[0],
-    });
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "Project deleted",
+        data: result.rows[0],
+      });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
