@@ -487,11 +487,11 @@ router.post("/", async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO projects (
-        project_name, status, contract_sum, total_received, down_payment,
+        project_name, status, contract_sum, total_received, down_payment, down_payment_month,
         site_progress, claim_till_date, total_target_pct, total_claimed_pct,
         target_monthly, claimed_monthly, received_monthly, achieved_monthly,
         risk_level, uploaded_by, excel_source
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
       RETURNING *`,
       [
         name,
@@ -499,6 +499,7 @@ router.post("/", async (req, res) => {
         contractSum,
         totalReceived,
         downAmt,
+        b.down_payment_month || null,
         site,
         claimTill,
         totalTargetPct,
@@ -512,21 +513,17 @@ router.post("/", async (req, res) => {
         "manual-entry",
       ],
     );
-    res
-      .status(201)
-      .json({
-        success: true,
-        message: "Project created",
-        data: result.rows[0],
-      });
+    res.status(201).json({
+      success: true,
+      message: "Project created",
+      data: result.rows[0],
+    });
   } catch (error) {
     if (error.code === "23505")
-      return res
-        .status(409)
-        .json({
-          success: false,
-          message: "A project with this name already exists",
-        });
+      return res.status(409).json({
+        success: false,
+        message: "A project with this name already exists",
+      });
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -582,8 +579,8 @@ router.put("/:id", async (req, res) => {
         project_name=$1, status=$2, contract_sum=$3, total_received=$4, down_payment=$5,
         site_progress=$6, claim_till_date=$7, total_target_pct=$8, total_claimed_pct=$9,
         target_monthly=$10, claimed_monthly=$11, received_monthly=$12, achieved_monthly=$13,
-        risk_level=$14, updated_at=CURRENT_TIMESTAMP
-      WHERE id=$15 RETURNING *`,
+        risk_level=$14, down_payment_month=$15, updated_at=CURRENT_TIMESTAMP
+      WHERE id=$16 RETURNING *`,
       [
         name,
         status,
@@ -599,6 +596,7 @@ router.put("/:id", async (req, res) => {
         JSON.stringify(receivedMonthly),
         JSON.stringify(achievedMonthly),
         riskLevel,
+        b.down_payment_month || null,
         req.params.id,
       ],
     );
@@ -606,21 +604,17 @@ router.put("/:id", async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Project not found" });
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Project updated",
-        data: result.rows[0],
-      });
+    res.status(200).json({
+      success: true,
+      message: "Project updated",
+      data: result.rows[0],
+    });
   } catch (error) {
     if (error.code === "23505")
-      return res
-        .status(409)
-        .json({
-          success: false,
-          message: "A project with this name already exists",
-        });
+      return res.status(409).json({
+        success: false,
+        message: "A project with this name already exists",
+      });
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -638,13 +632,11 @@ router.delete("/:id", async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Project not found" });
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Project deleted",
-        data: result.rows[0],
-      });
+    res.status(200).json({
+      success: true,
+      message: "Project deleted",
+      data: result.rows[0],
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

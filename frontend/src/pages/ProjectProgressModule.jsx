@@ -1112,6 +1112,59 @@ function monthMeta(key) {
   if (!m) return { year: 2025, idx: 0 };
   return { year: 2000 + parseInt(m[2], 10), idx: MONTH_ORDER[m[1]] ?? 0 };
 }
+
+// Is a month key in the past or current (relative to today)?
+function isPastOrCurrentMonth(key) {
+  const now = new Date();
+  const meta = monthMeta(key);
+  return (
+    meta.year < now.getFullYear() ||
+    (meta.year === now.getFullYear() && meta.idx <= now.getMonth())
+  );
+}
+
+// Cumulative achieved % up to and including today's month (0..1).
+function cumulativeAchieved(achievedMonthly) {
+  let sum = 0;
+  Object.entries(achievedMonthly || {}).forEach(([k, v]) => {
+    if (isPastOrCurrentMonth(k)) {
+      const x = parseFloat(v);
+      if (!isNaN(x)) sum += x;
+    }
+  });
+  return Math.min(Math.max(sum, 0), 1);
+}
+
+// Per-month shortfall roll-forward for one project.
+// Returns an array of { month, target, achieved, effectiveTarget, shortfall, carriedIn }
+// where shortfall carries into the next month's effective target.
+// All values are decimals (0..1).
+function buildShortfallRows(targetMonthly, achievedMonthly) {
+  const rows = [];
+  let carry = 0; // shortfall carried from previous month
+  ALL_MONTHS.forEach((month) => {
+    const t = parseFloat(targetMonthly?.[month]);
+    const a = parseFloat(achievedMonthly?.[month]);
+    const hasTarget = !isNaN(t);
+    const hasAchieved = !isNaN(a);
+    // Skip months with no target AND no achieved AND no carry (nothing to show)
+    if (!hasTarget && !hasAchieved && carry === 0) return;
+    const target = hasTarget ? t : 0;
+    const achieved = hasAchieved ? a : 0;
+    const effectiveTarget = target + carry;
+    const shortfall = Math.max(0, effectiveTarget - achieved);
+    rows.push({
+      month,
+      target,
+      achieved,
+      carriedIn: carry,
+      effectiveTarget,
+      shortfall,
+    });
+    carry = shortfall; // roll forward
+  });
+  return rows;
+}
 const STATUS_LIST = ["Completed", "Closed", "In Progress", "Upcoming Project"];
 
 // ─── COLORS ──────────────────────────────────────────────────────────────────
@@ -1546,6 +1599,7 @@ export default function ProjectProgressModule() {
   // ── Add/Edit modal state ──
   const [modalOpen, setModalOpen] = useState(false);
   const [editProject, setEditProject] = useState(null);
+  const [detailProject, setDetailProject] = useState(null);
 
   // ── Fetch projects from database (reusable) ──
   const fetchProjects = async () => {
@@ -1553,32 +1607,44 @@ export default function ProjectProgressModule() {
       setLoading(true);
       const response = await api.get("/projects");
       if (response.data.success) {
-        const transformed = response.data.data.map((item) => ({
-          id: item.id,
-          name: item.project_name,
-          status: item.status,
-          siteProgress: parseFloat(item.site_progress) || 0,
-          claimTillDate: parseFloat(item.claim_till_date) || 0,
-          totalTargetPct: parseFloat(item.total_target_pct) || 0,
-          totalClaimedPct: parseFloat(item.total_claimed_pct) || 0,
-          contractSum: parseFloat(item.contract_sum) || 0,
-          totalReceived: parseFloat(item.total_received) || 0,
-          balance: parseFloat(item.balance) || 0,
-          downPayment: parseFloat(item.down_payment) || 0,
-          riskLevel: item.risk_level || "low",
-          targetMonthly: item.target_monthly || {},
-          claimedMonthly: item.claimed_monthly || {},
-          receivedMonthly: item.received_monthly || {},
-          // raw fields for the edit form:
-          project_name: item.project_name,
-          contract_sum: item.contract_sum,
-          down_payment: item.down_payment,
-          site_progress: item.site_progress,
-          claim_till_date: item.claim_till_date,
-          target_monthly: item.target_monthly,
-          claimed_monthly: item.claimed_monthly,
-          received_monthly: item.received_monthly,
-        }));
+        const transformed = response.data.data.map((item) => {
+          const achievedMonthly = item.achieved_monthly || {};
+          // If achieved data exists, site progress = cumulative achieved up to today.
+          // Otherwise fall back to the stored site_progress value.
+          const hasAchieved = Object.keys(achievedMonthly).length > 0;
+          const computedSite = hasAchieved
+            ? cumulativeAchieved(achievedMonthly)
+            : parseFloat(item.site_progress) || 0;
+          return {
+            id: item.id,
+            name: item.project_name,
+            status: item.status,
+            siteProgress: computedSite,
+            claimTillDate: parseFloat(item.claim_till_date) || 0,
+            totalTargetPct: parseFloat(item.total_target_pct) || 0,
+            totalClaimedPct: parseFloat(item.total_claimed_pct) || 0,
+            contractSum: parseFloat(item.contract_sum) || 0,
+            totalReceived: parseFloat(item.total_received) || 0,
+            balance: parseFloat(item.balance) || 0,
+            downPayment: parseFloat(item.down_payment) || 0,
+            riskLevel: item.risk_level || "low",
+            targetMonthly: item.target_monthly || {},
+            claimedMonthly: item.claimed_monthly || {},
+            receivedMonthly: item.received_monthly || {},
+            achievedMonthly: achievedMonthly,
+            // raw fields for the edit form:
+            project_name: item.project_name,
+            contract_sum: item.contract_sum,
+            down_payment: item.down_payment,
+            down_payment_month: item.down_payment_month,
+            site_progress: item.site_progress,
+            claim_till_date: item.claim_till_date,
+            target_monthly: item.target_monthly,
+            claimed_monthly: item.claimed_monthly,
+            received_monthly: item.received_monthly,
+            achieved_monthly: item.achieved_monthly,
+          };
+        });
         setRawProjects(transformed);
         setFetchError(null);
       } else {
@@ -4248,6 +4314,21 @@ export default function ProjectProgressModule() {
                                   }}
                                 >
                                   <button
+                                    onClick={() => setDetailProject(p)}
+                                    title="Monthly detail"
+                                    style={{
+                                      background: "none",
+                                      border: `1px solid ${C.border}`,
+                                      borderRadius: 6,
+                                      padding: "4px 6px",
+                                      cursor: "pointer",
+                                      color: C.amber,
+                                      marginRight: 6,
+                                    }}
+                                  >
+                                    <BarChart3 size={13} />
+                                  </button>
+                                  <button
                                     onClick={() => {
                                       setEditProject(p);
                                       setModalOpen(true);
@@ -5978,6 +6059,229 @@ export default function ProjectProgressModule() {
           onClose={() => setModalOpen(false)}
           onSaved={fetchProjects}
         />
+      )}
+
+      {detailProject && (
+        <div
+          onClick={() => setDetailProject(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            backdropFilter: "blur(4px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: C.bg,
+              border: `1px solid ${C.border}`,
+              borderRadius: 16,
+              width: "100%",
+              maxWidth: 720,
+              maxHeight: "88vh",
+              overflowY: "auto",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                position: "sticky",
+                top: 0,
+                background: C.card,
+                borderBottom: `1px solid ${C.border}`,
+                padding: "16px 22px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                borderRadius: "16px 16px 0 0",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>
+                  {detailProject.name}
+                </div>
+                <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>
+                  Monthly Target vs Achieved · Shortfall carries to next month
+                </div>
+              </div>
+              <button
+                onClick={() => setDetailProject(null)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: C.textMuted,
+                  fontSize: 20,
+                }}
+              >
+                <XCircle size={20} />
+              </button>
+            </div>
+
+            <div style={{ padding: 22 }}>
+              {/* Cumulative summary */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                  marginBottom: 18,
+                }}
+              >
+                <div
+                  style={{
+                    background: C.card,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 10,
+                    padding: "12px 14px",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: C.textMuted,
+                      textTransform: "uppercase",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Site Progress (cumulative achieved to today)
+                  </div>
+                  <div
+                    style={{ fontSize: 20, fontWeight: 700, color: C.green }}
+                  >
+                    {fmtPct(detailProject.siteProgress)}
+                  </div>
+                </div>
+                <div
+                  style={{
+                    background: C.card,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 10,
+                    padding: "12px 14px",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: C.textMuted,
+                      textTransform: "uppercase",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Total Target %
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: C.blue }}>
+                    {fmtPct(detailProject.totalTargetPct)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Monthly table */}
+              {(() => {
+                const rows = buildShortfallRows(
+                  detailProject.targetMonthly,
+                  detailProject.achievedMonthly,
+                );
+                if (rows.length === 0) {
+                  return (
+                    <div
+                      style={{
+                        color: C.textMuted,
+                        fontSize: 13,
+                        textAlign: "center",
+                        padding: "20px 0",
+                      }}
+                    >
+                      No monthly target or achieved data entered yet.
+                    </div>
+                  );
+                }
+                const th = {
+                  textAlign: "left",
+                  padding: "8px 10px",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: C.textMuted,
+                  textTransform: "uppercase",
+                  borderBottom: `1px solid ${C.border}`,
+                };
+                const td = {
+                  padding: "7px 10px",
+                  fontSize: 13,
+                  color: C.text,
+                  borderBottom: `1px solid ${C.border}`,
+                };
+                return (
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th style={th}>Month</th>
+                        <th style={{ ...th, color: C.blue }}>Target %</th>
+                        <th style={{ ...th, color: C.amber }}>Achieved %</th>
+                        <th style={{ ...th, color: C.textMuted }}>
+                          Carried In
+                        </th>
+                        <th style={{ ...th, color: C.purple }}>Eff. Target</th>
+                        <th style={{ ...th, color: C.red }}>Shortfall</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r) => (
+                        <tr key={r.month}>
+                          <td style={{ ...td, color: C.textMuted }}>
+                            {r.month}
+                          </td>
+                          <td style={td}>{fmtPct(r.target)}</td>
+                          <td style={td}>{fmtPct(r.achieved)}</td>
+                          <td
+                            style={{
+                              ...td,
+                              color: r.carriedIn > 0 ? C.amber : C.textDim,
+                            }}
+                          >
+                            {r.carriedIn > 0 ? fmtPct(r.carriedIn) : "—"}
+                          </td>
+                          <td style={{ ...td, fontWeight: 600 }}>
+                            {fmtPct(r.effectiveTarget)}
+                          </td>
+                          <td
+                            style={{
+                              ...td,
+                              color: r.shortfall > 0 ? C.red : C.green,
+                              fontWeight: 600,
+                            }}
+                          >
+                            {r.shortfall > 0 ? fmtPct(r.shortfall) : "On track"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
+
+              <div
+                style={{
+                  fontSize: 11,
+                  color: C.textMuted,
+                  marginTop: 14,
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong>Eff. Target</strong> = this month's target + shortfall
+                carried from previous month. <strong>Shortfall</strong> = Eff.
+                Target − Achieved, carried into the next month.
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

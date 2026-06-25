@@ -124,6 +124,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     status: "Upcoming Project",
     contract_sum: "",
     down_payment: "",
+    down_payment_month: "",
     site_progress: "",
     claim_till_date: "",
     risk_level: "low",
@@ -143,14 +144,25 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
         status: project.status || "Upcoming Project",
         contract_sum: project.contract_sum ?? project.contractSum ?? "",
         down_payment: project.down_payment ?? project.downPayment ?? "",
+        down_payment_month:
+          project.down_payment_month ?? project.downPaymentMonth ?? "",
         site_progress:
           (project.site_progress ?? project.siteProgress ?? 0) * 100 || "",
         claim_till_date:
           (project.claim_till_date ?? project.claimTillDate ?? 0) * 100 || "",
         risk_level: project.risk_level || project.riskLevel || "low",
       });
-      setTarget(project.target_monthly || project.targetMonthly || {});
-      setClaimed(project.claimed_monthly || project.claimedMonthly || {});
+      // Stored as decimals (0-1) in DB; show as whole percents in the form.
+      const toPct = (obj) => {
+        const out = {};
+        Object.entries(obj || {}).forEach(([m, v]) => {
+          const x = parseFloat(v);
+          if (!isNaN(x)) out[m] = x <= 1 ? Math.round(x * 1000) / 10 : x;
+        });
+        return out;
+      };
+      setTarget(toPct(project.target_monthly || project.targetMonthly));
+      setClaimed(toPct(project.claimed_monthly || project.claimedMonthly));
       setReceived(project.received_monthly || project.receivedMonthly || {});
       // achieved is stored as decimals (0-1) in DB; show as whole percents in the form
       const rawAchieved =
@@ -158,7 +170,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       const achievedPct = {};
       Object.entries(rawAchieved).forEach(([m, v]) => {
         const x = parseFloat(v);
-        if (!isNaN(x)) achievedPct[m] = x <= 1 ? x * 100 : x;
+        if (!isNaN(x)) achievedPct[m] = x <= 1 ? Math.round(x * 1000) / 10 : x;
       });
       setAchieved(achievedPct);
     }
@@ -230,6 +242,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       status: form.status,
       contract_sum: num(form.contract_sum),
       down_payment: num(form.down_payment),
+      down_payment_month: form.down_payment_month || null,
       site_progress: calc.autoSitePct / 100, // auto = cumulative achieved up to today
       claim_till_date: calc.totalClaimed,
       risk_level: form.risk_level,
@@ -367,7 +380,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr 1fr",
+              gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr",
               gap: 14,
               marginBottom: 20,
             }}
@@ -395,6 +408,23 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                 }
                 placeholder="0"
               />
+            </div>
+            <div>
+              <label style={lbl}>Down Payment Month</label>
+              <select
+                style={inp}
+                value={form.down_payment_month}
+                onChange={(e) =>
+                  setForm({ ...form, down_payment_month: e.target.value })
+                }
+              >
+                <option value="">—</option>
+                {MONTHS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label style={lbl}>Site Progress % (auto)</label>
