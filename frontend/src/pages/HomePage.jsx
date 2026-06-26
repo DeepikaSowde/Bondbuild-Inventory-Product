@@ -32,6 +32,9 @@ export default function HomePage() {
     totalPOValue: 0,
     openPRs: 0,
     totalProjects: 0,
+    completedProjects: 0,
+    inProgressProjects: 0,
+    upcomingProjects: 0,
   });
 
   // ========================
@@ -50,22 +53,22 @@ export default function HomePage() {
         // Extract data from response
         const invData = inventoryResponse.data;
 
-        // Fetch PO data (if endpoint exists)
-        let poData = { openPOs: 0, closedPOs: 0, totalPOValue: 0 };
+        // Fetch Procurement summary (open PRs + open POs)
+        let procData = { open_prs: 0, open_pos: 0 };
         try {
-          const poResponse = await api.get("/purchase-orders/summary");
-          poData = poResponse.data;
+          const procResponse = await api.get("/home/procurement-summary");
+          procData = procResponse.data?.data || procData;
         } catch (err) {
-          console.log("PO endpoint not available yet, using defaults");
+          console.log("Procurement summary not available yet, using defaults");
         }
 
-        // Fetch PR data (if endpoint exists)
-        let prData = { openPRs: 0 };
+        // Fetch Operation summary (project status counts)
+        let opData = { completed: 0, in_progress: 0, upcoming: 0 };
         try {
-          const prResponse = await api.get("/material-requests/summary");
-          prData = prResponse.data;
+          const opResponse = await api.get("/home/operation-summary");
+          opData = opResponse.data?.data || opData;
         } catch (err) {
-          console.log("PR endpoint not available yet, using defaults");
+          console.log("Operation summary not available yet, using defaults");
         }
 
         // Update state with fetched data
@@ -76,11 +79,17 @@ export default function HomePage() {
           lowStockItems: invData.low_stock_items || 0,
           outOfStockItems: invData.out_of_stock_items || 0,
           stockValue: invData.total_value || 0,
-          openPOs: poData.openPOs || poData.open_pos || 0,
-          closedPOs: poData.closedPOs || poData.closed_pos || 0,
-          totalPOValue: poData.totalPOValue || poData.total_po_value || 0,
-          openPRs: prData.openPRs || prData.open_prs || 0,
-          totalProjects: 0, // Will implement if needed
+          openPOs: procData.open_pos || 0,
+          closedPOs: 0,
+          totalPOValue: 0,
+          openPRs: procData.open_prs || 0,
+          totalProjects:
+            (opData.completed || 0) +
+            (opData.in_progress || 0) +
+            (opData.upcoming || 0),
+          completedProjects: opData.completed || 0,
+          inProgressProjects: opData.in_progress || 0,
+          upcomingProjects: opData.upcoming || 0,
         });
 
         setLoading(false);
@@ -279,6 +288,9 @@ export default function HomePage() {
   const openPRs = dashboardData.openPRs;
   const stockValue = dashboardData.stockValue;
   const totalProjects = dashboardData.totalProjects;
+  const completedProjects = dashboardData.completedProjects;
+  const inProgressProjects = dashboardData.inProgressProjects;
+  const upcomingProjects = dashboardData.upcomingProjects;
   const fmtVal = (n) =>
     n >= 1000 ? `S$${(n / 1000).toFixed(1)}k` : `S$${n.toFixed(0)}`;
 
@@ -359,7 +371,6 @@ export default function HomePage() {
       stats: [
         { label: "OPEN PRS", value: openPRs },
         { label: "OPEN POS", value: openPOs },
-        { label: "PO VALUE", value: fmtVal(totalPOVal) },
       ],
       cta: "Track requests, approvals & delivery",
     },
@@ -371,9 +382,9 @@ export default function HomePage() {
       badge: null,
       subtitle: "Project status & claim follow up",
       stats: [
-        { label: "PROJECTS", value: totalProjects },
-        { label: "CLOSED POS", value: closedPOs },
-        { label: "OPEN POS", value: openPOs },
+        { label: "COMPLETED", value: completedProjects },
+        { label: "IN PROGRESS", value: inProgressProjects },
+        { label: "UPCOMING", value: upcomingProjects },
       ],
       cta: "Monitor projects & claim status",
     },
@@ -385,11 +396,7 @@ export default function HomePage() {
       badge: "Soon",
       badgeColor: "#fbbf24",
       subtitle: "Spend analysis & financials",
-      stats: [
-        { label: "TOTAL POS", value: openPOs + closedPOs },
-        { label: "CLOSED", value: closedPOs },
-        { label: "PO VALUE", value: fmtVal(totalPOVal) },
-      ],
+      stats: [],
       cta: "View spending & financial summary",
     },
   ];
@@ -418,6 +425,15 @@ export default function HomePage() {
       label: "Settings",
       sub: "System preferences",
       action: () => setDropdownOpen(false),
+    },
+    {
+      icon: "🔑",
+      label: "Change Password",
+      sub: "Update your password",
+      action: () => {
+        setDropdownOpen(false);
+        navigate("/change-password");
+      },
     },
     { divider: true },
     {
@@ -964,50 +980,52 @@ export default function HomePage() {
               </div>
 
               {/* Stats */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr",
-                  borderBottom: "1px solid rgba(255,255,255,0.04)",
-                  background: "rgba(0,0,0,0.15)",
-                }}
-              >
-                {card.stats.map((st, i) => (
-                  <div
-                    key={st.label}
-                    style={{
-                      padding: "16px 24px",
-                      borderRight:
-                        i < card.stats.length - 1
-                          ? "1px solid rgba(255,255,255,0.04)"
-                          : "none",
-                    }}
-                  >
+              {card.stats.length > 0 && (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr 1fr",
+                    borderBottom: "1px solid rgba(255,255,255,0.04)",
+                    background: "rgba(0,0,0,0.15)",
+                  }}
+                >
+                  {card.stats.map((st, i) => (
                     <div
+                      key={st.label}
                       style={{
-                        fontSize: 10,
-                        fontWeight: "800",
-                        color: "#6B7A99",
-                        letterSpacing: "0.1em",
-                        textTransform: "uppercase",
-                        marginBottom: 6,
+                        padding: "16px 24px",
+                        borderRight:
+                          i < card.stats.length - 1
+                            ? "1px solid rgba(255,255,255,0.04)"
+                            : "none",
                       }}
                     >
-                      {st.label}
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: "800",
+                          color: "#6B7A99",
+                          letterSpacing: "0.1em",
+                          textTransform: "uppercase",
+                          marginBottom: 6,
+                        }}
+                      >
+                        {st.label}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 22,
+                          fontWeight: "800",
+                          letterSpacing: "-0.02em",
+                          color: "#fff",
+                        }}
+                      >
+                        {st.value}
+                      </div>
                     </div>
-                    <div
-                      style={{
-                        fontSize: 22,
-                        fontWeight: "800",
-                        letterSpacing: "-0.02em",
-                        color: "#fff",
-                      }}
-                    >
-                      {st.value}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
 
               {/* Footer CTA */}
               <div

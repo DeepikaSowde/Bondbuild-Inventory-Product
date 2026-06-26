@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -222,12 +223,51 @@ export default function LoginPage() {
             )}
           </button>
 
+          {/* Forgot Password link */}
+          <div className="mt-3 text-center">
+            <button
+              type="button"
+              onClick={() => setShowForgot(true)}
+              className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+            >
+              Forgot Password?
+            </button>
+          </div>
+
           {/* Footer */}
           <div className="mt-6 text-center text-[10px] text-gray-600">
             Bond Build SG · v2.0
           </div>
         </div>
       </div>
+      {/* ── Forgot Password popup ── */}
+      {showForgot && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          onClick={() => setShowForgot(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-[#1a1744] border border-white/10 p-6 text-center shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-3xl mb-3">🔑</div>
+            <h2 className="text-lg font-black text-white mb-2">
+              Forgot Password?
+            </h2>
+            <p className="text-sm text-indigo-200 leading-relaxed mb-5">
+              Please contact your{" "}
+              <span className="font-bold text-white">Administrator</span> to
+              retrieve a new password.
+            </p>
+            <button
+              onClick={() => setShowForgot(false)}
+              className="w-full py-2.5 rounded-lg bg-indigo-500 text-white text-sm font-bold hover:bg-indigo-600 transition-colors"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

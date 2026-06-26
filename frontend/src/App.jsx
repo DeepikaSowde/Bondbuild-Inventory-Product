@@ -22,6 +22,7 @@ import SetupDashboard from "./pages/Setup/SetupDashboard";
 import ProjectProgressModule from "./pages/ProjectProgressModule";
 import Procurement from "./pages/Procurement";
 import Dashboard from "./pages/Dashboard";
+import ChangePassword from "./pages/ChangePassword";
 
 // Placeholder pages (create these later)
 
@@ -49,10 +50,17 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/setup" element={<SetupDashboard />} />
       <Route path="/setup" element={<SetupDashboard />} />
-
       <Route path="/project-progress" element={<ProjectProgressModule />} />
-
       {/* Protected routes */}
+      
+      <Route
+        path="/change-password"
+        element={
+          <PrivateRoute>
+            <ChangePassword />
+          </PrivateRoute>
+        }
+      />
       <Route
         path="/"
         element={
@@ -61,7 +69,6 @@ function AppRoutes() {
           </PrivateRoute>
         }
       />
-
       <Route
         path="/stock"
         element={
@@ -70,7 +77,6 @@ function AppRoutes() {
           </PrivateRoute>
         }
       />
-
       <Route
         path="/dashboard"
         element={
@@ -79,7 +85,6 @@ function AppRoutes() {
           </PrivateRoute>
         }
       />
-
       <Route
         path="/pr-followup"
         element={
@@ -88,7 +93,6 @@ function AppRoutes() {
           </PrivateRoute>
         }
       />
-
       <Route
         path="/project-progress"
         element={
@@ -97,7 +101,6 @@ function AppRoutes() {
           </PrivateRoute>
         }
       />
-
       <Route
         path="/accounting"
         element={
@@ -106,7 +109,6 @@ function AppRoutes() {
           </PrivateRoute>
         }
       />
-
       {/* ADMIN ONLY ROUTES */}
       <Route
         path="/users"
@@ -116,7 +118,6 @@ function AppRoutes() {
           </AdminRoute>
         }
       />
-
       {/* Catch all */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

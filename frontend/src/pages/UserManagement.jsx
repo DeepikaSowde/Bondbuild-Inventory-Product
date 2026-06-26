@@ -167,6 +167,30 @@ function UsersModule({
     }
   };
 
+  const handleResetPassword = async (u) => {
+    const newPassword = window.prompt(
+      `Reset password for "${u.name}" (${u.username}).\nEnter a new temporary password (min 6 characters):`,
+    );
+    if (newPassword === null) return; // cancelled
+    if (newPassword.trim().length < 6) {
+      showNotify("Password must be at least 6 characters", "error");
+      return;
+    }
+    try {
+      await api.post(`/auth/users/${u.id}/reset-password`, {
+        newPassword: newPassword.trim(),
+      });
+      showNotify(
+        `Password reset for ${u.name}. Share the temporary password with them.`,
+      );
+    } catch (err) {
+      showNotify(
+        err.response?.data?.error || "Error resetting password",
+        "error",
+      );
+    }
+  };
+
   const toggleStatus = async (u) => {
     if (u.id === currentUser?.id) {
       showNotify("Cannot deactivate your own account", "error");
@@ -579,6 +603,24 @@ function UsersModule({
                           >
                             ✏️ Edit
                           </button>
+                          {!isMe && (
+                            <button
+                              onClick={() => handleResetPassword(u)}
+                              style={{
+                                background: "#FFF7ED",
+                                border: "none",
+                                borderRadius: 7,
+                                padding: "6px 12px",
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: "#D97706",
+                                cursor: "pointer",
+                              }}
+                              title="Reset this user's password"
+                            >
+                              🔑 Reset
+                            </button>
+                          )}
                           {!isMe && (
                             <button
                               onClick={() => handleDelete(u)}
