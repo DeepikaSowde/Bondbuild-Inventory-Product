@@ -21,12 +21,9 @@ import UserManagement from "./pages/UserManagement";
 import SetupDashboard from "./pages/Setup/SetupDashboard";
 import ProjectProgressModule from "./pages/ProjectProgressModule";
 import Procurement from "./pages/Procurement";
+import Dashboard from "./pages/Dashboard";
+
 // Placeholder pages (create these later)
-const Dashboard = () => (
-  <div className="p-8">
-    <h1>📊 Dashboard</h1>
-  </div>
-);
 
 const ProjectProgress = () => (
   <div className="p-8">
@@ -50,7 +47,7 @@ function AppRoutes() {
     <Routes>
       {/* Public routes */}
       <Route path="/login" element={<LoginPage />} />
-
+      <Route path="/setup" element={<SetupDashboard />} />
       <Route path="/setup" element={<SetupDashboard />} />
 
       <Route path="/project-progress" element={<ProjectProgressModule />} />

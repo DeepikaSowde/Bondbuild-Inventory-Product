@@ -144,7 +144,7 @@ export default function Sidebar({
         <SectionLabel label="Main" />
 
         {/* Home */}
-        <NavItem id="home" icon="🏠" label="Home" />
+        <NavItem id="home" icon="🏠" label="Home" path="/HomePage" />
 
         {/* Dashboard */}
         <NavItem id="dashboard" icon="📊" label="Dashboard" path="/dashboard" />
