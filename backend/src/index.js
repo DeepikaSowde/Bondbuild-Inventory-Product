@@ -84,8 +84,8 @@ app.use("/api/purchase-orders", require("./routes/purchaseOrdersImport"));
 app.use("/api/import", require("./routes/poImport"));
 app.use("/api", require("./routes/poReference"));
 app.use("/api", require("./routes/poDashboard"));
-app.use("/api/auth", require("./routes/passwordRoutes"));
-app.use("/api/home", require("./routes/homeSummary"));
+app.use("/api/auth", require("./routes/Passwordroutes"));
+app.use("/api/home", require("./routes/Homesummary"));
 // ============================================================
 // Health Check Endpoint
 // ============================================================
