@@ -352,6 +352,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
 
 function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canFIC, canCreate, busy, setBusy, notify, onReject, onEdit, onChanged, onClose }) {
   const isAdmin = user.role === "Admin";
+  const canSeePrice = !!perms.see_pr_price || isAdmin;
   const pApprove = !!perms.approve_pr || isAdmin;
   const pReject = !!perms.reject_pr || isAdmin;
   const pAssign = !!perms.assign_supplier || isAdmin;
@@ -404,7 +405,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
 
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-[13px]">
-          <thead><tr>{["Code", "Description", "Total", "Stock", "Stock status", "Buy", "Supplier", "Unit price", "Amount"].map((h, i) => <th key={i} className={th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Code", "Description", "Total", "Stock", "Stock status", "Buy", "Supplier", ...(canSeePrice ? ["Unit price", "Amount"] : [])].map((h, i) => <th key={i} className={th}>{h}</th>)}</tr></thead>
           <tbody>
             {items.map((it, i) => {
               const hasStock = Number(it.stock_qty) > 0;
@@ -428,8 +429,8 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                     </td>
                     <td className={td}>—</td>
                     <td className={td}><span className="text-[12px] text-[#6B7280]">From stock</span></td>
-                    <td className={td}>{money(it.stock_unit_price)}</td>
-                    <td className={td}>{money((Number(it.stock_qty) || 0) * (Number(it.stock_unit_price) || 0))}</td>
+                    {canSeePrice && <td className={td}>{money(it.stock_unit_price)}</td>}
+                    {canSeePrice && <td className={td}>{money((Number(it.stock_qty) || 0) * (Number(it.stock_unit_price) || 0))}</td>}
                   </tr>
                 );
               }
@@ -451,10 +452,12 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                         </Select>
                       ) : (it.supplier_name || "—")}
                     </td>
-                    <td className={`${td} w-[110px]`}>
-                      {assignMode ? <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} /> : money(it.unit_price)}
-                    </td>
-                    <td className={td}>{money((Number(it.buy_qty) || 0) * (Number(it.unit_price) || 0))}</td>
+                    {canSeePrice && (
+                      <td className={`${td} w-[110px]`}>
+                        {assignMode ? <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} /> : money(it.unit_price)}
+                      </td>
+                    )}
+                    {canSeePrice && <td className={td}>{money((Number(it.buy_qty) || 0) * (Number(it.unit_price) || 0))}</td>}
                   </tr>
                 );
               }
@@ -465,17 +468,19 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                     <td className={`${td} font-mono`}>{it.profile_code || "—"}</td>
                     <td className={td}>{it.description}</td>
                     <td className={td}>{it.qty}</td>
-                    <td className={td} colSpan={6}>—</td>
+                    <td className={td} colSpan={canSeePrice ? 6 : 4}>—</td>
                   </tr>
                 );
               }
               return rows;
             })}
           </tbody>
-          <tfoot>
-            <tr><td colSpan={8} className="px-2.5 py-2.5 text-right font-bold text-[#6B7280]">Buy total</td><td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{money(total)}</td></tr>
-            <tr><td colSpan={8} className="px-2.5 py-1 text-right text-[12px] text-[#6B7280]">Stock value</td><td className="px-2.5 py-1 text-[12px] font-semibold text-[#6366F1]">{money(stockTotal)}</td></tr>
-          </tfoot>
+          {canSeePrice && (
+            <tfoot>
+              <tr><td colSpan={8} className="px-2.5 py-2.5 text-right font-bold text-[#6B7280]">Buy total</td><td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{money(total)}</td></tr>
+              <tr><td colSpan={8} className="px-2.5 py-1 text-right text-[12px] text-[#6B7280]">Stock value</td><td className="px-2.5 py-1 text-[12px] font-semibold text-[#6366F1]">{money(stockTotal)}</td></tr>
+            </tfoot>
+          )}
         </table>
       </div>
 

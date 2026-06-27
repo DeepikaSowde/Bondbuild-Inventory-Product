@@ -17,6 +17,8 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
   const canReceive = !!perms.receive_po || isAdmin;
   const canTrack = !!perms.set_delivery || isAdmin;
   const canCancel = !!perms.cancel_po || isAdmin;
+  const canSeePrice = !!perms.see_po_price || isAdmin;
+  const canSeeAmount = !!perms.see_po_amount || isAdmin;
 
   const load = () => api.pos({ status, job, q }).then(setPOs).catch((e) => notify(apiError(e), "error"));
   useEffect(() => { load(); }, [status, job]);
@@ -37,13 +39,13 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
           {jobs.map((j) => <option key={j}>{j}</option>)}
         </Select>
         <span className="border-l-[3px] border-[#6366F1] pl-2.5 font-mono text-[12.5px] text-[#6B7280]">
-          {pos.length} POs · {money(totalVal)}
+          {pos.length} POs{canSeeAmount ? ` · ${money(totalVal)}` : ""}
         </span>
       </div>
 
       <Table columns={[
         { label: "PO No" }, { label: "PR" }, { label: "Project" }, { label: "Supplier" },
-        { label: "Date" }, { label: "Amount", align: "right" }, { label: "Status" }, { label: "Delivery stage" }, { label: "" },
+        { label: "Date" }, ...(canSeeAmount ? [{ label: "Amount", align: "right" }] : []), { label: "Status" }, { label: "Delivery stage" }, { label: "" },
       ]}>
         {pos.length === 0 && <EmptyRow colSpan={9}>No purchase orders match.</EmptyRow>}
         {pos.map((p) => (
@@ -53,7 +55,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
             <Td>{p.project_name || "—"}</Td>
             <Td>{p.po_type === "STOCK" ? <span className="text-[#6366F1]">From stock <span className="text-[11px] text-[#9CA3AF]">@ {p.source_location}</span></span> : p.supplier_name}</Td>
             <Td>{p.po_date?.slice(0, 10)}</Td>
-            <Td align="right">{money(p.amount)}</Td>
+            {canSeeAmount && <Td align="right">{money(p.amount)}</Td>}
             <Td><Badge status={p.status} /></Td>
             <Td>{p.delivery_stage ? <span className="rounded bg-[#FEF3C7] px-2 py-0.5 text-[11px] font-bold text-[#D97706]">{stageLabel(p.delivery_stage)}</span> : <span className="text-[#9CA3AF]">—</span>}</Td>
             <Td align="right"><Btn variant="ghost" small onClick={() => api.po(p.po_no).then(setView)}>Open</Btn></Td>
@@ -62,14 +64,16 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
       </Table>
 
       {view && (
-        <POView po={view} canManage={canManage} canReceive={canReceive} canTrack={canTrack} canCancel={canCancel} busy={busy} setBusy={setBusy} notify={notify}
+        <POView po={view} canManage={canManage} canReceive={canReceive} canTrack={canTrack} canCancel={canCancel}
+          canSeePrice={canSeePrice} canSeeAmount={canSeeAmount}
+          busy={busy} setBusy={setBusy} notify={notify}
           onChanged={(fresh) => { setView(fresh); refresh(); }} onClose={() => setView(null)} />
       )}
     </div>
   );
 }
 
-function POView({ po, canManage, canReceive, canTrack, canCancel, busy, setBusy, notify, onChanged, onClose }) {
+function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, canSeeAmount, busy, setBusy, notify, onChanged, onClose }) {
   const [d, setD] = useState({
     delivery_method: po.delivery_method || "",
     delivery_address: po.delivery_address || "",
@@ -109,7 +113,7 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, busy, setBusy,
 
       <table className="mb-4 w-full border-collapse text-[13px]">
         <thead>
-          <tr>{["Code", "Description", "Qty", "Unit", "Unit price", "Amount"].map((h, i) => (
+          <tr>{["Code", "Description", "Qty", "Unit", ...(canSeePrice ? ["Unit price"] : []), ...(canSeeAmount ? ["Amount"] : [])].map((h, i) => (
             <th key={i} className="border-b border-[#E5E7EB] px-2.5 py-2 text-left text-[10px] font-bold uppercase text-[#9CA3AF]">{h}</th>
           ))}</tr>
         </thead>
@@ -120,15 +124,17 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, busy, setBusy,
               <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.description}</td>
               <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.qty}</td>
               <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.unit}</td>
-              <td className="border-b border-[#F3F4F6] px-2.5 py-2">{money(it.unit_price)}</td>
-              <td className="border-b border-[#F3F4F6] px-2.5 py-2">{money(it.line_total)}</td>
+              {canSeePrice && <td className="border-b border-[#F3F4F6] px-2.5 py-2">{money(it.unit_price)}</td>}
+              {canSeeAmount && <td className="border-b border-[#F3F4F6] px-2.5 py-2">{money(it.line_total)}</td>}
             </tr>
           ))}
         </tbody>
-        <tfoot>
-          <tr><td colSpan={5} className="px-2.5 py-2.5 text-right font-bold text-[#6B7280]">Total</td>
-            <td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{money(po.amount)}</td></tr>
-        </tfoot>
+        {canSeeAmount && (
+          <tfoot>
+            <tr><td colSpan={4 + (canSeePrice ? 1 : 0)} className="px-2.5 py-2.5 text-right font-bold text-[#6B7280]">Total</td>
+              <td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{money(po.amount)}</td></tr>
+          </tfoot>
+        )}
       </table>
 
       {canManage && po.status === "OPEN" && (
