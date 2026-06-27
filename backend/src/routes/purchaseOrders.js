@@ -19,9 +19,13 @@ const fail = (res, code, error) => res.status(code).json({ success: false, error
 async function getPO(poNo, client = db) {
   const { rows } = await client.query("SELECT * FROM purchase_orders WHERE po_no = $1", [poNo]);
   if (!rows[0]) return null;
-  const items = await client.query("SELECT * FROM po_items WHERE po_id=$1 ORDER BY line_no, id", [rows[0].id]);
-  const track = await client.query("SELECT * FROM po_delivery_tracking WHERE po_id=$1", [rows[0].id]);
-  return { ...rows[0], items: items.rows, tracking: track.rows[0] || null };
+  const items  = await client.query("SELECT * FROM po_items WHERE po_id=$1 ORDER BY line_no, id", [rows[0].id]);
+  const track  = await client.query("SELECT * FROM po_delivery_tracking WHERE po_id=$1", [rows[0].id]);
+  const photos = await client.query(
+    "SELECT id, original_name, mime_type, size_bytes, uploaded_by, created_at FROM po_receive_photos WHERE po_id=$1 ORDER BY id",
+    [rows[0].id]
+  );
+  return { ...rows[0], items: items.rows, tracking: track.rows[0] || null, receive_photos: photos.rows };
 }
 
 async function notify(client, rolesList, title, body, type, refPr, refPo) {
@@ -130,21 +134,33 @@ router.put("/:poNo", canDo("generate_po"), async (req, res) => {
   } catch (e) { fail(res, 500, e.message); }
 });
 
-// ── Receive goods = close PO (NO inventory write, per spec) ──
 // ── Set delivery stage (FIC / Supervisor click the tracker) ──
+const BUY_STAGE_ORDER   = ["WITH_VENDOR", "SHIPPED", "ARRIVED_HUB", "RECEIVED_FACTORY"];
+const STOCK_STAGE_ORDER = ["PENDING_ISSUE", "READY_COLLECT", "COLLECTED"];
+
 router.put("/:poNo/delivery-stage", canDo("set_delivery"), async (req, res) => {
   try {
     const po = await getPO(req.params.poNo);
     if (!po) return fail(res, 404, "PO not found");
     if (po.status !== "OPEN") return fail(res, 409, `PO is ${po.status}; delivery stage can only change while OPEN`);
-    const stage = req.body?.stage ?? null; // null clears (deselect)
-    const allowed = ["WITH_VENDOR", "SHIPPED", "ARRIVED_HUB", "RECEIVED_FACTORY"];
-    if (stage !== null && !allowed.includes(stage)) return fail(res, 400, "Invalid delivery stage");
+
+    const stage = req.body?.stage;
+    const stageOrder = po.po_type === "STOCK" ? STOCK_STAGE_ORDER : BUY_STAGE_ORDER;
+
+    if (!stage || !stageOrder.includes(stage))
+      return fail(res, 400, "Invalid delivery stage");
+
+    const currentIdx = po.delivery_stage ? stageOrder.indexOf(po.delivery_stage) : -1;
+    const newIdx     = stageOrder.indexOf(stage);
+
+    if (newIdx <= currentIdx)
+      return fail(res, 400, `Cannot go back to "${stage}" — stages can only move forward`);
+
     await withTransaction(async (c) => {
       await c.query("UPDATE purchase_orders SET delivery_stage=$2 WHERE id=$1", [po.id, stage]);
       await c.query(
         "INSERT INTO po_approvals (po_id, action, actor, actor_role, note) VALUES ($1,'DELIVERY_STAGE',$2,$3,$4)",
-        [po.id, req.user.name, req.user.role, stage || "cleared"]
+        [po.id, req.user.name, req.user.role, stage]
       );
     });
     const updatedPO = await getPO(po.po_no);

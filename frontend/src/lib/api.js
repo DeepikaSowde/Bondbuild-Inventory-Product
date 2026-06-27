@@ -10,6 +10,8 @@ export const api = {
   // reference (PR/PO owns these)
   suppliers: () => data(axiosClient.get("/suppliers")),
   addSupplier: (s) => raw(axiosClient.post("/suppliers", s)),
+  updateSupplier: (id, s) => data(axiosClient.put(`/suppliers/${id}`, s)),
+  deleteSupplier: (id) => data(axiosClient.delete(`/suppliers/${id}`)),
   poProjects: () => data(axiosClient.get("/po-projects")),
   poProject: (jobNo) => data(axiosClient.get(`/po-projects/${enc(jobNo)}`)),
   addPoProject: (p) => raw(axiosClient.post("/po-projects", p)),
@@ -46,6 +48,18 @@ export const api = {
   },
   deleteAttachment: (id) => data(axiosClient.delete(`/purchase-requests/attachments/${id}`)),
   attachmentDownloadPath: (id) => `/purchase-requests/attachments/${id}/download`,
+
+  // PO receiving photos
+  uploadReceivePhotos: (poNo, fileList) => {
+    const fd = new FormData();
+    Array.from(fileList).forEach((f) => fd.append("photos", f));
+    return data(axiosClient.post(`/purchase-orders/${enc(poNo)}/receive-photos`, fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }));
+  },
+  receivePhotos: (poNo) => data(axiosClient.get(`/purchase-orders/${enc(poNo)}/receive-photos`)),
+  receivePhotoBlob: (id) => axiosClient.get(`/purchase-orders/receive-photos/${id}/view`, { responseType: "blob" })
+    .then((r) => URL.createObjectURL(r.data)),
 
   // purchase orders
   pos: (params = {}) => data(axiosClient.get(`/purchase-orders?${new URLSearchParams(params)}`)),

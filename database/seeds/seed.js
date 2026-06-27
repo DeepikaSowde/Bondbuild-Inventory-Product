@@ -26,6 +26,7 @@ const users = [
   },
   {
     name: "Freddy Lim",
+
     username: "freddy",
     password: "Admin@123",
     role: "Purchaser",

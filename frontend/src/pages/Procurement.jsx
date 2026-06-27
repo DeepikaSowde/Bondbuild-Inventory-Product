@@ -7,6 +7,7 @@ import { Toasts } from "../components/ui";
 import PurchaseRequests from "./PurchaseRequests";
 import PurchaseOrders from "./PurchaseOrders";
 import ProcurementExport from "./ProcurementExport";
+import SupplierDirectory from "./SupplierDirectory";
 
 export default function Procurement() {
   const { user } = useAuth();
@@ -35,6 +36,8 @@ export default function Procurement() {
 
   if (!user) return null;
   if (perms === null) return <div className="p-8 text-[#9CA3AF]">Loading…</div>;
+
+  const canEditSuppliers = !!user;
 
   const tabBtn = (key, label) => (
     <button
@@ -65,21 +68,29 @@ export default function Procurement() {
       <div className="mb-[22px] border-b border-[#E5E7EB]">
         {tabBtn("pr", "Purchase requests")}
         {tabBtn("po", "Purchase orders")}
+        {tabBtn("suppliers", "Supplier")}
       </div>
 
-      {tab === "pr" ? (
+      {tab === "pr" && (
         <PurchaseRequests
           user={user}
           perms={perms}
           notify={notify}
           refreshInbox={refreshInbox}
         />
-      ) : (
+      )}
+      {tab === "po" && (
         <PurchaseOrders
           user={user}
           perms={perms}
           notify={notify}
           refreshInbox={refreshInbox}
+        />
+      )}
+      {tab === "suppliers" && (
+        <SupplierDirectory
+          notify={notify}
+          canEdit={canEditSuppliers}
         />
       )}
 

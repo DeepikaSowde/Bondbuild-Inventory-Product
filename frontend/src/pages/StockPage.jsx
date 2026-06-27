@@ -13,7 +13,7 @@
 // Layout/Sidebar component (the flex child that wraps this page),
 // otherwise the page can still stretch. See note at bottom of file.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
 
@@ -208,15 +208,20 @@ export default function StockPage() {
   };
 
   // ── Edit Item modal state ──
-  const [editItem, setEditItem] = useState(null); // the item being edited
-  const [editForm, setEditForm] = useState({
-    quantity_in_stock: "",
-    unit_price: "",
-    remarks: "",
-  });
+  const [editItem, setEditItem] = useState(null);
+  const [editForm, setEditForm] = useState({ quantity_in_stock: "", unit_price: "", remarks: "" });
   const [editError, setEditError] = useState("");
 
-  const openEdit = (item) => {
+  // ── Photo state for edit modal ──
+  const [existingPhotos, setExistingPhotos] = useState([]);   // photos already in DB
+  const [newFiles,       setNewFiles]       = useState([]);   // files picked this session
+  const [previews,       setPreviews]       = useState([]);   // object-URL previews for newFiles
+  const [blobUrls,       setBlobUrls]       = useState({});   // id → blob URL for existing photos
+  const [lightbox,       setLightbox]       = useState(null); // id or preview index open in lightbox
+  const [lightboxSrc,   setLightboxSrc]    = useState(null); // resolved URL for lightbox img
+  const photoInputRef = useRef();
+
+  const openEdit = async (item) => {
     setEditItem(item);
     setEditForm({
       quantity_in_stock: item.quantity_in_stock ?? "",
@@ -224,16 +229,63 @@ export default function StockPage() {
       remarks: item.remarks ?? "",
     });
     setEditError("");
+    // reset photo state
+    setNewFiles([]); setPreviews([]); setBlobUrls({}); setLightbox(null); setLightboxSrc(null);
+    // load existing photos from DB
+    try {
+      const res = await api.get(`/inventory/${item.id}/photos`);
+      const photos = res.data?.data || [];
+      setExistingPhotos(photos);
+      // fetch blob URLs for thumbnails
+      photos.forEach((p) => {
+        api.get(`/inventory/photos/${p.id}/view`, { responseType: "blob" })
+          .then((r) => {
+            const url = URL.createObjectURL(r.data);
+            setBlobUrls((prev) => ({ ...prev, [p.id]: url }));
+          }).catch(() => {});
+      });
+    } catch {
+      setExistingPhotos([]);
+    }
   };
+
+  const closeEdit = () => {
+    // revoke all blob URLs to free memory
+    Object.values(blobUrls).forEach((u) => URL.revokeObjectURL(u));
+    previews.forEach((p) => URL.revokeObjectURL(p.url));
+    setEditItem(null); setExistingPhotos([]); setNewFiles([]); setPreviews([]);
+    setBlobUrls({}); setLightbox(null); setLightboxSrc(null);
+  };
+
+  const handleAddPhotos = (incoming) => {
+    const arr = Array.from(incoming);
+    setNewFiles((prev) => [...prev, ...arr]);
+    setPreviews((prev) => [...prev, ...arr.map((f) => ({ name: f.name, url: URL.createObjectURL(f) }))]);
+  };
+
+  const removeNewPhoto = (idx) => {
+    URL.revokeObjectURL(previews[idx].url);
+    setNewFiles((p)    => p.filter((_, i) => i !== idx));
+    setPreviews((p) => p.filter((_, i) => i !== idx));
+  };
+
+  const removeExistingPhoto = async (photo) => {
+    try {
+      await api.delete(`/inventory/photos/${photo.id}`);
+      URL.revokeObjectURL(blobUrls[photo.id]);
+      setBlobUrls((prev) => { const n = { ...prev }; delete n[photo.id]; return n; });
+      setExistingPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+    } catch { /* silent */ }
+  };
+
+  const openLightbox = (src) => { setLightboxSrc(src); setLightbox(true); };
 
   const handleEditSave = async () => {
     if (String(editForm.quantity_in_stock).trim() === "") {
-      setEditError("Qty is required");
-      return;
+      setEditError("Qty is required"); return;
     }
     if (Number(editForm.quantity_in_stock) < 0) {
-      setEditError("Qty cannot be negative");
-      return;
+      setEditError("Qty cannot be negative"); return;
     }
     try {
       setSaving(true);
@@ -243,12 +295,18 @@ export default function StockPage() {
         unit_price: editForm.unit_price,
         remarks: editForm.remarks,
       });
-      setEditItem(null);
-      await fetchData(); // refresh table
+      // upload any newly selected photos
+      if (newFiles.length) {
+        const fd = new FormData();
+        newFiles.forEach((f) => fd.append("photos", f));
+        await api.post(`/inventory/${editItem.id}/photos`, fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+      }
+      closeEdit();
+      await fetchData();
     } catch (err) {
-      setEditError(
-        err.response?.data?.error || "Failed to update item. Please try again.",
-      );
+      setEditError(err.response?.data?.error || "Failed to update item. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -946,194 +1004,153 @@ export default function StockPage() {
       {/* ── Edit Item Modal (Qty / Unit Price / Remarks) ── */}
       {editItem && (
         <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-            padding: 16,
-          }}
-          onClick={() => !saving && setEditItem(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+          onClick={() => !saving && closeEdit()}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{
-              background: "#fff",
-              borderRadius: 14,
-              width: "100%",
-              maxWidth: 440,
-              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-            }}
+            style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 520, maxHeight: "92vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
           >
             {/* Header */}
-            <div
-              style={{
-                padding: "18px 22px",
-                borderBottom: "1px solid #E5E7EB",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <h3
-                style={{
-                  margin: 0,
-                  fontSize: 16,
-                  fontWeight: 800,
-                  color: "#111827",
-                }}
-              >
-                ✏️ Edit {editItem.item_code}
-              </h3>
-              <button
-                onClick={() => !saving && setEditItem(null)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  fontSize: 20,
-                  cursor: "pointer",
-                  color: "#6B7280",
-                }}
-              >
-                ✕
-              </button>
+            <div style={{ padding: "18px 22px", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#111827" }}>✏️ Edit {editItem.item_code}</h3>
+              <button onClick={() => !saving && closeEdit()} style={{ background: "transparent", border: "none", fontSize: 20, cursor: "pointer", color: "#6B7280" }}>✕</button>
             </div>
 
             {/* Body */}
             <div style={{ padding: "20px 22px" }}>
               {editError && (
-                <div
-                  style={{
-                    background: "#FEF2F2",
-                    border: "1px solid #FECACA",
-                    color: "#B91C1C",
-                    borderRadius: 8,
-                    padding: "9px 12px",
-                    fontSize: 13,
-                    marginBottom: 16,
-                  }}
-                >
+                <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#B91C1C", borderRadius: 8, padding: "9px 12px", fontSize: 13, marginBottom: 16 }}>
                   {editError}
                 </div>
               )}
 
-              {(() => {
-                const lbl = {
-                  display: "block",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: "#374151",
-                  marginBottom: 5,
-                };
-                const inp = {
-                  width: "100%",
-                  padding: "9px 11px",
-                  borderRadius: 8,
-                  border: "1px solid #D1D5DB",
-                  fontSize: 14,
-                  boxSizing: "border-box",
-                  marginBottom: 14,
-                };
-                return (
-                  <>
-                    {/* Read-only context so user knows what they're editing */}
+              {/* Context */}
+              <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>
+                {editItem.profile_name}{editItem.size ? ` · ${editItem.size}` : ""}{editItem.location_code ? ` · ${editItem.location_code}` : ""}
+              </div>
+
+              {/* Fields */}
+              {[
+                { label: "Quantity *", type: "number", key: "quantity_in_stock" },
+                { label: "Unit Price", type: "number", key: "unit_price" },
+                { label: "Remarks", type: "text",   key: "remarks", placeholder: "Optional note" },
+              ].map(({ label, type, key, placeholder }) => (
+                <div key={key}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 5 }}>{label}</label>
+                  <input
+                    type={type}
+                    value={editForm[key]}
+                    onChange={(e) => setEditForm({ ...editForm, [key]: e.target.value })}
+                    placeholder={placeholder || ""}
+                    style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid #D1D5DB", fontSize: 14, boxSizing: "border-box", marginBottom: 14 }}
+                  />
+                </div>
+              ))}
+
+              {/* ── Photo Section ── */}
+              <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: 16, marginTop: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    📷 Photos {(existingPhotos.length + newFiles.length) > 0 && (
+                      <span style={{ background: "#6366F1", color: "#fff", borderRadius: 99, padding: "1px 7px", marginLeft: 6, fontSize: 11 }}>
+                        {existingPhotos.length + newFiles.length}
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    onClick={() => photoInputRef.current?.click()}
+                    style={{ background: "#EEF2FF", border: "1px solid #6366F1", borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 700, color: "#6366F1", cursor: "pointer" }}
+                  >
+                    + Add Photos
+                  </button>
+                </div>
+
+                <input ref={photoInputRef} type="file" accept="image/*" multiple style={{ display: "none" }}
+                  onChange={(e) => { handleAddPhotos(e.target.files); e.target.value = ""; }} />
+
+                {/* Drop zone when empty */}
+                {existingPhotos.length === 0 && newFiles.length === 0 && (
+                  <div
+                    onClick={() => photoInputRef.current?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); handleAddPhotos(e.dataTransfer.files); }}
+                    style={{ border: "2px dashed #C7D2FE", borderRadius: 10, padding: "24px 0", textAlign: "center", color: "#9CA3AF", cursor: "pointer", background: "#F8F9FF" }}
+                  >
+                    <div style={{ fontSize: 28 }}>📷</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>Click or drag photos here</div>
+                    <div style={{ fontSize: 11, marginTop: 2 }}>Any number of images (max 15 MB each)</div>
+                  </div>
+                )}
+
+                {/* Thumbnail grid */}
+                {(existingPhotos.length > 0 || newFiles.length > 0) && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+                    {/* Existing DB photos */}
+                    {existingPhotos.map((p) => (
+                      <div key={p.id} style={{ position: "relative", aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "1px solid #E5E7EB", background: "#F3F4F6", cursor: "pointer" }}
+                        onClick={() => blobUrls[p.id] && openLightbox(blobUrls[p.id])}>
+                        {blobUrls[p.id]
+                          ? <img src={blobUrls[p.id]} alt={p.original_name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, color: "#9CA3AF" }}>⏳</div>
+                        }
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeExistingPhoto(p); }}
+                          style={{ position: "absolute", top: 3, right: 3, width: 18, height: 18, borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none", color: "#fff", fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                        >✕</button>
+                      </div>
+                    ))}
+
+                    {/* New (not yet uploaded) photos */}
+                    {previews.map((p, i) => (
+                      <div key={`new-${i}`} style={{ position: "relative", aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "2px dashed #A5B4FC", background: "#F0F0FF", cursor: "pointer" }}
+                        onClick={() => openLightbox(p.url)}>
+                        <img src={p.url} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeNewPhoto(i); }}
+                          style={{ position: "absolute", top: 3, right: 3, width: 18, height: 18, borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none", color: "#fff", fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                        >✕</button>
+                        <div style={{ position: "absolute", bottom: 2, left: 2, background: "#6366F1", color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 4, padding: "1px 4px" }}>NEW</div>
+                      </div>
+                    ))}
+
+                    {/* Add more tile */}
                     <div
-                      style={{
-                        fontSize: 12,
-                        color: "#6B7280",
-                        marginBottom: 16,
-                      }}
-                    >
-                      {editItem.profile_name}
-                      {editItem.size ? ` · ${editItem.size}` : ""}
-                      {editItem.location_code
-                        ? ` · ${editItem.location_code}`
-                        : ""}
-                    </div>
-
-                    <label style={lbl}>Quantity *</label>
-                    <input
-                      style={inp}
-                      type="number"
-                      value={editForm.quantity_in_stock}
-                      onChange={(e) =>
-                        setEditForm({
-                          ...editForm,
-                          quantity_in_stock: e.target.value,
-                        })
-                      }
-                    />
-
-                    <label style={lbl}>Unit Price</label>
-                    <input
-                      style={inp}
-                      type="number"
-                      value={editForm.unit_price}
-                      onChange={(e) =>
-                        setEditForm({ ...editForm, unit_price: e.target.value })
-                      }
-                    />
-
-                    <label style={lbl}>Remarks</label>
-                    <input
-                      style={inp}
-                      value={editForm.remarks}
-                      onChange={(e) =>
-                        setEditForm({ ...editForm, remarks: e.target.value })
-                      }
-                      placeholder="Optional note"
-                    />
-                  </>
-                );
-              })()}
+                      onClick={() => photoInputRef.current?.click()}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => { e.preventDefault(); handleAddPhotos(e.dataTransfer.files); }}
+                      style={{ aspectRatio: "1", borderRadius: 8, border: "2px dashed #C7D2FE", background: "#F8F9FF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#9CA3AF", fontSize: 24 }}
+                    >+</div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Footer */}
-            <div
-              style={{
-                padding: "14px 22px",
-                borderTop: "1px solid #E5E7EB",
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 10,
-              }}
-            >
-              <button
-                onClick={() => !saving && setEditItem(null)}
-                disabled={saving}
-                style={{
-                  background: "#F3F4F6",
-                  border: "none",
-                  borderRadius: 8,
-                  padding: "9px 18px",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: "#374151",
-                  cursor: saving ? "not-allowed" : "pointer",
-                }}
-              >
+            <div style={{ padding: "14px 22px", borderTop: "1px solid #E5E7EB", display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button onClick={() => !saving && closeEdit()} disabled={saving}
+                style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 700, color: "#374151", cursor: saving ? "not-allowed" : "pointer" }}>
                 Cancel
               </button>
-              <button
-                onClick={handleEditSave}
-                disabled={saving}
-                style={{
-                  background: saving ? "#A5B4FC" : "#6366F1",
-                  border: "none",
-                  borderRadius: 8,
-                  padding: "9px 18px",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: "#fff",
-                  cursor: saving ? "not-allowed" : "pointer",
-                }}
-              >
+              <button onClick={handleEditSave} disabled={saving}
+                style={{ background: saving ? "#A5B4FC" : "#6366F1", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 700, color: "#fff", cursor: saving ? "not-allowed" : "pointer" }}>
                 {saving ? "Saving…" : "Save Changes"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Lightbox ── */}
+      {lightbox && lightboxSrc && (
+        <div onClick={() => setLightbox(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
+            <img src={lightboxSrc} alt="" style={{ maxHeight: "88vh", maxWidth: "88vw", borderRadius: 12, objectFit: "contain", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} />
+            <button onClick={() => setLightbox(null)}
+              style={{ position: "absolute", top: -12, right: -12, width: 30, height: 30, borderRadius: "50%", background: "#fff", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#374151", boxShadow: "0 2px 8px rgba(0,0,0,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              ✕
+            </button>
           </div>
         </div>
       )}

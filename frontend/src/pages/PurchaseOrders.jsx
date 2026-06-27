@@ -1,5 +1,5 @@
 // pages/PurchaseOrders.jsx — Tailwind version
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiError } from "../lib/api";
 import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money } from "../components/ui";
 import { Table, Td } from "../components/Table";
@@ -10,6 +10,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
   const [status, setStatus] = useState("All");
   const [job, setJob] = useState("All");
   const [view, setView] = useState(null);
+  const [receiveTarget, setReceiveTarget] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const isAdmin = user.role === "Admin";
@@ -67,24 +68,50 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
         <POView po={view} canManage={canManage} canReceive={canReceive} canTrack={canTrack} canCancel={canCancel}
           canSeePrice={canSeePrice} canSeeAmount={canSeeAmount}
           busy={busy} setBusy={setBusy} notify={notify}
-          onChanged={(fresh) => { setView(fresh); refresh(); }} onClose={() => setView(null)} />
+          onChanged={(fresh) => { setView(fresh); refresh(); }}
+          onClose={() => setView(null)}
+          onOpenReceive={() => setReceiveTarget(view)} />
+      )}
+
+      {receiveTarget && (
+        <ReceiveModal
+          po={receiveTarget}
+          onClose={() => setReceiveTarget(null)}
+          onConfirmed={async (receivedBy, files) => {
+            setBusy(true);
+            try {
+              if (files.length) await api.uploadReceivePhotos(receiveTarget.po_no, files);
+              await api.receivePO(receiveTarget.po_no, receivedBy);
+              notify("Goods received — PO closed");
+              const fresh = await api.po(receiveTarget.po_no);
+              setView(fresh);
+              refresh();
+              setReceiveTarget(null);
+            } catch (e) {
+              notify(apiError(e), "error");
+            } finally {
+              setBusy(false);
+            }
+          }}
+          busy={busy}
+        />
       )}
     </div>
   );
 }
 
-function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, canSeeAmount, busy, setBusy, notify, onChanged, onClose }) {
+function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, canSeeAmount, busy, setBusy, notify, onChanged, onClose, onOpenReceive }) {
   const [d, setD] = useState({
-    delivery_method: po.delivery_method || "",
-    delivery_address: po.delivery_address || "",
-    required_date: po.required_date || "",
+    delivery_method: po.delivery_method ?? "",
+    delivery_address: po.delivery_address ?? "",
+    required_date: po.required_date ?? "",
     tracking: {
-      fabrication_lead_days: po.tracking?.fabrication_lead_days || "",
-      powder_coating_lead_days: po.tracking?.powder_coating_lead_days || "",
-      shipment_etd: po.tracking?.shipment_etd?.slice(0, 10) || "",
-      shipment_eta: po.tracking?.shipment_eta?.slice(0, 10) || "",
-      freight_forwarder: po.tracking?.freight_forwarder || "",
-      freight_total_cost: po.tracking?.freight_total_cost || "",
+      fabrication_lead_days: po.tracking?.fabrication_lead_days ?? "",
+      powder_coating_lead_days: po.tracking?.powder_coating_lead_days ?? "",
+      shipment_etd: po.tracking?.shipment_etd?.slice(0, 10) ?? "",
+      shipment_eta: po.tracking?.shipment_eta?.slice(0, 10) ?? "",
+      freight_forwarder: po.tracking?.freight_forwarder ?? "",
+      freight_total_cost: po.tracking?.freight_total_cost ?? "",
     },
   });
   const setT = (k, v) => setD((s) => ({ ...s, tracking: { ...s.tracking, [k]: v } }));
@@ -137,7 +164,7 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
         )}
       </table>
 
-      {canManage && po.status === "OPEN" && (
+      {canManage && po.status === "OPEN" && po.po_type !== "STOCK" && (
         <>
           <div className="my-1.5 text-[11px] font-bold uppercase tracking-wide text-[#9CA3AF]">Delivery &amp; lead times</div>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-3">
@@ -165,6 +192,8 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
       <DeliveryTracker po={po} canTrack={canTrack && po.status === "OPEN"} busy={busy}
         onSet={(stage) => act(() => api.setDeliveryStage(po.po_no, stage), stage ? "Delivery stage updated" : "Stage cleared")} />
 
+      <PhotoGallery photos={po.receive_photos || []} />
+
       <div className="mt-5 flex justify-end gap-2.5">
         {canManage && po.status === "OPEN" && (
           <Btn variant="soft" disabled={busy} onClick={() => act(() => api.updatePO(po.po_no, d), "Saved")}>Save details</Btn>
@@ -173,7 +202,7 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
           <Btn variant="danger" disabled={busy} onClick={() => act(() => api.cancelPO(po.po_no, ""), "PO cancelled")}>Cancel PO</Btn>
         )}
         {canReceive && po.status === "OPEN" && (
-          <Btn variant="success" disabled={busy} onClick={() => act(() => api.receivePO(po.po_no, ""), "Goods received — PO closed")}>Receive goods (close)</Btn>
+          <Btn variant="success" disabled={busy} onClick={onOpenReceive}>✅ Receive goods (close)</Btn>
         )}
       </div>
     </Modal>
@@ -181,50 +210,292 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
 }
 
 // Delivery stage labels (DB key → display name)
-export const STAGES = [
-  { key: "WITH_VENDOR", label: "With Vendor", icon: "🏭", desc: "Order confirmed, vendor processing / fabricating" },
-  { key: "SHIPPED", label: "In Transit", icon: "🚢", desc: "Goods dispatched / in transit to Singapore" },
-  { key: "ARRIVED_HUB", label: "Arrived at Hub", icon: "📦", desc: "Arrived at port / forwarder / warehouse hub" },
-  { key: "RECEIVED_FACTORY", label: "Received", icon: "✅", desc: "Goods delivered & received at factory / site" },
+export const BUY_STAGES = [
+  { key: "WITH_VENDOR",      label: "With Vendor",    icon: "🏭", desc: "Order confirmed, vendor processing / fabricating" },
+  { key: "SHIPPED",          label: "In Transit",     icon: "🚢", desc: "Goods dispatched / in transit to Singapore" },
+  { key: "ARRIVED_HUB",     label: "Arrived at Hub", icon: "📦", desc: "Arrived at port / forwarder / warehouse hub" },
+  { key: "RECEIVED_FACTORY", label: "Received",       icon: "✅", desc: "Goods delivered & received at factory / site" },
 ];
+
+export const STOCK_STAGES = [
+  { key: "PENDING_ISSUE",  label: "Pending Issue",     icon: "⏳", desc: "Waiting for factory in-charge to prepare and pick items" },
+  { key: "READY_COLLECT",  label: "Ready to Collect",  icon: "📋", desc: "Items picked & ready for collection at factory / warehouse" },
+  { key: "COLLECTED",      label: "Collected",          icon: "✅", desc: "Items collected from factory / site" },
+];
+
+export const STAGES = [...BUY_STAGES, ...STOCK_STAGES];
 export const stageLabel = (key) => STAGES.find((s) => s.key === key)?.label || "—";
 
 function DeliveryTracker({ po, canTrack, busy, onSet }) {
-  const current = po.delivery_stage;
-  const currentIdx = STAGES.findIndex((s) => s.key === current);
+  const isStock    = po.po_type === "STOCK";
+  const stages     = isStock ? STOCK_STAGES : BUY_STAGES;
+  const current    = po.delivery_stage;
+  const currentIdx = stages.findIndex((s) => s.key === current);
+
   return (
     <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
       <div className="mb-3 flex items-center justify-between">
-        <span className="text-[14px] font-extrabold text-[#1E1B4B]">🚚 Delivery Status Tracker</span>
+        <span className="text-[14px] font-extrabold text-[#1E1B4B]">
+          {isStock ? "🏭 Collection Status Tracker" : "🚚 Delivery Status Tracker"}
+        </span>
         <span className="rounded-full bg-[#FEF3C7] px-3 py-1 text-[12px] font-bold text-[#D97706]">
           Current: {current ? stageLabel(current) : "Not started"}
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {STAGES.map((s, i) => {
-          const done = currentIdx > -1 && i < currentIdx;
+
+      <div className={`grid gap-3 ${isStock ? "grid-cols-3" : "grid-cols-2 md:grid-cols-4"}`}>
+        {stages.map((s, i) => {
+          const isPast    = currentIdx > -1 && i < currentIdx;
           const isCurrent = s.key === current;
+          const isFuture  = i > currentIdx;
+          // Only future stages are clickable
+          const clickable = canTrack && !busy && isFuture;
+
           const base = "rounded-xl border p-3 text-center transition-all";
-          const cls = isCurrent
-            ? "border-[#D97706] bg-[#D97706] text-white"
-            : done
-            ? "border-[#C7D2FE] bg-[#EEF2FF] text-[#6366F1]"
-            : "border-[#E5E7EB] bg-white text-[#9CA3AF]";
+          const cls  = isCurrent
+            ? "border-[#D97706] bg-[#D97706] text-white cursor-default"
+            : isPast
+            ? "border-[#D1D5DB] bg-[#F3F4F6] text-[#9CA3AF] cursor-not-allowed opacity-70"
+            : clickable
+            ? "border-[#E5E7EB] bg-white text-[#374151] cursor-pointer hover:border-[#6366F1] hover:shadow-md"
+            : "border-[#E5E7EB] bg-white text-[#9CA3AF] cursor-default";
+
           return (
-            <button key={s.key} disabled={!canTrack || busy}
-              onClick={() => onSet(isCurrent ? null : s.key)}
-              title={canTrack ? "Click to set current stage (click again to clear)" : ""}
-              className={`${base} ${cls} ${canTrack ? "cursor-pointer hover:shadow-md" : "cursor-default"}`}>
-              <div className="text-[22px]">{s.icon}</div>
-              <div className={`mt-1 text-[13px] font-bold ${isCurrent ? "text-white" : done ? "text-[#6366F1]" : "text-[#374151]"}`}>{s.label}</div>
-              <div className={`mt-0.5 text-[10px] leading-tight ${isCurrent ? "text-white/90" : "text-[#9CA3AF]"}`}>{s.desc}</div>
+            <button
+              key={s.key}
+              disabled={!clickable}
+              onClick={() => clickable && onSet(s.key)}
+              title={
+                isPast    ? "Already passed — cannot go back"
+                : isCurrent ? "Current stage"
+                : canTrack  ? "Click to advance to this stage"
+                : ""
+              }
+              className={`${base} ${cls}`}
+            >
+              <div className="text-[22px]">{isPast ? "✓" : s.icon}</div>
+              <div className={`mt-1 text-[13px] font-bold ${isCurrent ? "text-white" : isPast ? "text-[#9CA3AF]" : "text-[#374151]"}`}>
+                {s.label}
+              </div>
+              <div className={`mt-0.5 text-[10px] leading-tight ${isCurrent ? "text-white/90" : "text-[#9CA3AF]"}`}>
+                {s.desc}
+              </div>
               {isCurrent && <div className="mt-1.5 rounded bg-white/25 px-2 py-0.5 text-[10px] font-bold">● CURRENT</div>}
-              {done && <div className="mt-1.5 text-[11px] font-bold text-[#6366F1]">✓ Done</div>}
+              {isPast    && <div className="mt-1.5 text-[11px] font-bold text-[#6B7280]">✓ Done</div>}
             </button>
           );
         })}
       </div>
-      {canTrack && <div className="mt-2 text-center text-[11px] text-[#9CA3AF]">Click a stage to set current delivery status · click again to deselect</div>}
+
+      {canTrack && (
+        <div className="mt-2 text-center text-[11px] text-[#9CA3AF]">
+          Click a future stage to advance · completed stages are locked
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Receive goods modal ─────────────────────────────────────────────────────
+function ReceiveModal({ po, onClose, onConfirmed, busy }) {
+  const [receivedBy, setReceivedBy] = useState("");
+  const [files, setFiles]           = useState([]);
+  const [previews, setPreviews]     = useState([]);
+  const fileRef                     = useRef();
+
+  const handleFiles = (incoming) => {
+    const arr = Array.from(incoming);
+    setFiles((prev) => {
+      const merged = [...prev, ...arr];
+      setPreviews(merged.map((f) => ({ name: f.name, url: URL.createObjectURL(f) })));
+      return merged;
+    });
+  };
+
+  const removePhoto = (idx) => {
+    URL.revokeObjectURL(previews[idx].url);
+    setFiles((p)    => p.filter((_, i) => i !== idx));
+    setPreviews((p) => p.filter((_, i) => i !== idx));
+  };
+
+  const summary = po.items?.map((it) => `${it.description} ${it.qty} ${it.unit}`).join(" · ") || "";
+
+  return (
+    <Modal title="Confirm Goods Received" onClose={onClose} wide>
+      <div className="space-y-4 p-1">
+        {/* PO summary box */}
+        <div className="rounded-xl border border-[#E5E7EB] bg-[#F8F9FF] p-4">
+          <div className="text-[15px] font-extrabold text-[#1E1B4B]">{po.po_no}</div>
+          {po.delivery_address && <div className="mt-0.5 text-[12px] uppercase text-[#6B7280]">{po.delivery_address}</div>}
+          {summary && <div className="mt-1 text-[12px] text-[#374151]">{summary}</div>}
+        </div>
+
+        {/* Info notices */}
+        <div className="rounded-xl border border-[#D1FAE5] bg-[#ECFDF5] px-4 py-3 text-[13px] text-[#065F46]">
+          ✅ This will mark the PO as <strong>CLOSED</strong>, record goods received on <strong>{new Date().toISOString().slice(0, 10)}</strong>, and update factory stock.
+        </div>
+        <div className="rounded-xl border border-[#DBEAFE] bg-[#EFF6FF] px-4 py-3 text-[13px] text-[#1E40AF]">
+          🔔 <strong>Site Supervisor will be notified</strong> — please ensure supervisor confirms receipt of goods.
+        </div>
+
+        {/* Received by */}
+        <Field label="Received by (Factory In-charge name)">
+          <Input
+            value={receivedBy}
+            onChange={(e) => setReceivedBy(e.target.value)}
+            placeholder="Enter your name"
+          />
+        </Field>
+
+        {/* Photo upload */}
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-[#9CA3AF]">
+              📷 Receiving Photos {files.length > 0 && <span className="ml-1 rounded-full bg-[#6366F1] px-2 py-0.5 text-white">{files.length}</span>}
+            </span>
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="cursor-pointer rounded-lg border border-[#6366F1] bg-[#EEF2FF] px-3 py-1.5 text-[12px] font-semibold text-[#6366F1] hover:bg-[#6366F1] hover:text-white transition"
+            >
+              + Add Photos
+            </button>
+          </div>
+
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }}
+          />
+
+          {/* Drop zone (when no photos yet) */}
+          {previews.length === 0 && (
+            <div
+              onClick={() => fileRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
+              className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#C7D2FE] bg-[#F8F9FF] py-8 text-[#9CA3AF] hover:border-[#6366F1] hover:bg-[#EEF2FF] transition"
+            >
+              <div className="text-3xl">📷</div>
+              <div className="mt-2 text-[13px] font-semibold">Click or drag photos here</div>
+              <div className="text-[11px]">Any number of images (max 15 MB each)</div>
+            </div>
+          )}
+
+          {/* Thumbnails */}
+          {previews.length > 0 && (
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
+              {previews.map((p, i) => (
+                <div key={i} className="group relative aspect-square overflow-hidden rounded-lg border border-[#E5E7EB] bg-[#F3F4F6]">
+                  <img src={p.url} alt={p.name} className="h-full w-full object-cover" />
+                  <button
+                    onClick={() => removePhoto(i)}
+                    className="absolute right-1 top-1 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full bg-black/60 text-[10px] text-white opacity-0 transition group-hover:opacity-100"
+                  >✕</button>
+                </div>
+              ))}
+              {/* Add more tile */}
+              <div
+                onClick={() => fileRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
+                className="flex aspect-square cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#C7D2FE] bg-[#F8F9FF] text-[#9CA3AF] hover:border-[#6366F1] hover:bg-[#EEF2FF] transition"
+              >
+                <span className="text-2xl">+</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex justify-end gap-2 pt-1">
+          <Btn variant="ghost" onClick={onClose} disabled={busy}>Cancel</Btn>
+          <Btn
+            variant="success"
+            disabled={busy}
+            onClick={() => onConfirmed(receivedBy, files)}
+          >
+            {busy ? "Saving…" : "✅ Confirm Goods Received"}
+          </Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Receiving photos gallery (shown inside closed PO detail) ──────────────
+function PhotoGallery({ photos }) {
+  const [blobUrls, setBlobUrls]     = useState({});
+  const [lightbox, setLightbox]     = useState(null);
+
+  useEffect(() => {
+    if (!photos.length) return;
+    let alive = true;
+    photos.forEach((p) => {
+      api.receivePhotoBlob(p.id).then((url) => {
+        if (alive) setBlobUrls((prev) => ({ ...prev, [p.id]: url }));
+      }).catch(() => {});
+    });
+    return () => { alive = false; };
+  }, [photos]);
+
+  if (!photos.length) return null;
+
+  return (
+    <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+      <div className="mb-3 text-[13px] font-extrabold text-[#1E1B4B]">📷 Receiving Photos ({photos.length})</div>
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+        {photos.map((p) => (
+          <div
+            key={p.id}
+            onClick={() => blobUrls[p.id] && setLightbox(p.id)}
+            className="aspect-square cursor-pointer overflow-hidden rounded-lg border border-[#E5E7EB] bg-[#F3F4F6] hover:opacity-90 transition"
+            title={p.original_name}
+          >
+            {blobUrls[p.id]
+              ? <img src={blobUrls[p.id]} alt={p.original_name} className="h-full w-full object-cover" />
+              : <div className="flex h-full w-full items-center justify-center text-[#9CA3AF] text-xl">⏳</div>
+            }
+          </div>
+        ))}
+      </div>
+
+      {/* Lightbox */}
+      {lightbox && blobUrls[lightbox] && (
+        <div
+          onClick={() => setLightbox(null)}
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80"
+        >
+          <div className="relative max-h-[90vh] max-w-[90vw]">
+            <img
+              src={blobUrls[lightbox]}
+              alt=""
+              className="max-h-[90vh] max-w-[90vw] rounded-xl object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              onClick={() => setLightbox(null)}
+              className="absolute -right-3 -top-3 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-white text-[#374151] shadow-lg hover:bg-[#F3F4F6]"
+            >✕</button>
+            {/* Prev / Next */}
+            {photos.length > 1 && (() => {
+              const idx  = photos.findIndex((p) => p.id === lightbox);
+              const prev = photos[idx - 1];
+              const next = photos[idx + 1];
+              return (
+                <>
+                  {prev && <button onClick={(e) => { e.stopPropagation(); setLightbox(prev.id); }}
+                    className="absolute left-[-44px] top-1/2 -translate-y-1/2 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-white shadow-lg hover:bg-[#F3F4F6] text-[#374151]">‹</button>}
+                  {next && <button onClick={(e) => { e.stopPropagation(); setLightbox(next.id); }}
+                    className="absolute right-[-44px] top-1/2 -translate-y-1/2 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-white shadow-lg hover:bg-[#F3F4F6] text-[#374151]">›</button>}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

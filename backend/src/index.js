@@ -58,6 +58,7 @@ app.use("/api/import", importRoutes);
 // Inventory Routes
 const inventoryRoutes = require("./routes/inventory");
 app.use("/api/inventory", inventoryRoutes);
+app.use("/api/inventory", require("./routes/inventoryPhotos"));
 
 // Users Routes
 const userRoutes = require("./routes/users");
@@ -75,7 +76,9 @@ app.use("/api/projects", projectsRoutes);
 // PR / PO module
 app.use("/api", require("./routes/poReference"));
 app.use("/api/purchase-requests", require("./routes/purchaseRequests"));
+app.use("/api/purchase-requests", require("./routes/prAttachments"));
 app.use("/api/purchase-orders", require("./routes/purchaseOrders"));
+app.use("/api/purchase-orders", require("./routes/poReceivePhotos"));
 app.use("/api/pr-po-permissions", require("./routes/prPoPermissions"));
 app.use("/api/purchase-orders", require("./routes/purchaseOrdersImport"));
 app.use("/api/import", require("./routes/poImport"));
