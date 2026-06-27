@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { Toasts } from "../components/ui";
 import PurchaseRequests from "./PurchaseRequests";
 import PurchaseOrders from "./PurchaseOrders";
+import ProcurementExport from "./ProcurementExport";
 
 export default function Procurement() {
   const { user } = useAuth();
@@ -19,38 +20,68 @@ export default function Procurement() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4500);
   }, []);
 
-  const refreshInbox = useCallback(() => { api.notifications().catch(() => {}); }, []);
-  useEffect(() => { refreshInbox(); }, []);
-  useEffect(() => { api.myPermissions().then(setPerms).catch(() => setPerms({})); }, []);
+  const refreshInbox = useCallback(() => {
+    api.notifications().catch(() => {});
+  }, []);
+  useEffect(() => {
+    refreshInbox();
+  }, []);
+  useEffect(() => {
+    api
+      .myPermissions()
+      .then(setPerms)
+      .catch(() => setPerms({}));
+  }, []);
 
   if (!user) return null;
   if (perms === null) return <div className="p-8 text-[#9CA3AF]">Loading…</div>;
 
   const tabBtn = (key, label) => (
-    <button onClick={() => setTab(key)}
+    <button
+      onClick={() => setTab(key)}
       className={`mr-6 cursor-pointer border-none bg-transparent px-1 py-2.5 text-[15px] font-bold transition-colors
-        ${tab === key ? "border-b-[3px] border-[#6366F1] text-[#6366F1]" : "border-b-[3px] border-transparent text-[#6B7280]"}`}>
+        ${tab === key ? "border-b-[3px] border-[#6366F1] text-[#6366F1]" : "border-b-[3px] border-transparent text-[#6B7280]"}`}
+    >
       {label}
     </button>
   );
 
   return (
     <div className="p-8 font-['DM_Sans',sans-serif] text-[#374151]">
-      <h1 className="m-0 text-2xl font-extrabold text-[#1E1B4B]">Procurement</h1>
-      <p className="mb-4 mt-1 text-[13px] text-[#6B7280]">
-        {tab === "pr"
-          ? "Drafter raises · Manager approves · Purchaser assigns suppliers · Factory In-charge issues stock"
-          : "One PO per supplier · self-collect shows supplier address · receiving closes the PO"}
-      </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="m-0 text-2xl font-extrabold text-[#1E1B4B]">
+            Procurement
+          </h1>
+          <p className="mb-4 mt-1 text-[13px] text-[#6B7280]">
+            {tab === "pr"
+              ? "Drafter raises · Manager approves · Purchaser assigns suppliers · Factory In-charge issues stock"
+              : "One PO per supplier · self-collect shows supplier address · receiving closes the PO"}
+          </p>
+        </div>
+        <ProcurementExport />
+      </div>
 
       <div className="mb-[22px] border-b border-[#E5E7EB]">
         {tabBtn("pr", "Purchase requests")}
         {tabBtn("po", "Purchase orders")}
       </div>
 
-      {tab === "pr"
-        ? <PurchaseRequests user={user} perms={perms} notify={notify} refreshInbox={refreshInbox} />
-        : <PurchaseOrders user={user} perms={perms} notify={notify} refreshInbox={refreshInbox} />}
+      {tab === "pr" ? (
+        <PurchaseRequests
+          user={user}
+          perms={perms}
+          notify={notify}
+          refreshInbox={refreshInbox}
+        />
+      ) : (
+        <PurchaseOrders
+          user={user}
+          perms={perms}
+          notify={notify}
+          refreshInbox={refreshInbox}
+        />
+      )}
 
       <Toasts items={toasts} />
     </div>
