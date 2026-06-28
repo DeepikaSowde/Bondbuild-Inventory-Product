@@ -110,11 +110,12 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // --- Resolve profile_id (look up by name, create if missing) ---
+    // --- Resolve profile_id (look up by name or code, create if missing) ---
     let profileId = null;
+    const profileCode = String(item_code).substring(0, 2).toUpperCase();
     const profileResult = await pool.query(
-      "SELECT id FROM inventory_profiles WHERE profile_name = $1",
-      [profile_name],
+      "SELECT id FROM inventory_profiles WHERE profile_name = $1 OR profile_code = $2 LIMIT 1",
+      [profile_name, profileCode],
     );
     if (profileResult.rows.length > 0) {
       profileId = profileResult.rows[0].id;
@@ -123,7 +124,7 @@ router.post("/", async (req, res) => {
         `INSERT INTO inventory_profiles (profile_code, profile_name, status)
          VALUES ($1, $2, 'Active')
          RETURNING id`,
-        [String(item_code).substring(0, 2), profile_name],
+        [profileCode, profile_name],
       );
       profileId = createProfile.rows[0].id;
     }
