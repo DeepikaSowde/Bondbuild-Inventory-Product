@@ -69,6 +69,146 @@ router.get("/", async (req, res) => {
 });
 
 // ================================================================================
+// POST /api/inventory - Create a NEW inventory item (Add Item)
+// ================================================================================
+
+router.post("/", async (req, res) => {
+  try {
+    const {
+      location_code,
+      item_code, // this is the "Profile Code" (e.g. LA-051)
+      profile_name,
+      size,
+      length,
+      quantity_in_stock,
+      unit_price,
+      remarks,
+    } = req.body;
+
+    // --- Validate required fields (all required except remarks) ---
+    const missing = [];
+    if (!location_code) missing.push("Location");
+    if (!item_code) missing.push("Profile Code");
+    if (!profile_name) missing.push("Profile");
+    if (size === undefined || size === null || size === "")
+      missing.push("Size");
+    if (length === undefined || length === null || length === "")
+      missing.push("Length");
+    if (
+      quantity_in_stock === undefined ||
+      quantity_in_stock === null ||
+      quantity_in_stock === ""
+    )
+      missing.push("Qty");
+    if (unit_price === undefined || unit_price === null || unit_price === "")
+      missing.push("Unit Price");
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields: " + missing.join(", "),
+      });
+    }
+
+    // --- Resolve profile_id (look up by name, create if missing) ---
+    let profileId = null;
+    const profileResult = await pool.query(
+      "SELECT id FROM inventory_profiles WHERE profile_name = $1",
+      [profile_name],
+    );
+    if (profileResult.rows.length > 0) {
+      profileId = profileResult.rows[0].id;
+    } else {
+      const createProfile = await pool.query(
+        `INSERT INTO inventory_profiles (profile_code, profile_name, status)
+         VALUES ($1, $2, 'Active')
+         RETURNING id`,
+        [String(item_code).substring(0, 2), profile_name],
+      );
+      profileId = createProfile.rows[0].id;
+    }
+
+    // --- Resolve location_id (look up by code, create if missing) ---
+    let locationId = null;
+    const locationResult = await pool.query(
+      "SELECT id FROM storage_locations WHERE location_code = $1",
+      [location_code],
+    );
+    if (locationResult.rows.length > 0) {
+      locationId = locationResult.rows[0].id;
+    } else {
+      const createLocation = await pool.query(
+        `INSERT INTO storage_locations (location_code, location_name, location_type, status)
+         VALUES ($1, $2, 'Pallet', 'Active')
+         RETURNING id`,
+        [location_code, location_code],
+      );
+      locationId = createLocation.rows[0].id;
+    }
+
+    // --- Compute derived values ---
+    const qty = parseInt(quantity_in_stock) || 0;
+    const price = parseFloat(unit_price) || 0;
+    const totalValue = qty * price;
+
+    let stockStatus = "OK";
+    if (qty === 0) stockStatus = "OUT_OF_STOCK";
+    else if (qty <= 10) stockStatus = "LOW_STOCK";
+
+    // --- Insert the new item (item_name not used) ---
+    const insertResult = await pool.query(
+      `INSERT INTO inventory (
+        item_code, location_id, location_code, profile_id,
+        profile_name, size, length, quantity_in_stock, unit_price,
+        total_value, stock_status, low_stock_threshold, reorder_quantity,
+        remarks, is_active, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW()
+      )
+      RETURNING *`,
+      [
+        item_code,
+        locationId,
+        location_code,
+        profileId,
+        profile_name,
+        size || null,
+        parseFloat(length) || 0,
+        qty,
+        price,
+        totalValue,
+        stockStatus,
+        10, // low_stock_threshold
+        50, // reorder_quantity
+        remarks || null,
+        true, // is_active
+      ],
+    );
+
+    console.log(`✅ New item created: ${item_code}`);
+
+    res.status(201).json({
+      success: true,
+      data: insertResult.rows[0],
+      message: "Item created successfully",
+    });
+  } catch (err) {
+    // Unique violation on item_code
+    if (err.code === "23505") {
+      return res.status(409).json({
+        success: false,
+        error: `Profile Code "${req.body.item_code}" already exists`,
+      });
+    }
+    console.error("❌ Error creating item:", err.message);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// ================================================================================
 // GET /api/inventory/:id - Get single inventory item
 // ================================================================================
 
