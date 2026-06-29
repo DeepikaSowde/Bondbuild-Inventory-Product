@@ -16,6 +16,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
+import * as XLSX from "xlsx";
 
 // Default permissions for each role
 const DEFAULT_PERMISSIONS = {
@@ -418,6 +419,29 @@ export default function StockPage() {
     return isNaN(num) ? "0.00" : num.toFixed(2);
   };
 
+  const exportToExcel = () => {
+    const rows = filteredInventory.map((item) => {
+      const row = {
+        Location: item.location_code,
+        "Profile Code": item.item_code,
+        Profile: item.profile_name,
+        Size: item.size,
+        Length: item.length,
+        Quantity: item.quantity_in_stock,
+        Status: item.stock_status,
+        Remarks: item.remarks ?? "",
+      };
+      if (permissions.view_unit_price) row["Unit Price (SGD)"] = formatPrice(item.unit_price);
+      if (permissions.view_total_value) row["Total Value (SGD)"] = formatPrice(item.total_value);
+      return row;
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Inventory");
+    XLSX.writeFile(wb, `inventory_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   return (
     <div style={{ padding: "32px" }}>
       {/* Header */}
@@ -450,6 +474,7 @@ export default function StockPage() {
           {/* Export button - visible to all */}
           {permissions.export_excel && (
             <button
+              onClick={exportToExcel}
               style={{
                 background: "#10B981",
                 color: "#fff",
