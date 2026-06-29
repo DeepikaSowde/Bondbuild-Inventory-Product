@@ -13,6 +13,7 @@ export default function LoginPage() {
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
+  const [remember, setRemember] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -24,7 +25,7 @@ export default function LoginPage() {
     }
     setLoading(true);
     try {
-      await login(username.trim(), password);
+      await login(username.trim(), password, remember);
       setError("");
       navigate("/home");
     } catch (err) {
@@ -199,6 +200,17 @@ export default function LoginPage() {
               </button>
             </div>
           </div>
+
+          {/* Remember Me */}
+          <label className="flex items-center gap-2 mb-4 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="w-4 h-4 rounded accent-indigo-500 cursor-pointer"
+            />
+            <span className="text-xs text-gray-400">Remember me</span>
+          </label>
 
           {/* Sign In Button */}
           <button

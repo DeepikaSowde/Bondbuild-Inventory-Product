@@ -104,28 +104,34 @@ END; $$;
 
 -- A7. Helper function: next Buy PO number
 CREATE OR REPLACE FUNCTION next_po_no(p_job TEXT, p_pr TEXT) RETURNS TEXT LANGUAGE plpgsql AS $$
-DECLARE v INTEGER;
+DECLARE
+  v_yy     TEXT    := TO_CHAR(NOW(), 'YY');
+  v_mm     TEXT    := TO_CHAR(NOW(), 'MM');
+  v_prefix TEXT    := v_yy || v_mm || 'P';
+  v_seq    INTEGER;
 BEGIN
-  SELECT COALESCE(MAX(
-    CAST(REGEXP_REPLACE(po_no, '.*-PO', '') AS INTEGER)
-  ), 0) + 1
-  INTO v
+  SELECT COALESCE(MAX(CAST(SUBSTRING(po_no FROM '[0-9]+$') AS INTEGER)), 0) + 1
+  INTO v_seq
   FROM purchase_orders
-  WHERE job_no = p_job AND po_type = 'BUY';
-  RETURN p_job || '-PO' || LPAD(v::TEXT, 2, '0');
+  WHERE po_type = 'BUY'
+    AND po_no ~ (v_prefix || '[0-9]+$');
+  RETURN p_job || '/' || p_pr || '/' || v_yy || '/' || v_prefix || LPAD(v_seq::TEXT, 3, '0');
 END; $$;
 
 -- A8. Helper function: next Stock PO number
 CREATE OR REPLACE FUNCTION next_stock_po_no(p_job TEXT, p_pr TEXT) RETURNS TEXT LANGUAGE plpgsql AS $$
-DECLARE v INTEGER;
+DECLARE
+  v_yy     TEXT    := TO_CHAR(NOW(), 'YY');
+  v_mm     TEXT    := TO_CHAR(NOW(), 'MM');
+  v_prefix TEXT    := v_yy || v_mm || 'S';
+  v_seq    INTEGER;
 BEGIN
-  SELECT COALESCE(MAX(
-    CAST(REGEXP_REPLACE(po_no, '.*-STOCK', '') AS INTEGER)
-  ), 0) + 1
-  INTO v
+  SELECT COALESCE(MAX(CAST(SUBSTRING(po_no FROM '[0-9]+$') AS INTEGER)), 0) + 1
+  INTO v_seq
   FROM purchase_orders
-  WHERE job_no = p_job AND po_type = 'STOCK';
-  RETURN p_job || '-STOCK' || LPAD(v::TEXT, 2, '0');
+  WHERE po_type = 'STOCK'
+    AND po_no ~ (v_prefix || '[0-9]+$');
+  RETURN p_job || '/' || p_pr || '/' || v_yy || '/' || v_prefix || LPAD(v_seq::TEXT, 3, '0');
 END; $$;
 
 -- A9. Purchase Requests

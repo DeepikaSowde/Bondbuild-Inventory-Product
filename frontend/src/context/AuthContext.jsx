@@ -9,7 +9,7 @@ export function AuthProvider({ children }) {
 
   // Check if user already logged in
   useEffect(() => {
-    const token = localStorage.getItem("bb_token");
+    const token = localStorage.getItem("bb_token") || sessionStorage.getItem("bb_token");
     if (token) {
       api
         .get("/auth/me")
@@ -21,17 +21,20 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  // Login function
-  const login = async (username, password) => {
+  const login = async (username, password, remember = false) => {
     const res = await api.post("/auth/login", { username, password });
-    localStorage.setItem("bb_token", res.data.token);
+    if (remember) {
+      localStorage.setItem("bb_token", res.data.token);
+    } else {
+      sessionStorage.setItem("bb_token", res.data.token);
+    }
     setUser(res.data.user);
     return res.data.user;
   };
 
-  // Logout function
   const logout = () => {
     localStorage.removeItem("bb_token");
+    sessionStorage.removeItem("bb_token");
     setUser(null);
   };
 
