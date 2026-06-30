@@ -2074,7 +2074,7 @@ export default function ProjectProgressModule() {
       if (c[p.status] !== undefined) c[p.status]++;
     });
     return c;
-  }, []);
+  }, [RAW_PROJECTS]);
 
   const projectOpts = [
     { v: "all", l: "All Projects" },
