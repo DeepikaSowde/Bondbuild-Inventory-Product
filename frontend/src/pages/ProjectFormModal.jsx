@@ -221,6 +221,16 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setError("Project name is required");
       return;
     }
+    const contractSum = num(form.contract_sum);
+    const downPayment = num(form.down_payment);
+    if (contractSum > 0 && downPayment > contractSum) {
+      setError(`Down payment ($${Math.round(downPayment).toLocaleString()}) cannot exceed contract sum ($${Math.round(contractSum).toLocaleString()})`);
+      return;
+    }
+    if (contractSum > 0 && calc.totalReceived > contractSum) {
+      setError(`Total received ($${Math.round(calc.totalReceived).toLocaleString()}) exceeds contract sum ($${Math.round(contractSum).toLocaleString()}). Reduce the monthly received amounts.`);
+      return;
+    }
     setSaving(true);
     setError(null);
 
@@ -400,7 +410,14 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
             <div>
               <label style={lbl}>Down Payment ($)</label>
               <input
-                style={inp}
+                style={{
+                  ...inp,
+                  borderColor:
+                    num(form.down_payment) > num(form.contract_sum) &&
+                    num(form.contract_sum) > 0
+                      ? C.red
+                      : C.border,
+                }}
                 type="number"
                 value={form.down_payment}
                 onChange={(e) =>
@@ -408,6 +425,12 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                 }
                 placeholder="0"
               />
+              {num(form.down_payment) > num(form.contract_sum) &&
+                num(form.contract_sum) > 0 && (
+                  <div style={{ fontSize: 11, color: C.red, marginTop: 4 }}>
+                    Cannot exceed contract sum
+                  </div>
+                )}
             </div>
             <div>
               <label style={lbl}>Down Payment Month</label>
@@ -586,7 +609,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                 c: C.purple,
               },
               { l: "Total Received", v: fmt(calc.totalReceived), c: C.green },
-              { l: "Balance", v: fmt(calc.balance), c: C.amber },
+              { l: "Balance", v: fmt(calc.balance), c: calc.balance < 0 ? C.red : C.amber },
             ].map((x) => (
               <div
                 key={x.l}
