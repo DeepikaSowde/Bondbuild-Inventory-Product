@@ -1388,6 +1388,7 @@ function CollectionGauge({ pct }) {
   const arcY = (deg) => cy + r * Math.sin(toRad(deg));
   const endDeg = startAngle + angle;
   const largeArc = angle > 180 ? 1 : 0;
+  const display = (pct * 100).toFixed(1);
   const color = pct >= 0.8 ? C.green : pct >= 0.5 ? C.blue : C.amber;
   return (
     <div
@@ -1423,7 +1424,7 @@ function CollectionGauge({ pct }) {
           fontWeight={700}
           fill={color}
         >
-          {Math.round(pct * 100)}%
+          {display}%
         </text>
         <text
           x={cx}
