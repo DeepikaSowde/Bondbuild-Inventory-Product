@@ -135,6 +135,9 @@ function AppContent() {
   // HIDE on: Login, Setup, HomePage
   const showSidebar = !isAuthPage && !isHomePage && user;
 
+  // Derive active tab from current route
+  const activeTab = pathname === "/HomePage" ? "home" : pathname.slice(1);
+
   return (
     <div className="flex min-h-screen bg-gray-50">
       {/* Sidebar - NOW PASSES currentUser PROP! */}
@@ -144,7 +147,7 @@ function AppContent() {
           alertCount={0}
           inboxCount={0}
           setShowAlerts={() => {}}
-          tab="home"
+          tab={activeTab}
           setTab={() => {}}
           showHome={false}
           setShowHome={() => {}}
