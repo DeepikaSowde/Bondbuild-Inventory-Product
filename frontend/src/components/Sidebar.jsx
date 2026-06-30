@@ -150,7 +150,7 @@ export default function Sidebar({
         <NavItem id="dashboard" icon="📊" label="Dashboard" path="/dashboard" />
 
         {/* ── SECTION 2: MODULES ── */}
-        <SectionLabel label=" " />
+        <SectionLabel label="Modules" />
 
         {/* Inventory */}
         <NavItem id="stock" icon="📦" label="Inventory" path="/stock" sub />
