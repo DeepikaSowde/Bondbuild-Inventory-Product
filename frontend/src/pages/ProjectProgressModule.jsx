@@ -1191,8 +1191,7 @@ const C = {
 };
 
 // ─── FORMULA ENGINE ──────────────────────────────────────────────────────────
-const computeBalance = (p) =>
-  p.contractSum - Object.values(p.receivedMonthly).reduce((s, v) => s + v, 0);
+const computeBalance = (p) => p.contractSum - p.totalReceived;
 const computeClaimTillDate = (p) =>
   Object.values(p.claimedMonthly).reduce((s, v) => s + v, 0);
 const computeTotalTargetPct = (p) =>
