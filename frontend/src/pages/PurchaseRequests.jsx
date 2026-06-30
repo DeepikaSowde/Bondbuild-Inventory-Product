@@ -258,7 +258,15 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                   <label className={lbl}>S/N</label>
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#C7D2FE] bg-[#EEF2FF] text-[15px] font-extrabold text-[#6366F1]">{i + 1}</div>
                 </div>
-                <div><label className={lbl}>Description *</label><input className={inp} value={it.description} onChange={(e) => setItem(i, "description", e.target.value)} placeholder="e.g. L-Angle 25x75x2.8mm" /></div>
+                <div>
+                  <label className={lbl}>
+                    Description *
+                    <span className={`ml-1 font-normal normal-case tracking-normal ${it.description.length > 450 ? "text-[#DC2626]" : "text-[#9CA3AF]"}`}>
+                      ({it.description.length}/500)
+                    </span>
+                  </label>
+                  <input className={inp} value={it.description} maxLength={500} onChange={(e) => setItem(i, "description", e.target.value)} placeholder="e.g. L-Angle 25x75x2.8mm" />
+                </div>
                 <div><label className={lbl}>Colour</label><input className={inp} value={it.colour} onChange={(e) => setItem(i, "colour", e.target.value)} placeholder="e.g. SS, RAL 7016" /></div>
               </div>
 
