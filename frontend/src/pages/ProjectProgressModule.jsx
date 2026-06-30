@@ -1696,7 +1696,7 @@ export default function ProjectProgressModule() {
       totalContract: filtered.reduce((s, p) => s + p.contractSum, 0),
       totalReceived: filtered.reduce((s, p) => s + p.totalReceived, 0),
       totalPending: filtered.reduce(
-        (s, p) => s + Math.max(0, computeBalance(p)),
+        (s, p) => s + Math.max(0, p.contractSum - p.totalReceived),
         0,
       ),
       totalClaimed: filtered.reduce(

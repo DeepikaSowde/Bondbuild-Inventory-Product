@@ -101,7 +101,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   const blankItem = () => ({
     profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
     remarks: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
-    stock_qty: "", inventory_id: "", stock_location: "", buy_qty: "",
+    stock_qty: "", inventory_id: "", stock_location: "", buy_qty: "", available_stock_qty: "",
   });
   const [form, setForm] = useState(() => editPR ? {
     job_no: editPR.job_no, project_name: editPR.project_name || "", location: editPR.location || "",
@@ -125,7 +125,30 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   const [stockList, setStockList] = useState([]);      // factory stock rows
   const [stockLoaded, setStockLoaded] = useState(false);
 
-  const setItem = (i, key, val) => setForm((f) => ({ ...f, items: f.items.map((it, x) => (x === i ? { ...it, [key]: val } : it)) }));
+  const setItem = (i, key, val) => setForm((f) => ({
+    ...f,
+    items: f.items.map((it, x) => {
+      if (x !== i) return it;
+      const updated = { ...it, [key]: val };
+      if (key === "qty") {
+        const total = Number(val) || 0;
+        const avail = Number(it.available_stock_qty) || 0;
+        const maxStock = avail > 0 ? Math.min(total, avail) : 0;
+        const stock = Math.min(Number(it.stock_qty) || 0, maxStock);
+        updated.stock_qty = it.inventory_id ? String(stock) : it.stock_qty;
+        updated.buy_qty = String(Math.max(0, total - (Number(updated.stock_qty) || 0)));
+      }
+      if (key === "stock_qty") {
+        const total = Number(it.qty) || 0;
+        const avail = Number(it.available_stock_qty) || 0;
+        const max = avail > 0 ? Math.min(total, avail) : total;
+        const capped = Math.min(Math.max(0, Number(val) || 0), max);
+        updated.stock_qty = String(capped);
+        updated.buy_qty = String(Math.max(0, total - capped));
+      }
+      return updated;
+    }),
+  }));
   const removeItem = (i) => setForm((f) => ({ ...f, items: f.items.filter((_, x) => x !== i) }));
   const addItem = () => setForm((f) => ({ ...f, items: [...f.items, blankItem()] }));
 
@@ -145,14 +168,23 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
 
   // "Use from Stock": link the inventory row, pre-fill From-Stock qty, set code/description
   const useFromStock = (i, s) => {
-    setForm((f) => ({ ...f, items: f.items.map((it, x) => x === i ? {
-      ...it,
-      inventory_id: s.id,
-      stock_location: s.location_code,
-      profile_code: s.item_code || it.profile_code,
-      description: it.description || [s.profile_name, s.size].filter(Boolean).join(" "),
-      stock_qty: it.stock_qty || Math.min(Number(it.qty) || s.quantity_in_stock, s.quantity_in_stock),
-    } : it) }));
+    setForm((f) => ({ ...f, items: f.items.map((it, x) => {
+      if (x !== i) return it;
+      const total = Number(it.qty) || 0;
+      const avail = Number(s.quantity_in_stock) || 0;
+      const stock = Math.min(total, avail);
+      const buy = Math.max(0, total - stock);
+      return {
+        ...it,
+        inventory_id: s.id,
+        stock_location: s.location_code,
+        profile_code: s.item_code || it.profile_code,
+        description: it.description || [s.profile_name, s.size].filter(Boolean).join(" "),
+        available_stock_qty: String(avail),
+        stock_qty: String(stock),
+        buy_qty: String(buy),
+      };
+    }) }));
     setStockOpen(null);
   };
 
@@ -251,12 +283,18 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
               <div className="grid grid-cols-[1fr_140px_140px] items-end gap-2.5 px-3 pb-2">
                 <div><label className={lbl}>Remarks</label><input className={inp} value={it.remarks} onChange={(e) => setItem(i, "remarks", e.target.value)} placeholder="e.g. URGENT, Preference (P&M)" /></div>
                 <div>
-                  <label className={lbl}>From stock {it.stock_location && <span className="text-[#059669]">@ {it.stock_location}</span>}</label>
-                  <input type="number" min="0" className={inp} value={it.stock_qty} disabled={!it.inventory_id} title={it.inventory_id ? "" : "Use 'Use from Stock' below to link an item"} onChange={(e) => setItem(i, "stock_qty", e.target.value)} placeholder={it.inventory_id ? "" : "use stock ↓"} />
+                  <label className={lbl}>From stock {it.stock_location && <span className="text-[#059669]">@ {it.stock_location}</span>}{it.available_stock_qty !== "" && <span className="text-[#9CA3AF]"> (avail: {it.available_stock_qty})</span>}</label>
+                  <input type="number" min="0"
+                    max={it.available_stock_qty !== "" ? Math.min(totalQty, Number(it.available_stock_qty)) : totalQty}
+                    className={inp} value={it.stock_qty}
+                    disabled={!it.inventory_id}
+                    title={it.inventory_id ? `Max: ${Math.min(totalQty, Number(it.available_stock_qty) || totalQty)}` : "Use 'Use from Stock' below to link an item"}
+                    onChange={(e) => setItem(i, "stock_qty", e.target.value)}
+                    placeholder={it.inventory_id ? "" : "use stock ↓"} />
                 </div>
                 <div>
-                  <label className={lbl}>Buy qty {totalQty > 0 && <span className="text-[#9CA3AF]">(auto {autoBuy})</span>}</label>
-                  <input type="number" min="0" className={inp} value={it.buy_qty} onChange={(e) => setItem(i, "buy_qty", e.target.value)} placeholder={String(autoBuy)} />
+                  <label className={lbl}>Buy qty <span className="text-[#9CA3AF]">(auto)</span></label>
+                  <input type="number" className={`${inp} bg-[#F9FAFB] cursor-not-allowed`} value={autoBuy} readOnly title="Auto-calculated: Total Qty − Stock Qty" />
                 </div>
               </div>
 
