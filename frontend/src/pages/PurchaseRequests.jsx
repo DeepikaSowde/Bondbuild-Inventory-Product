@@ -217,7 +217,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   const inp = "w-full box-border border border-[#E5E7EB] rounded-lg px-2.5 py-2 text-[12px] outline-none bg-white focus:border-[#6366F1]";
 
   return (
-    <Modal wide title={editPR ? `Edit ${editPR.pr_no}` : `New purchase request · ${nextNo}`} onClose={onClose}>
+    <Modal wide noBackdropClose title={editPR ? `Edit ${editPR.pr_no}` : `New purchase request · ${nextNo}`} onClose={onClose}>
       {editPR?.rejection_reason && (
         <div className="mb-3.5 rounded-lg bg-[#FFF7E6] px-3.5 py-2.5 text-[13px] text-[#92400E]">Sent back: {editPR.rejection_reason}</div>
       )}
