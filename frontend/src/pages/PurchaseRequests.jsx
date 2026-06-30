@@ -322,7 +322,10 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                             return (
                               <tr key={s.id}>
                                 <td className="border-b border-[#F3F4F6] px-2.5 py-1.5">{s.location_code || "—"}</td>
-                                <td className="border-b border-[#F3F4F6] px-2.5 py-1.5 font-mono text-[#6366F1]">{s.item_code}</td>
+                                <td className="border-b border-[#F3F4F6] px-2.5 py-1.5">
+                                  <span className="font-mono text-[#6366F1]">{s.item_code}</span>
+                                  {s.profile_name && <div className="text-[10px] text-[#9CA3AF] mt-0.5">{s.profile_name}</div>}
+                                </td>
                                 <td className="border-b border-[#F3F4F6] px-2.5 py-1.5">{s.size || s.item_name || "—"}</td>
                                 <td className="border-b border-[#F3F4F6] px-2.5 py-1.5 font-bold text-[#059669]">{s.quantity_in_stock}</td>
                                 <td className="border-b border-[#F3F4F6] px-2.5 py-1.5">
