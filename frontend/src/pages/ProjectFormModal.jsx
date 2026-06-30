@@ -189,15 +189,17 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     const sumT = Object.values(target).reduce((s, v) => s + num(v) / 100, 0);
     const sumC = Object.values(claimed).reduce((s, v) => s + num(v) / 100, 0);
     const sumR = Object.values(received).reduce((s, v) => s + num(v), 0);
-    // Site progress = cumulative achieved % up to today (whole-percent number)
     const autoSitePct = cumulativeAchievedPct(achieved);
+    const totalClaimedRaw = downPct + sumC;
     return {
-      totalTarget: Math.min(sumT, 1), // targets only (down payment excluded)
-      totalClaimed: Math.min(downPct + sumC, 1),
+      totalTarget: Math.min(sumT, 1),
+      totalClaimed: Math.min(totalClaimedRaw, 1),
+      totalClaimedRaw,
+      claimedMonthlySum: sumC,
       totalReceived: downAmt + sumR,
       balance: contract - (downAmt + sumR),
       downPct,
-      autoSitePct, // 0..100
+      autoSitePct,
     };
   }, [
     form.contract_sum,
@@ -229,6 +231,17 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     }
     if (contractSum > 0 && calc.totalReceived > contractSum) {
       setError(`Total received ($${Math.round(calc.totalReceived).toLocaleString()}) exceeds contract sum ($${Math.round(contractSum).toLocaleString()}). Reduce the monthly received amounts.`);
+      return;
+    }
+    const monthsClaimedWithoutTarget = Object.keys(claimed).filter(
+      (m) => num(claimed[m]) > 0 && !(num(target[m]) > 0)
+    );
+    if (monthsClaimedWithoutTarget.length > 0) {
+      setError(`Claimed % requires Target % to be set first for: ${monthsClaimedWithoutTarget.slice(0, 3).join(", ")}${monthsClaimedWithoutTarget.length > 3 ? "…" : ""}`);
+      return;
+    }
+    if (calc.claimedMonthlySum > 1) {
+      setError(`Monthly Claimed % total is ${Math.round(calc.claimedMonthlySum * 100)}% — cannot exceed 100%`);
       return;
     }
     setSaving(true);
@@ -570,9 +583,17 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                     onChange={(e) => setMonth(setAchieved)(m, e.target.value)}
                   />
                   <input
-                    style={{ ...inp, padding: "5px 8px" }}
+                    style={{
+                      ...inp,
+                      padding: "5px 8px",
+                      ...(!(num(target[m]) > 0)
+                        ? { opacity: 0.35, cursor: "not-allowed", background: "#0c0e16" }
+                        : {}),
+                    }}
                     type="number"
                     placeholder="—"
+                    disabled={!(num(target[m]) > 0)}
+                    title={!(num(target[m]) > 0) ? "Set Target % first" : ""}
                     value={claimed[m] ?? ""}
                     onChange={(e) => setMonth(setClaimed)(m, e.target.value)}
                   />
@@ -605,8 +626,8 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
               },
               {
                 l: "Total Claimed %",
-                v: `${Math.round(calc.totalClaimed * 100)}%`,
-                c: C.purple,
+                v: `${Math.round(calc.totalClaimedRaw * 100)}%`,
+                c: calc.totalClaimedRaw > 1 ? C.red : C.purple,
               },
               { l: "Total Received", v: fmt(calc.totalReceived), c: C.green },
               { l: "Balance", v: fmt(calc.balance), c: calc.balance < 0 ? C.red : C.amber },
