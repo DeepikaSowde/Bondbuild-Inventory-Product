@@ -2798,7 +2798,7 @@ export default function ProjectProgressModule() {
                   <ResponsiveContainer width="100%" height={120}>
                     <AreaChart
                       data={velocityData}
-                      margin={{ top: 5, right: 0, left: 0, bottom: 0 }}
+                      margin={{ top: 5, right: 16, left: 16, bottom: 0 }}
                     >
                       <defs>
                         <linearGradient
