@@ -215,21 +215,24 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     achieved,
   ]);
 
-  // Running cumulative claimed vs target per month (order = MONTHS array)
+  // Running cumulative sums per month — used for both target and achieved checks
   const cumulativeCheck = useMemo(() => {
-    let cumT = 0, cumC = 0;
+    let cumT = 0, cumC = 0, cumA = 0;
     const result = {};
     MONTHS.forEach((m) => {
       cumT += num(target[m]);
       cumC += num(claimed[m]);
+      cumA += num(achieved[m]);
       result[m] = {
         cumTarget: cumT,
         cumClaimed: cumC,
-        exceeds: cumC > cumT + 0.01 && cumC > 0,
+        cumAchieved: cumA,
+        exceedsTarget:   cumC > cumT + 0.01 && cumC > 0,
+        exceedsAchieved: cumA > 0 && cumC > cumA + 0.01,
       };
     });
     return result;
-  }, [target, claimed]);
+  }, [target, claimed, achieved]);
 
   const setMonth = (setter) => (month, val) =>
     setter((prev) => {
@@ -321,11 +324,19 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       );
       return;
     }
-    const monthsClaimedExceedsAchieved = MONTHS.filter(
-      (m) => num(claimed[m]) > 0 && num(achieved[m]) > 0 && num(claimed[m]) > num(achieved[m])
-    );
-    if (monthsClaimedExceedsAchieved.length > 0) {
-      setError(`Claimed % exceeds Achieved % for: ${monthsClaimedExceedsAchieved.slice(0, 3).join(", ")}`);
+    let cumA = 0, cumC2 = 0, achievedViolation = null;
+    for (const m of MONTHS) {
+      cumA += num(achieved[m]);
+      cumC2 += num(claimed[m]);
+      if (cumA > 0 && cumC2 > cumA + 0.01 && cumC2 > 0) {
+        achievedViolation = { month: m, cumAchieved: cumA, cumClaimed: cumC2 };
+        break;
+      }
+    }
+    if (achievedViolation) {
+      setError(
+        `Cumulative Claimed (${Math.round(achievedViolation.cumClaimed)}%) exceeds Cumulative Achieved (${Math.round(achievedViolation.cumAchieved)}%) at ${achievedViolation.month}. You can only claim work that has been achieved.`
+      );
       return;
     }
     const totalClaimedSum = Object.values(claimed).reduce((s, v) => s + num(v), 0);
@@ -700,8 +711,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                       padding: "5px 8px",
                       ...(!(num(target[m]) > 0)
                         ? { opacity: 0.35, cursor: "not-allowed", background: "#0c0e16" }
-                        : cumulativeCheck[m]?.exceeds ||
-                          (num(claimed[m]) > num(achieved[m]) && num(achieved[m]) > 0)
+                        : cumulativeCheck[m]?.exceedsTarget || cumulativeCheck[m]?.exceedsAchieved
                         ? { borderColor: C.red }
                         : {}),
                     }}
@@ -712,10 +722,10 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                     title={
                       !(num(target[m]) > 0)
                         ? "Set Target % first"
-                        : cumulativeCheck[m]?.exceeds
+                        : cumulativeCheck[m]?.exceedsTarget
                         ? `Cumulative Claimed (${cumulativeCheck[m].cumClaimed.toFixed(1)}%) exceeds Cumulative Target (${cumulativeCheck[m].cumTarget.toFixed(1)}%) at this month`
-                        : num(claimed[m]) > num(achieved[m]) && num(achieved[m]) > 0
-                        ? "Claimed % cannot exceed Achieved %"
+                        : cumulativeCheck[m]?.exceedsAchieved
+                        ? `Cumulative Claimed (${cumulativeCheck[m].cumClaimed.toFixed(1)}%) exceeds Cumulative Achieved (${cumulativeCheck[m].cumAchieved.toFixed(1)}%) at this month`
                         : ""
                     }
                     value={claimed[m] ?? ""}
