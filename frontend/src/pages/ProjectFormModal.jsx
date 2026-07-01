@@ -244,6 +244,25 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setError(`Claimed % requires Target % to be set first for: ${monthsClaimedWithoutTarget.slice(0, 3).join(", ")}${monthsClaimedWithoutTarget.length > 3 ? "…" : ""}`);
       return;
     }
+    const monthsClaimedExceedsTarget = MONTHS.filter(
+      (m) => num(claimed[m]) > 0 && num(target[m]) > 0 && num(claimed[m]) > num(target[m])
+    );
+    if (monthsClaimedExceedsTarget.length > 0) {
+      setError(`Claimed % exceeds Target % for: ${monthsClaimedExceedsTarget.slice(0, 3).join(", ")}`);
+      return;
+    }
+    const monthsClaimedExceedsAchieved = MONTHS.filter(
+      (m) => num(claimed[m]) > 0 && num(achieved[m]) > 0 && num(claimed[m]) > num(achieved[m])
+    );
+    if (monthsClaimedExceedsAchieved.length > 0) {
+      setError(`Claimed % exceeds Achieved % for: ${monthsClaimedExceedsAchieved.slice(0, 3).join(", ")}`);
+      return;
+    }
+    const totalClaimedSum = Object.values(claimed).reduce((s, v) => s + num(v), 0);
+    if (totalClaimedSum > calc.autoSitePct && calc.autoSitePct > 0) {
+      setError(`Total Claimed (${Math.round(totalClaimedSum)}%) cannot exceed Site Progress (${Math.round(calc.autoSitePct)}%)`);
+      return;
+    }
     if (calc.claimedMonthlySum > 1) {
       setError(`Monthly Claimed % total is ${Math.round(calc.claimedMonthlySum * 100)}% — cannot exceed 100%`);
       return;
@@ -416,6 +435,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
               <input
                 style={inp}
                 type="number"
+                min="0"
                 value={form.contract_sum}
                 onChange={(e) =>
                   setForm({ ...form, contract_sum: e.target.value })
@@ -435,6 +455,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                       : C.border,
                 }}
                 type="number"
+                min="0"
                 value={form.down_payment}
                 onChange={(e) =>
                   setForm({ ...form, down_payment: e.target.value })
@@ -590,6 +611,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                   <input
                     style={{ ...inp, padding: "5px 8px" }}
                     type="number"
+                    min="0"
                     placeholder="—"
                     value={target[m] ?? ""}
                     onChange={(e) => setMonth(setTarget)(m, e.target.value)}
@@ -597,6 +619,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                   <input
                     style={{ ...inp, padding: "5px 8px" }}
                     type="number"
+                    min="0"
                     placeholder="—"
                     value={achieved[m] ?? ""}
                     onChange={(e) => setMonth(setAchieved)(m, e.target.value)}
@@ -607,18 +630,31 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                       padding: "5px 8px",
                       ...(!(num(target[m]) > 0)
                         ? { opacity: 0.35, cursor: "not-allowed", background: "#0c0e16" }
+                        : (num(claimed[m]) > num(target[m]) && num(target[m]) > 0) ||
+                          (num(claimed[m]) > num(achieved[m]) && num(achieved[m]) > 0)
+                        ? { borderColor: C.red }
                         : {}),
                     }}
                     type="number"
+                    min="0"
                     placeholder="—"
                     disabled={!(num(target[m]) > 0)}
-                    title={!(num(target[m]) > 0) ? "Set Target % first" : ""}
+                    title={
+                      !(num(target[m]) > 0)
+                        ? "Set Target % first"
+                        : num(claimed[m]) > num(target[m]) && num(target[m]) > 0
+                        ? "Claimed % cannot exceed Target %"
+                        : num(claimed[m]) > num(achieved[m]) && num(achieved[m]) > 0
+                        ? "Claimed % cannot exceed Achieved %"
+                        : ""
+                    }
                     value={claimed[m] ?? ""}
                     onChange={(e) => setMonth(setClaimed)(m, e.target.value)}
                   />
                   <input
                     style={{ ...inp, padding: "5px 8px" }}
                     type="number"
+                    min="0"
                     placeholder="—"
                     value={received[m] ?? ""}
                     onChange={(e) => setMonth(setReceived)(m, e.target.value)}

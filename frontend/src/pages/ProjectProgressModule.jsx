@@ -4014,7 +4014,7 @@ export default function ProjectProgressModule() {
                         ) : (
                           sorted.map((p, i) => {
                             const bal = Math.max(0, computeBalance(p));
-                            const cc = computeClaimTillDate(p);
+                            const cc = p.totalClaimedPct;
                             const ct = Math.min(1, computeTotalTargetPct(p));
                             const risk = computeRisk(p);
                             const siteColor =
