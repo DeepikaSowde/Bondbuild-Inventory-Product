@@ -13,6 +13,7 @@
  */
 
 import { useState, useMemo, useEffect } from "react";
+import ExcelJS from "exceljs";
 import api from "../services/api";
 import ProjectFormModal from "./ProjectFormModal";
 import {
@@ -56,6 +57,7 @@ import {
   Plus,
   Pencil,
   Trash2,
+  Download,
 } from "lucide-react";
 
 // ─── DATA ────────────────────────────────────────────────────────────────────
@@ -1675,6 +1677,7 @@ export default function ProjectProgressModule() {
   const [sortCol, setSortCol] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
   const [activeTab, setActiveTab] = useState("overview");
+  const [exporting, setExporting] = useState(false);
 
   // ── Filtered set ──
   const filtered = useMemo(
@@ -2038,6 +2041,262 @@ export default function ProjectProgressModule() {
     [filtered, sortCol, sortDir],
   );
 
+  const exportToExcel = async () => {
+    setExporting(true);
+    try {
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "Bond Build SG";
+      wb.created = new Date();
+
+      const ws = wb.addWorksheet("Project Report", {
+        views: [{ state: "frozen", xSplit: 2, ySplit: 3 }],
+        pageSetup: { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1 },
+      });
+
+      const SUMMARY_COLS = [
+        { header: "S.No",                width: 6  },
+        { header: "Project Name",         width: 26 },
+        { header: "Status",               width: 14 },
+        { header: "Risk Level",           width: 11 },
+        { header: "Contract\nSum ($)",    width: 15 },
+        { header: "Down\nPayment ($)",    width: 14 },
+        { header: "Down Payment\nMonth",  width: 14 },
+        { header: "Site\nProgress (%)",   width: 13 },
+        { header: "Claim Till\nDate (%)", width: 13 },
+        { header: "Total\nClaimed ($)",   width: 15 },
+        { header: "Total\nReceived ($)",  width: 15 },
+        { header: "Balance ($)",          width: 14 },
+      ];
+      const totalCols = SUMMARY_COLS.length + ALL_MONTHS.length * 4;
+
+      // ── Shared style helpers ──
+      const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
+      const navyFill  = fill("FF1E3A5F");
+      const navy2Fill = fill("FF162E4D");
+      const totalFill = fill("FF0D2540");
+      const rowFills  = [fill("FFFFFFFF"), fill("FFF0F5FF")];
+
+      const font = (size, bold, argb = "FF1A1A2E") => ({ name: "Calibri", size, bold, color: { argb } });
+      const headerFont = font(10, true, "FFFFFFFF");
+      const dataFont   = font(10, false);
+      const totalFont  = font(10, true, "FFFFFFFF");
+
+      const thinBorder = (colorArgb = "FFD0D8E8") => ({
+        top:    { style: "thin", color: { argb: colorArgb } },
+        left:   { style: "thin", color: { argb: colorArgb } },
+        bottom: { style: "thin", color: { argb: colorArgb } },
+        right:  { style: "thin", color: { argb: colorArgb } },
+      });
+      const navyBorder = thinBorder("FF2A4A6F");
+      const boldTop    = { ...thinBorder("FF2A4A6F"), top: { style: "medium", color: { argb: "FF2A4A6F" } }, bottom: { style: "medium", color: { argb: "FF2A4A6F" } } };
+
+      // ── Row 1: Title ──
+      const today = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+      const titleRow = ws.addRow([`Bond Build SG  |  Project Management Report  |  Exported: ${today}`]);
+      titleRow.height = 34;
+      ws.mergeCells(1, 1, 1, totalCols);
+      const t1 = ws.getCell(1, 1);
+      t1.font = font(14, true, "FFFFFFFF");
+      t1.fill = navyFill;
+      t1.alignment = { vertical: "middle", horizontal: "center" };
+      for (let c = 2; c <= totalCols; c++) ws.getCell(1, c).fill = navyFill;
+
+      // ── Row 2: Thin navy divider ──
+      ws.addRow([]);
+      ws.getRow(2).height = 5;
+      for (let c = 1; c <= totalCols; c++) ws.getCell(2, c).fill = navyFill;
+
+      // ── Row 3: Column headers ──
+      const headerVals = [
+        ...SUMMARY_COLS.map((c) => c.header),
+        ...ALL_MONTHS.flatMap((m) => [`${m}\nTarget %`, `${m}\nAchieved %`, `${m}\nClaimed %`, `${m}\nReceived ($)`]),
+      ];
+      ws.addRow(headerVals);
+      ws.getRow(3).height = 44;
+
+      SUMMARY_COLS.forEach((col, i) => {
+        const cell = ws.getCell(3, i + 1);
+        cell.font = headerFont;
+        cell.fill = navyFill;
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+        cell.border = navyBorder;
+        ws.getColumn(i + 1).width = col.width;
+      });
+      ALL_MONTHS.forEach((m, mi) => {
+        const base = SUMMARY_COLS.length + mi * 4;
+        const hFill = mi % 2 === 0 ? navyFill : navy2Fill;
+        for (let c = base + 1; c <= base + 4; c++) {
+          const cell = ws.getCell(3, c);
+          cell.font = font(9, true, "FFFFFFFF");
+          cell.fill = hFill;
+          cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+          cell.border = navyBorder;
+        }
+        ws.getColumn(base + 1).width = 9;
+        ws.getColumn(base + 2).width = 10;
+        ws.getColumn(base + 3).width = 9;
+        ws.getColumn(base + 4).width = 12;
+      });
+
+      // Status & risk color maps
+      const statusStyle = {
+        "Completed":        { bg: "FF052E16", fg: "FF86EFAC" },
+        "Closed":           { bg: "FF0C1A3A", fg: "FF93C5FD" },
+        "In Progress":      { bg: "FF1C1500", fg: "FFFDE68A" },
+        "Upcoming Project": { bg: "FF1E2130", fg: "FFC4C9D8" },
+      };
+      const riskFg = { high: "FFF87171", medium: "FFFBBF24", low: "FF4ADE80" };
+
+      // ── Data rows ──
+      filtered.forEach((p, idx) => {
+        const bgFill = rowFills[idx % 2];
+        const balance = (p.contractSum || 0) - (p.totalReceived || 0);
+        const totalClaimed = (p.contractSum || 0) * (p.totalClaimedPct || 0);
+
+        const row = ws.addRow([
+          idx + 1,
+          p.name,
+          p.status,
+          (p.riskLevel || "low").charAt(0).toUpperCase() + (p.riskLevel || "low").slice(1),
+          p.contractSum || 0,
+          p.downPayment || 0,
+          p.down_payment_month || "",
+          p.siteProgress || 0,
+          p.totalClaimedPct || 0,
+          totalClaimed,
+          p.totalReceived || 0,
+          balance,
+          ...ALL_MONTHS.flatMap((m) => [
+            p.targetMonthly[m]                  || "",
+            (p.achievedMonthly || {})[m]         || "",
+            p.claimedMonthly[m]                 || "",
+            p.receivedMonthly[m]                || "",
+          ]),
+        ]);
+        row.height = 20;
+
+        // Base fill + border on all cells
+        for (let c = 1; c <= totalCols; c++) {
+          const cell = row.getCell(c);
+          cell.fill = bgFill;
+          cell.font = { ...dataFont };
+          cell.border = thinBorder();
+        }
+
+        // S.No
+        row.getCell(1).alignment = { vertical: "middle", horizontal: "center" };
+        // Project Name
+        row.getCell(2).alignment = { vertical: "middle", horizontal: "left" };
+        // Status (colored)
+        const sc = statusStyle[p.status] || statusStyle["Upcoming Project"];
+        const statCell = row.getCell(3);
+        statCell.font = font(10, true, sc.fg);
+        statCell.fill = fill(sc.bg);
+        statCell.alignment = { vertical: "middle", horizontal: "center" };
+        // Risk (colored text)
+        row.getCell(4).font = font(10, true, riskFg[(p.riskLevel || "low").toLowerCase()] || riskFg.low);
+        row.getCell(4).alignment = { vertical: "middle", horizontal: "center" };
+        // Contract Sum
+        row.getCell(5).numFmt = "$#,##0";
+        row.getCell(5).alignment = { vertical: "middle", horizontal: "right" };
+        // Down Payment
+        row.getCell(6).numFmt = "$#,##0";
+        row.getCell(6).alignment = { vertical: "middle", horizontal: "right" };
+        // Down Payment Month
+        row.getCell(7).alignment = { vertical: "middle", horizontal: "center" };
+        // Site Progress
+        row.getCell(8).numFmt = "0.0%";
+        row.getCell(8).alignment = { vertical: "middle", horizontal: "center" };
+        // Claim Till Date
+        row.getCell(9).numFmt = "0.0%";
+        row.getCell(9).alignment = { vertical: "middle", horizontal: "center" };
+        // Total Claimed $
+        row.getCell(10).numFmt = "$#,##0";
+        row.getCell(10).alignment = { vertical: "middle", horizontal: "right" };
+        // Total Received $
+        row.getCell(11).numFmt = "$#,##0";
+        row.getCell(11).alignment = { vertical: "middle", horizontal: "right" };
+        // Balance (red if negative)
+        const balCell = row.getCell(12);
+        balCell.numFmt = "$#,##0";
+        balCell.alignment = { vertical: "middle", horizontal: "right" };
+        if (balance < 0) balCell.font = font(10, true, "FFDC2626");
+
+        // Monthly columns
+        ALL_MONTHS.forEach((m, mi) => {
+          const base = SUMMARY_COLS.length + mi * 4;
+          const tCell = row.getCell(base + 1);
+          const aCell = row.getCell(base + 2);
+          const cCell = row.getCell(base + 3);
+          const rCell = row.getCell(base + 4);
+          if (tCell.value !== "") { tCell.numFmt = "0.0%"; tCell.alignment = { vertical: "middle", horizontal: "center" }; }
+          if (aCell.value !== "") { aCell.numFmt = "0.0%"; aCell.alignment = { vertical: "middle", horizontal: "center" }; }
+          if (cCell.value !== "") { cCell.numFmt = "0.0%"; cCell.alignment = { vertical: "middle", horizontal: "center" }; }
+          if (rCell.value !== "") { rCell.numFmt = "$#,##0"; rCell.alignment = { vertical: "middle", horizontal: "right" }; }
+        });
+      });
+
+      // ── Totals row ──
+      const n = filtered.length;
+      const tContract  = filtered.reduce((s, p) => s + (p.contractSum || 0), 0);
+      const tDown      = filtered.reduce((s, p) => s + (p.downPayment || 0), 0);
+      const tClaimed   = filtered.reduce((s, p) => s + (p.contractSum || 0) * (p.totalClaimedPct || 0), 0);
+      const tReceived  = filtered.reduce((s, p) => s + (p.totalReceived || 0), 0);
+      const tBalance   = filtered.reduce((s, p) => s + (p.contractSum || 0) - (p.totalReceived || 0), 0);
+      const avgSite    = n > 0 ? filtered.reduce((s, p) => s + (p.siteProgress || 0), 0) / n : 0;
+      const avgClaim   = n > 0 ? filtered.reduce((s, p) => s + (p.totalClaimedPct || 0), 0) / n : 0;
+
+      const totRow = ws.addRow([
+        "", `TOTALS  (${n} project${n !== 1 ? "s" : ""})`, "", "",
+        tContract, tDown, "", avgSite, avgClaim, tClaimed, tReceived, tBalance,
+        ...ALL_MONTHS.flatMap((m) => [
+          "", "", "",
+          filtered.reduce((s, p) => s + (p.receivedMonthly[m] || 0), 0) || "",
+        ]),
+      ]);
+      totRow.height = 22;
+
+      for (let c = 1; c <= totalCols; c++) {
+        const cell = totRow.getCell(c);
+        cell.font = totalFont;
+        cell.fill = totalFill;
+        cell.border = boldTop;
+        cell.alignment = { vertical: "middle", horizontal: "right" };
+      }
+      totRow.getCell(2).alignment = { vertical: "middle", horizontal: "left" };
+      totRow.getCell(5).numFmt  = "$#,##0";
+      totRow.getCell(6).numFmt  = "$#,##0";
+      totRow.getCell(8).numFmt  = "0.0%";
+      totRow.getCell(9).numFmt  = "0.0%";
+      totRow.getCell(10).numFmt = "$#,##0";
+      totRow.getCell(11).numFmt = "$#,##0";
+      totRow.getCell(12).numFmt = "$#,##0";
+      if (tBalance < 0) totRow.getCell(12).font = font(10, true, "FFDC2626");
+      ALL_MONTHS.forEach((m, mi) => {
+        const cell = totRow.getCell(SUMMARY_COLS.length + mi * 4 + 4);
+        if (cell.value !== "") { cell.numFmt = "$#,##0"; cell.alignment = { vertical: "middle", horizontal: "right" }; }
+      });
+
+      // ── Auto-filter on summary headers ──
+      ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: SUMMARY_COLS.length } };
+
+      // ── Download ──
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `BondBuildSG_ProjectReport_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Export failed. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleDelete = async (p) => {
     if (!window.confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
     try {
@@ -2283,6 +2542,27 @@ export default function ProjectProgressModule() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            onClick={exportToExcel}
+            disabled={exporting}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "7px 14px",
+              borderRadius: 9,
+              border: `1px solid ${C.border}`,
+              background: exporting ? "#0d2010" : "#0a1f0a",
+              color: exporting ? C.textMuted : C.green,
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: exporting ? "not-allowed" : "pointer",
+              opacity: exporting ? 0.7 : 1,
+            }}
+          >
+            <Download size={15} />
+            {exporting ? "Exporting…" : "Export Excel"}
+          </button>
           <button
             onClick={() => {
               setEditProject(null);
