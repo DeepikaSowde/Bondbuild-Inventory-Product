@@ -201,7 +201,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       claimedMonthlySum: sumC,
       totalReceived,
       totalClaimedAmt,
-      receivedExceedsClaimed: contract > 0 && totalReceived > totalClaimedAmt,
+      receivedExceedsClaimed: contract > 0 && (totalReceived - totalClaimedAmt) > 0.01,
       balance: contract - totalReceived,
       downPct,
       autoSitePct,
@@ -290,7 +290,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setError("Down Payment Month is required when a down payment amount is entered");
       return;
     }
-    if (contractSum > 0 && calc.totalReceived > contractSum) {
+    if (contractSum > 0 && (calc.totalReceived - contractSum) > 0.01) {
       setError(`Total received ($${Math.round(calc.totalReceived).toLocaleString()}) exceeds contract sum ($${Math.round(contractSum).toLocaleString()}). Reduce the monthly received amounts.`);
       return;
     }
