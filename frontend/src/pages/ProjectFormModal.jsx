@@ -245,6 +245,10 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setError(`Total received ($${Math.round(calc.totalReceived).toLocaleString()}) cannot exceed total claimed amount ($${Math.round(calc.totalClaimedAmt).toLocaleString()}). You can only receive what has been claimed.`);
       return;
     }
+    if (downPayment > 0 && form.down_payment_month && num(received[form.down_payment_month]) > 0) {
+      setError(`"${form.down_payment_month}" is the down payment month — the $${Math.round(downPayment).toLocaleString()} down payment is already tracked separately. Remove the Received $ amount for ${form.down_payment_month} to avoid double-counting.`);
+      return;
+    }
     const monthsClaimedWithoutTarget = Object.keys(claimed).filter(
       (m) => num(claimed[m]) > 0 && !(num(target[m]) > 0)
     );
@@ -660,10 +664,17 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                     onChange={(e) => setMonth(setClaimed)(m, e.target.value)}
                   />
                   <input
-                    style={{ ...inp, padding: "5px 8px" }}
+                    style={{
+                      ...inp,
+                      padding: "5px 8px",
+                      ...(m === form.down_payment_month && num(form.down_payment) > 0 && num(received[m]) > 0
+                        ? { borderColor: C.red }
+                        : {}),
+                    }}
                     type="number"
                     min="0"
                     placeholder="—"
+                    title={m === form.down_payment_month && num(form.down_payment) > 0 ? "Down payment month — don't enter received here, it's tracked separately" : ""}
                     value={received[m] ?? ""}
                     onChange={(e) => setMonth(setReceived)(m, e.target.value)}
                   />
@@ -671,6 +682,24 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
               ))}
             </div>
           </div>
+
+          {/* Soft warning: site progress ahead of claimed */}
+          {calc.autoSitePct > calc.totalClaimed * 100 && calc.autoSitePct > 0 && (
+            <div style={{
+              background: "#1c1500",
+              border: `1px solid ${C.amber}`,
+              borderRadius: 8,
+              padding: "9px 14px",
+              fontSize: 12,
+              color: C.amber,
+              marginTop: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}>
+              ⚠️ Site Progress ({calc.autoSitePct.toFixed(1)}%) is ahead of Claim Till Date ({(calc.totalClaimed * 100).toFixed(1)}%) — you may have unclaimed work.
+            </div>
+          )}
 
           {/* Live totals */}
           <div
