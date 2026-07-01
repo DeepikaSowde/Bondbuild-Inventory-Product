@@ -191,13 +191,17 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     const sumR = Object.values(received).reduce((s, v) => s + num(v), 0);
     const autoSitePct = cumulativeAchievedPct(achieved);
     const totalClaimedRaw = downPct + sumC;
+    const totalClaimedAmt = contract * Math.min(totalClaimedRaw, 1);
+    const totalReceived = downAmt + sumR;
     return {
       totalTarget: Math.min(sumT, 1),
       totalClaimed: Math.min(totalClaimedRaw, 1),
       totalClaimedRaw,
       claimedMonthlySum: sumC,
-      totalReceived: downAmt + sumR,
-      balance: contract - (downAmt + sumR),
+      totalReceived,
+      totalClaimedAmt,
+      receivedExceedsClaimed: contract > 0 && totalReceived > totalClaimedAmt,
+      balance: contract - totalReceived,
       downPct,
       autoSitePct,
     };
@@ -235,6 +239,10 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     }
     if (contractSum > 0 && calc.totalReceived > contractSum) {
       setError(`Total received ($${Math.round(calc.totalReceived).toLocaleString()}) exceeds contract sum ($${Math.round(contractSum).toLocaleString()}). Reduce the monthly received amounts.`);
+      return;
+    }
+    if (calc.receivedExceedsClaimed) {
+      setError(`Total received ($${Math.round(calc.totalReceived).toLocaleString()}) cannot exceed total claimed amount ($${Math.round(calc.totalClaimedAmt).toLocaleString()}). You can only receive what has been claimed.`);
       return;
     }
     const monthsClaimedWithoutTarget = Object.keys(claimed).filter(
@@ -684,7 +692,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                 v: `${Math.round(calc.totalClaimedRaw * 100)}%`,
                 c: calc.totalClaimedRaw > 1 ? C.red : C.purple,
               },
-              { l: "Total Received", v: fmt(calc.totalReceived), c: C.green },
+              { l: "Total Received", v: fmt(calc.totalReceived), c: calc.receivedExceedsClaimed ? C.red : C.green },
               { l: "Balance", v: fmt(calc.balance), c: calc.balance < 0 ? C.red : C.amber },
             ].map((x) => (
               <div
