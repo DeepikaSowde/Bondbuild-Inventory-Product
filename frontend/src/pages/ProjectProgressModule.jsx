@@ -2182,24 +2182,47 @@ export default function ProjectProgressModule() {
   // ── EMPTY STATE ──
   if (!RAW_PROJECTS.length) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          background: C.bg,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: C.text,
-        }}
-      >
-        <div style={{ textAlign: "center" }}>
-          <Building2 size={48} style={{ color: C.textDim, marginBottom: 16 }} />
-          <p style={{ fontSize: 16, color: C.textMuted }}>
+      <div style={{ minHeight: "100vh", background: C.bg, color: C.text }}>
+        {modalOpen && (
+          <ProjectFormModal
+            project={editProject}
+            onClose={() => { setModalOpen(false); setEditProject(null); }}
+            onSaved={fetchProjects}
+          />
+        )}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: "100vh",
+            flexDirection: "column",
+            gap: 16,
+          }}
+        >
+          <Building2 size={48} style={{ color: C.textDim }} />
+          <p style={{ fontSize: 16, color: C.textMuted, margin: 0 }}>
             No projects found in database.
           </p>
-          <p style={{ fontSize: 13, color: C.textDim, marginTop: 8 }}>
-            Import projects via Setup → Projects Import.
-          </p>
+          <button
+            onClick={() => { setEditProject(null); setModalOpen(true); }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "9px 18px",
+              borderRadius: 9,
+              border: "none",
+              background: C.blue,
+              color: "#06121f",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: "pointer",
+              marginTop: 8,
+            }}
+          >
+            <Plus size={15} /> Add Project
+          </button>
         </div>
       </div>
     );
