@@ -195,6 +195,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     const totalReceived = downAmt + sumR;
     return {
       totalTarget: Math.min(sumT, 1),
+      totalTargetRaw: sumT,
       totalClaimed: Math.min(totalClaimedRaw, 1),
       totalClaimedRaw,
       claimedMonthlySum: sumC,
@@ -244,8 +245,26 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setError(`Negative values are not allowed. Check: ${negativeMonths.slice(0, 3).join(", ")}`);
       return;
     }
+    const monthsOver100 = MONTHS.filter(
+      (m) => num(target[m]) > 100 || num(achieved[m]) > 100 || num(claimed[m]) > 100
+    );
+    if (monthsOver100.length > 0) {
+      setError(`Monthly % values cannot exceed 100%. Check: ${monthsOver100.slice(0, 3).join(", ")}`);
+      return;
+    }
+    const hasMonthlyData = MONTHS.some(
+      (m) => num(target[m]) > 0 || num(achieved[m]) > 0 || num(claimed[m]) > 0 || num(received[m]) > 0
+    );
+    if (contractSum === 0 && (downPayment > 0 || hasMonthlyData)) {
+      setError("Contract Sum is required when financial or monthly data is entered.");
+      return;
+    }
     if (contractSum > 0 && downPayment > contractSum) {
       setError(`Down payment ($${Math.round(downPayment).toLocaleString()}) cannot exceed contract sum ($${Math.round(contractSum).toLocaleString()})`);
+      return;
+    }
+    if (calc.totalTargetRaw > 1) {
+      setError(`Total Target % is ${Math.round(calc.totalTargetRaw * 100)}% — cannot exceed 100%. Reduce monthly target values.`);
       return;
     }
     if (downPayment > 0 && !form.down_payment_month) {
@@ -715,6 +734,22 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
               ⚠️ Site Progress ({calc.autoSitePct.toFixed(1)}%) is ahead of Claim Till Date ({(calc.totalClaimed * 100).toFixed(1)}%) — you may have unclaimed work.
             </div>
           )}
+          {(form.status === "Completed" || form.status === "Closed") && calc.totalTargetRaw < 1 && (
+            <div style={{
+              background: "#1c1500",
+              border: `1px solid ${C.amber}`,
+              borderRadius: 8,
+              padding: "9px 14px",
+              fontSize: 12,
+              color: C.amber,
+              marginTop: 8,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}>
+              ⚠️ Status is "{form.status}" but Total Target is only {Math.round(calc.totalTargetRaw * 100)}% — a completed project should have 100% target planned.
+            </div>
+          )}
 
           {/* Live totals */}
           <div
@@ -728,8 +763,8 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
             {[
               {
                 l: "Total Target %",
-                v: `${Math.round(calc.totalTarget * 100)}%`,
-                c: C.blue,
+                v: `${Math.round(calc.totalTargetRaw * 100)}%`,
+                c: calc.totalTargetRaw > 1 ? C.red : C.blue,
               },
               {
                 l: "Total Claimed %",
