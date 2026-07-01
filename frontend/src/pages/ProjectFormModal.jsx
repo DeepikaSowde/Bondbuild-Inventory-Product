@@ -348,6 +348,12 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setError(`Monthly Claimed % total is ${Math.round(calc.claimedMonthlySum * 100)}% — cannot exceed 100%`);
       return;
     }
+    if (calc.totalClaimedRaw > 1.001) {
+      const dpPct = Math.round((calc.totalClaimedRaw - calc.claimedMonthlySum) * 100);
+      const monthlyPct = Math.round(calc.claimedMonthlySum * 100);
+      setError(`Total Claimed % is ${Math.round(calc.totalClaimedRaw * 100)}% — Down Payment (${dpPct}%) + Monthly Claims (${monthlyPct}%) cannot exceed 100%. Reduce your monthly claimed values.`);
+      return;
+    }
     setSaving(true);
     setError(null);
 
