@@ -3759,6 +3759,7 @@ export default function ProjectProgressModule() {
                 cx = 18,
                 cy = 18,
                 circ = 2 * Math.PI * r;
+              const full = pct >= 1;
               const dash = Math.min(1, Math.max(0, pct)) * circ;
               return (
                 <svg width={size} height={size} viewBox="0 0 36 36">
@@ -3767,9 +3768,10 @@ export default function ProjectProgressModule() {
                     cy={cy}
                     r={r}
                     fill="none"
-                    stroke={C.border}
+                    stroke={full ? color : C.border}
                     strokeWidth={4}
                   />
+                  {!full && (
                   <circle
                     cx={cx}
                     cy={cy}
@@ -3781,6 +3783,7 @@ export default function ProjectProgressModule() {
                     strokeDashoffset={circ * 0.25}
                     strokeLinecap="round"
                   />
+                  )}
                   <text
                     x={cx}
                     y={cy + 4}
