@@ -215,6 +215,22 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     achieved,
   ]);
 
+  // Running cumulative claimed vs target per month (order = MONTHS array)
+  const cumulativeCheck = useMemo(() => {
+    let cumT = 0, cumC = 0;
+    const result = {};
+    MONTHS.forEach((m) => {
+      cumT += num(target[m]);
+      cumC += num(claimed[m]);
+      result[m] = {
+        cumTarget: cumT,
+        cumClaimed: cumC,
+        exceeds: cumC > cumT + 0.01 && cumC > 0,
+      };
+    });
+    return result;
+  }, [target, claimed]);
+
   const setMonth = (setter) => (month, val) =>
     setter((prev) => {
       const next = { ...prev };
@@ -290,11 +306,19 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setError(`Claimed % requires Target % to be set first for: ${monthsClaimedWithoutTarget.slice(0, 3).join(", ")}${monthsClaimedWithoutTarget.length > 3 ? "…" : ""}`);
       return;
     }
-    const monthsClaimedExceedsTarget = MONTHS.filter(
-      (m) => num(claimed[m]) > 0 && num(target[m]) > 0 && num(claimed[m]) > num(target[m])
-    );
-    if (monthsClaimedExceedsTarget.length > 0) {
-      setError(`Claimed % exceeds Target % for: ${monthsClaimedExceedsTarget.slice(0, 3).join(", ")}`);
+    let cumT = 0, cumC = 0, cumulativeViolation = null;
+    for (const m of MONTHS) {
+      cumT += num(target[m]);
+      cumC += num(claimed[m]);
+      if (cumC > cumT + 0.01 && cumC > 0) {
+        cumulativeViolation = { month: m, cumTarget: cumT, cumClaimed: cumC };
+        break;
+      }
+    }
+    if (cumulativeViolation) {
+      setError(
+        `Cumulative Claimed (${Math.round(cumulativeViolation.cumClaimed)}%) exceeds Cumulative Target (${Math.round(cumulativeViolation.cumTarget)}%) at ${cumulativeViolation.month}. Monthly claims can vary but the running total must not exceed the running target.`
+      );
       return;
     }
     const monthsClaimedExceedsAchieved = MONTHS.filter(
@@ -676,7 +700,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                       padding: "5px 8px",
                       ...(!(num(target[m]) > 0)
                         ? { opacity: 0.35, cursor: "not-allowed", background: "#0c0e16" }
-                        : (num(claimed[m]) > num(target[m]) && num(target[m]) > 0) ||
+                        : cumulativeCheck[m]?.exceeds ||
                           (num(claimed[m]) > num(achieved[m]) && num(achieved[m]) > 0)
                         ? { borderColor: C.red }
                         : {}),
@@ -688,8 +712,8 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                     title={
                       !(num(target[m]) > 0)
                         ? "Set Target % first"
-                        : num(claimed[m]) > num(target[m]) && num(target[m]) > 0
-                        ? "Claimed % cannot exceed Target %"
+                        : cumulativeCheck[m]?.exceeds
+                        ? `Cumulative Claimed (${cumulativeCheck[m].cumClaimed.toFixed(1)}%) exceeds Cumulative Target (${cumulativeCheck[m].cumTarget.toFixed(1)}%) at this month`
                         : num(claimed[m]) > num(achieved[m]) && num(achieved[m]) > 0
                         ? "Claimed % cannot exceed Achieved %"
                         : ""
