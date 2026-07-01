@@ -229,6 +229,21 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     }
     const contractSum = num(form.contract_sum);
     const downPayment = num(form.down_payment);
+    if (contractSum < 0) {
+      setError("Contract Sum cannot be negative");
+      return;
+    }
+    if (downPayment < 0) {
+      setError("Down Payment cannot be negative");
+      return;
+    }
+    const negativeMonths = MONTHS.filter(
+      (m) => num(target[m]) < 0 || num(achieved[m]) < 0 || num(claimed[m]) < 0 || num(received[m]) < 0
+    );
+    if (negativeMonths.length > 0) {
+      setError(`Negative values are not allowed. Check: ${negativeMonths.slice(0, 3).join(", ")}`);
+      return;
+    }
     if (contractSum > 0 && downPayment > contractSum) {
       setError(`Down payment ($${Math.round(downPayment).toLocaleString()}) cannot exceed contract sum ($${Math.round(contractSum).toLocaleString()})`);
       return;
