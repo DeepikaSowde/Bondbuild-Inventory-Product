@@ -229,6 +229,10 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setError(`Down payment ($${Math.round(downPayment).toLocaleString()}) cannot exceed contract sum ($${Math.round(contractSum).toLocaleString()})`);
       return;
     }
+    if (downPayment > 0 && !form.down_payment_month) {
+      setError("Down Payment Month is required when a down payment amount is entered");
+      return;
+    }
     if (contractSum > 0 && calc.totalReceived > contractSum) {
       setError(`Total received ($${Math.round(calc.totalReceived).toLocaleString()}) exceeds contract sum ($${Math.round(contractSum).toLocaleString()}). Reduce the monthly received amounts.`);
       return;
@@ -289,7 +293,6 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
 
   return (
     <div
-      onClick={onClose}
       style={{
         position: "fixed",
         inset: 0,
@@ -446,9 +449,20 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                 )}
             </div>
             <div>
-              <label style={lbl}>Down Payment Month</label>
+              <label style={lbl}>
+                Down Payment Month
+                {num(form.down_payment) > 0 && (
+                  <span style={{ color: C.red, marginLeft: 2 }}>*</span>
+                )}
+              </label>
               <select
-                style={inp}
+                style={{
+                  ...inp,
+                  borderColor:
+                    num(form.down_payment) > 0 && !form.down_payment_month
+                      ? C.red
+                      : C.border,
+                }}
                 value={form.down_payment_month}
                 onChange={(e) =>
                   setForm({ ...form, down_payment_month: e.target.value })
@@ -461,6 +475,11 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                   </option>
                 ))}
               </select>
+              {num(form.down_payment) > 0 && !form.down_payment_month && (
+                <div style={{ fontSize: 11, color: C.red, marginTop: 4 }}>
+                  Required when down payment is entered
+                </div>
+              )}
             </div>
             <div>
               <label style={lbl}>Site Progress % (auto)</label>
