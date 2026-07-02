@@ -616,7 +616,7 @@ export default function HomePage() {
         <div style={{ textAlign: "center", marginTop: 64, display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }}>
           <div style={{ height: 1, flex: 1, maxWidth: 120, background: T.border }} />
           <p style={{ fontSize: 11, color: T.textDim, fontWeight: 500, letterSpacing: "0.04em" }}>
-            Bond Build SG · Inventory Management System · Powered by Yazhsey Technologies Pte Ltd
+            Bond Build SG · Inventory Management System · Powered by YazhSey Technologies
           </p>
           <div style={{ height: 1, flex: 1, maxWidth: 120, background: T.border }} />
         </div>
