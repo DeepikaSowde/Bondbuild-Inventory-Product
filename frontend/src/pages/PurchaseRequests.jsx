@@ -124,6 +124,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   const [stockOpen, setStockOpen] = useState(null);   // which item's stock table is expanded
   const [stockList, setStockList] = useState([]);      // factory stock rows
   const [stockLoaded, setStockLoaded] = useState(false);
+  const [descSuggest, setDescSuggest] = useState({ idx: -1, list: [] });
 
   const setItem = (i, key, val) => setForm((f) => ({
     ...f,
@@ -165,6 +166,23 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     if (!stockLoaded) {
       try { setStockList(await api.inventory()); setStockLoaded(true); } catch { notify("Could not load factory stock", "error"); }
     }
+  };
+
+  const onDescChange = async (i, val) => {
+    setItem(i, "description", val);
+    if (!val.trim() || val.trim().length < 2) { setDescSuggest({ idx: -1, list: [] }); return; }
+    let list = stockList;
+    if (!stockLoaded) {
+      try { list = await api.inventory(); setStockList(list); setStockLoaded(true); } catch { return; }
+    }
+    const q = val.toLowerCase();
+    const matches = list.filter((s) =>
+      (s.profile_name && s.profile_name.toLowerCase().includes(q)) ||
+      (s.size && s.size.toLowerCase().includes(q)) ||
+      (s.item_code && s.item_code.toLowerCase().includes(q)) ||
+      (s.item_name && s.item_name.toLowerCase().includes(q))
+    ).slice(0, 8);
+    setDescSuggest({ idx: i, list: matches });
   };
 
   // "Use from Stock": link the inventory row, pre-fill From-Stock qty, set code/description
@@ -247,9 +265,9 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
           const stockQty = Number(it.stock_qty) || 0;
           const autoBuy = Math.max(0, totalQty - stockQty);
           return (
-            <div key={i} className="overflow-hidden rounded-xl border border-[#E5E7EB]">
+            <div key={i} className="rounded-xl border border-[#E5E7EB]">
               {/* purple header */}
-              <div className="flex items-center justify-between bg-[#6366F1] px-3 py-1 text-[10px] font-bold text-white">
+              <div className="flex items-center justify-between rounded-t-xl bg-[#6366F1] px-3 py-1 text-[10px] font-bold text-white">
                 <span>Item {i + 1}</span>
                 {form.items.length > 1 && (
                   <button onClick={() => removeItem(i)} className="rounded bg-white/20 px-2 py-px text-[11px] text-white">✕ Remove</button>
@@ -269,7 +287,30 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                       ({it.description.length}/500)
                     </span>
                   </label>
-                  <input className={inp} value={it.description} maxLength={500} onChange={(e) => setItem(i, "description", e.target.value)} placeholder="e.g. L-Angle 25x75x2.8mm" />
+                  <div className="relative">
+                    <input
+                      className={inp} value={it.description} maxLength={500}
+                      onChange={(e) => onDescChange(i, e.target.value)}
+                      onBlur={() => setTimeout(() => setDescSuggest({ idx: -1, list: [] }), 150)}
+                      placeholder="e.g. L-Angle 25x75x2.8mm"
+                    />
+                    {descSuggest.idx === i && descSuggest.list.length > 0 && (
+                      <div className="absolute left-0 top-full z-50 mt-0.5 w-full rounded-lg border border-[#E5E7EB] bg-white shadow-lg">
+                        {descSuggest.list.map((s) => {
+                          const label = [s.profile_name, s.size].filter(Boolean).join(" ") || s.item_name || s.item_code;
+                          return (
+                            <button key={s.id} type="button"
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] hover:bg-[#EEF2FF] first:rounded-t-lg last:rounded-b-lg"
+                              onMouseDown={() => { setItem(i, "description", label); setDescSuggest({ idx: -1, list: [] }); }}
+                            >
+                              <span className="shrink-0 font-mono text-[10px] text-[#6366F1]">{s.item_code}</span>
+                              <span className="text-[#374151]">{label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div><label className={lbl}>Colour</label><input className={inp} value={it.colour} onChange={(e) => setItem(i, "colour", e.target.value)} placeholder="e.g. SS, RAL 7016" /></div>
               </div>
