@@ -189,8 +189,10 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   };
 
   const submit = async () => {
-    if (!form.job_no.trim() || !form.requested_by.trim()) return notify("Job No and Requested By are required", "error");
-    if (!form.items.some((it) => it.description.trim())) return notify("Add at least one item", "error");
+    if (!form.job_no.trim()) return notify("Job No is required", "error");
+    if (!form.requested_by.trim()) return notify("Requested By is required", "error");
+    if (!form.items.some((it) => it.description.trim())) return notify("Description is required — add at least one item with a description", "error");
+    if (!form.items.some((it) => Number(it.qty) > 0)) return notify("Quantity is required — at least one item must have a quantity greater than 0", "error");
     setBusy(true);
     try {
       try { await api.poProject(form.job_no.trim()); }
@@ -360,7 +362,11 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
 
       <Btn variant="soft" small className="mt-3" onClick={addItem}>+ Add item</Btn>
 
-      <div className="mt-3.5"><Field label="Remarks (overall)"><Input value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} /></Field></div>
+      <div className="mt-3.5">
+        <Field label={`Remarks (overall) — ${form.remarks.length}/200`}>
+          <Input value={form.remarks} maxLength={200} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
+        </Field>
+      </div>
 
       {/* Whole-PR attachments — files are held now, uploaded right after the PR saves */}
       <div className="mt-3.5">
