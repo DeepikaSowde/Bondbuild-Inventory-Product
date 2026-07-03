@@ -291,7 +291,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
 
               {/* Row 3: the split — From stock + Buy qty */}
               <div className="grid grid-cols-[1fr_140px_140px] items-end gap-2.5 px-3 pb-2">
-                <div><label className={lbl}>Remarks</label><input className={inp} value={it.remarks} onChange={(e) => setItem(i, "remarks", e.target.value)} placeholder="e.g. URGENT, Preference (P&M)" /></div>
+                <div><label className={lbl}>Remarks ({it.remarks.length}/200)</label><input className={inp} value={it.remarks} maxLength={200} onChange={(e) => setItem(i, "remarks", e.target.value)} placeholder="e.g. URGENT, Preference (P&M)" /></div>
                 <div>
                   <label className={lbl}>From stock {it.stock_location && <span className="text-[#059669]">@ {it.stock_location}</span>}{it.available_stock_qty !== "" && <span className="text-[#9CA3AF]"> (avail: {it.available_stock_qty})</span>}</label>
                   <input type="number" min="0"
