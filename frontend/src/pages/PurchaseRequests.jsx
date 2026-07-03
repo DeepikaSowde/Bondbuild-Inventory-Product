@@ -227,7 +227,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
       {/* Header fields */}
       <div className="mb-4 grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-3">
         <Field label="Job No *"><Input value={form.job_no} onChange={(e) => setForm({ ...form, job_no: e.target.value })} onBlur={lookupJob} placeholder="JN426" /></Field>
-        <Field label="Project name"><Input value={form.project_name} onChange={(e) => setForm({ ...form, project_name: e.target.value })} placeholder="12 Harlyn Road" /></Field>
+        <Field label="Project name"><Input value={form.project_name} maxLength={200} onChange={(e) => setForm({ ...form, project_name: e.target.value })} placeholder="12 Harlyn Road" /></Field>
         <Field label="Location / scope"><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
         <Field label="Date required"><Input value={form.date_required} onChange={(e) => setForm({ ...form, date_required: e.target.value })} placeholder="ASAP, 01-Apr-26" /></Field>
         <Field label="Date issued"><Input type="date" value={form.date_issued} onChange={(e) => setForm({ ...form, date_issued: e.target.value })} /></Field>
