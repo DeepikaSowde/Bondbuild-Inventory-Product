@@ -120,6 +120,13 @@ const PRPO_PERM_GROUPS = [
       { key: "see_po_amount", label: "See PO Amount", desc: "Can see PO totals" },
     ],
   },
+  {
+    group: "🏢 Module Access",
+    perms: [
+      { key: "see_operation_finance", label: "Operation & Finance", desc: "Can open the Operation and Finance module" },
+      { key: "see_accounting", label: "Accounting", desc: "Can open the Accounting module" },
+    ],
+  },
 ];
 
 export default function RolePermissions({ showNotify }) {

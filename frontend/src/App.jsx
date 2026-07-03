@@ -8,9 +8,11 @@ import {
   Navigate,
   useLocation,
 } from "react-router-dom";
+import { useState, useEffect } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import Sidebar from "./components/Sidebar";
 import { AdminRoute } from "./components/AdminRoute";
+import api from "./services/api";
 
 // Pages
 import LoginPage from "./pages/auth/LoginPage";
@@ -43,14 +45,58 @@ function PrivateRoute({ children }) {
   return user ? children : <Navigate to="/login" />;
 }
 
+// Module-level access guard — checks pr_po_permissions flag for the current role
+function ModuleGuard({ permKey, moduleName, children }) {
+  const { user } = useAuth();
+  const [allowed, setAllowed] = useState(null);
+
+  useEffect(() => {
+    if (!user) { setAllowed(false); return; }
+    if (user.role === "Admin") { setAllowed(true); return; }
+    api.get("/pr-po-permissions/me/effective")
+      .then((res) => {
+        const perms = res.data.permissions || {};
+        // if the key is missing from DB yet, default to allowed
+        setAllowed(perms[permKey] !== false);
+      })
+      .catch(() => setAllowed(true));
+  }, [user, permKey]);
+
+  if (allowed === null) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="text-gray-400 text-sm">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!allowed) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 px-6">
+        <div className="bg-white rounded-2xl shadow-md px-10 py-12 max-w-sm text-center border border-[#E5E7EB]">
+          <div className="text-5xl mb-4">🔒</div>
+          <h2 className="text-xl font-black text-[#1E1B4B] mb-2">Access Restricted</h2>
+          <p className="text-[13px] text-gray-500 leading-relaxed">
+            You don't have permission to view the{" "}
+            <span className="font-bold text-[#6366F1]">{moduleName}</span> module.
+          </p>
+          <p className="text-[12px] text-gray-400 mt-2">
+            Contact your administrator to request access.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return children;
+}
+
 function AppRoutes() {
   return (
     <Routes>
       {/* Public routes */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/setup" element={<SetupDashboard />} />
-      <Route path="/setup" element={<SetupDashboard />} />
-      <Route path="/project-progress" element={<ProjectProgressModule />} />
       {/* Protected routes */}
       
       <Route
@@ -97,7 +143,9 @@ function AppRoutes() {
         path="/project-progress"
         element={
           <PrivateRoute>
-            <ProjectProgress />
+            <ModuleGuard permKey="see_operation_finance" moduleName="Operation and Finance">
+              <ProjectProgressModule />
+            </ModuleGuard>
           </PrivateRoute>
         }
       />
@@ -105,7 +153,9 @@ function AppRoutes() {
         path="/accounting"
         element={
           <PrivateRoute>
-            <Accounting />
+            <ModuleGuard permKey="see_accounting" moduleName="Accounting">
+              <Accounting />
+            </ModuleGuard>
           </PrivateRoute>
         }
       />

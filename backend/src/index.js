@@ -87,6 +87,31 @@ app.use("/api", require("./routes/poDashboard"));
 app.use("/api/auth", require("./routes/Passwordroutes"));
 app.use("/api/home", require("./routes/Homesummary"));
 // ============================================================
+// One-time Schema Migration Endpoint (delete after use)
+// ============================================================
+app.get("/api/run-migration-x9k2", async (req, res) => {
+  const fs = require("fs");
+  const path = require("path");
+  try {
+    const schemaPath = path.join(__dirname, "../../full_schema.sql");
+    const sql = fs.readFileSync(schemaPath, "utf8");
+    await db.query(sql);
+    res.json({ status: "ok", message: "Schema applied successfully ✅" });
+  } catch (err) {
+    res.status(500).json({ status: "error", error: err.message });
+  }
+});
+
+// ============================================================
+// Startup: ensure module-access columns exist in pr_po_permissions
+// ============================================================
+db.query(`
+  ALTER TABLE pr_po_permissions
+    ADD COLUMN IF NOT EXISTS see_operation_finance BOOLEAN NOT NULL DEFAULT true,
+    ADD COLUMN IF NOT EXISTS see_accounting        BOOLEAN NOT NULL DEFAULT true
+`).catch((err) => console.error("Module-access column migration:", err.message));
+
+// ============================================================
 // Health Check Endpoint
 // ============================================================
 app.get("/api/health", async (req, res) => {

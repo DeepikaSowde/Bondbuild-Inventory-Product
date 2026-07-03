@@ -10,23 +10,28 @@ const COLS = [
   "raise_pr", "approve_pr", "reject_pr", "assign_supplier", "send_to_fic",
   "issue_stock", "generate_po", "set_delivery", "receive_po", "cancel_po",
   "see_pr_price", "see_po_price", "see_po_amount",
+  "see_operation_finance", "see_accounting",
 ];
+
+const ALL_ROLES = ["Drafter", "Manager", "Purchaser", "Factory In-charge", "Supervisor", "QS", "Admin"];
 
 // the same role defaults used by the backend gate (fallback when no row exists)
 const ROLE_DEFAULTS = {
-  raise_pr:        ["Drafter", "Admin"],
-  approve_pr:      ["Manager", "Admin"],
-  reject_pr:       ["Manager", "Admin"],
-  assign_supplier: ["Purchaser", "Admin"],
-  send_to_fic:     ["Purchaser", "Admin"],
-  issue_stock:     ["Factory In-charge", "Admin"],
-  generate_po:     ["Purchaser", "Admin"],
-  set_delivery:    ["Factory In-charge", "Supervisor", "Admin"],
-  receive_po:      ["Purchaser", "Supervisor", "Factory In-charge", "Admin"],
-  cancel_po:       ["Purchaser", "Admin"],
-  see_pr_price:    ["Manager", "Purchaser", "QS", "Admin"],
-  see_po_price:    ["Manager", "Purchaser", "QS", "Admin"],
-  see_po_amount:   ["Manager", "Purchaser", "QS", "Admin"],
+  raise_pr:               ["Drafter", "Admin"],
+  approve_pr:             ["Manager", "Admin"],
+  reject_pr:              ["Manager", "Admin"],
+  assign_supplier:        ["Purchaser", "Admin"],
+  send_to_fic:            ["Purchaser", "Admin"],
+  issue_stock:            ["Factory In-charge", "Admin"],
+  generate_po:            ["Purchaser", "Admin"],
+  set_delivery:           ["Factory In-charge", "Supervisor", "Admin"],
+  receive_po:             ["Purchaser", "Supervisor", "Factory In-charge", "Admin"],
+  cancel_po:              ["Purchaser", "Admin"],
+  see_pr_price:           ["Manager", "Purchaser", "QS", "Admin"],
+  see_po_price:           ["Manager", "Purchaser", "QS", "Admin"],
+  see_po_amount:          ["Manager", "Purchaser", "QS", "Admin"],
+  see_operation_finance:  ALL_ROLES,   // all roles can see by default; admin can restrict
+  see_accounting:         ALL_ROLES,
 };
 
 // ── CURRENT USER'S EFFECTIVE PERMISSIONS (for the frontend to show/hide UI) ──
