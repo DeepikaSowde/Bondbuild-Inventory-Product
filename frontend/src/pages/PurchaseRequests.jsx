@@ -293,7 +293,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
 
               {/* Row 3: the split — From stock + Buy qty */}
               <div className="grid grid-cols-[1fr_140px_140px] items-end gap-2.5 px-3 pb-2">
-                <div><label className={lbl}>Remarks ({it.remarks.length}/200)</label><input className={inp} value={it.remarks} maxLength={200} onChange={(e) => setItem(i, "remarks", e.target.value)} placeholder="e.g. URGENT, Preference (P&M)" /></div>
+                <div><label className={lbl}>Remarks ({(it.remarks || "").length}/200)</label><input className={inp} value={it.remarks || ""} maxLength={200} onChange={(e) => setItem(i, "remarks", e.target.value)} placeholder="e.g. URGENT, Preference (P&M)" /></div>
                 <div>
                   <label className={lbl}>From stock {it.stock_location && <span className="text-[#059669]">@ {it.stock_location}</span>}{it.available_stock_qty !== "" && <span className="text-[#9CA3AF]"> (avail: {it.available_stock_qty})</span>}</label>
                   <input type="number" min="0"
@@ -365,8 +365,8 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
       <Btn variant="soft" small className="mt-3" onClick={addItem}>+ Add item</Btn>
 
       <div className="mt-3.5">
-        <Field label={`Remarks (overall) — ${form.remarks.length}/200`}>
-          <Input value={form.remarks} maxLength={200} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
+        <Field label={`Remarks (overall) — ${(form.remarks || "").length}/200`}>
+          <Input value={form.remarks || ""} maxLength={200} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
         </Field>
       </div>
 
