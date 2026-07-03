@@ -131,6 +131,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
       if (x !== i) return it;
       const updated = { ...it, [key]: val };
       if (key === "qty") {
+        if (Number(val) < 0) return f;
         const total = Number(val) || 0;
         const avail = Number(it.available_stock_qty) || 0;
         const maxStock = avail > 0 ? Math.min(total, avail) : 0;
@@ -192,6 +193,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     if (!form.job_no.trim()) return notify("Job No is required", "error");
     if (!form.requested_by.trim()) return notify("Requested By is required", "error");
     if (!form.items.some((it) => it.description.trim())) return notify("Description is required — add at least one item with a description", "error");
+    if (form.items.some((it) => Number(it.qty) < 0)) return notify("Quantity cannot be negative", "error");
     if (!form.items.some((it) => Number(it.qty) > 0)) return notify("Quantity is required — at least one item must have a quantity greater than 0", "error");
     setBusy(true);
     try {
