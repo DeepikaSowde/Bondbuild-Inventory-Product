@@ -131,7 +131,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
       if (x !== i) return it;
       const updated = { ...it, [key]: val };
       if (key === "qty") {
-        if (Number(val) < 0) return f;
+        if (val !== "" && (isNaN(Number(val)) || Number(val) < 0)) return f;
         const total = Number(val) || 0;
         const avail = Number(it.available_stock_qty) || 0;
         const maxStock = avail > 0 ? Math.min(total, avail) : 0;
@@ -276,7 +276,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
 
               {/* Row 2: Total + Unit + Supplier + Type */}
               <div className="grid grid-cols-[90px_90px_1fr_110px] gap-2.5 px-3 pb-2 pt-1">
-                <div><label className={lbl}>Total Qty</label><input type="number" min="0" className={inp} value={it.qty} onChange={(e) => setItem(i, "qty", e.target.value)} placeholder="0" /></div>
+                <div><label className={lbl}>Total Qty</label><input type="number" min="0" className={inp} value={it.qty} onKeyDown={(e) => e.key === "-" && e.preventDefault()} onChange={(e) => { const v = e.target.value; if (v === "" || Number(v) >= 0) setItem(i, "qty", v); }} placeholder="0" /></div>
                 <div><label className={lbl}>Unit</label>
                   <select className={inp} value={it.unit} onChange={(e) => setItem(i, "unit", e.target.value)}>{["pcs", "m", "set", "lot", "kg"].map((u) => <option key={u}>{u}</option>)}</select>
                 </div>
