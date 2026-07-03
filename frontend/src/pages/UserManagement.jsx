@@ -104,6 +104,14 @@ function UsersModule({
       showNotify("User ID is required", "error");
       return;
     }
+    if (form.username.trim().length < 3) {
+      showNotify("User ID must be at least 3 characters", "error");
+      return;
+    }
+    if (!/^[a-zA-Z0-9._]+$/.test(form.username.trim())) {
+      showNotify("User ID can only contain letters, numbers, dot (.) and underscore (_). No spaces or special characters.", "error");
+      return;
+    }
     if (!form.password.trim() && !editUser) {
       showNotify("Password is required", "error");
       return;

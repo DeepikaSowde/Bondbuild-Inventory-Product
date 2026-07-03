@@ -9,7 +9,7 @@ import { useAuth } from "../../context/AuthContext";
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState({ username: "", password: "", general: "" });
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
@@ -19,17 +19,20 @@ export default function LoginPage() {
   const navigate = useNavigate();
 
   const handleLogin = async () => {
-    if (!username || !password) {
-      setError("Enter username and password.");
-      return;
-    }
+    const errs = { username: "", password: "", general: "" };
+    if (!username.trim()) errs.username = "Username is required.";
+    else if (username.trim().length < 3) errs.username = "Minimum 3 characters.";
+    if (!password) errs.password = "Password is required.";
+    else if (password.length < 8) errs.password = "Minimum 8 characters.";
+    if (errs.username || errs.password) { setError(errs); return; }
+
     setLoading(true);
     try {
       await login(username.trim(), password, remember);
-      setError("");
+      setError({ username: "", password: "", general: "" });
       navigate("/home");
     } catch (err) {
-      setError(err?.response?.data?.message || "Invalid username or password.");
+      setError({ username: "", password: "", general: err?.response?.data?.message || "Invalid username or password." });
       setLoading(false);
     }
   };
@@ -149,10 +152,10 @@ export default function LoginPage() {
           </div>
 
           {/* Error Banner */}
-          {error && (
+          {error.general && (
             <div className="bg-red-500/10 border border-red-500/25 rounded-lg px-3 py-2 mb-3 flex items-center gap-2">
               <span className="text-red-500">⚠️</span>
-              <span className="text-xs text-red-300">{error}</span>
+              <span className="text-xs text-red-300">{error.general}</span>
             </div>
           )}
 
@@ -165,12 +168,13 @@ export default function LoginPage() {
               value={username}
               onChange={(e) => {
                 setUsername(e.target.value);
-                setError("");
+                setError((prev) => ({ ...prev, username: "" }));
               }}
               onKeyDown={(e) => e.key === "Enter" && handleLogin()}
               placeholder="your.username"
-              className="w-full px-3.5 py-2.75 bg-white/6 border border-white/12 rounded-lg text-sm text-white placeholder-gray-600 outline-none transition-all focus:border-indigo-500 focus:bg-indigo-500/10 focus:ring-2 focus:ring-indigo-500/20"
+              className={`w-full px-3.5 py-2.75 bg-white/6 border rounded-lg text-sm text-white placeholder-gray-600 outline-none transition-all focus:bg-indigo-500/10 focus:ring-2 focus:ring-indigo-500/20 ${error.username ? "border-red-500 focus:border-red-500" : "border-white/12 focus:border-indigo-500"}`}
             />
+            {error.username && <p className="text-red-400 text-[11px] mt-1">{error.username}</p>}
           </div>
 
           {/* Password Field */}
@@ -184,11 +188,11 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
-                  setError("");
+                  setError((prev) => ({ ...prev, password: "" }));
                 }}
                 onKeyDown={(e) => e.key === "Enter" && handleLogin()}
                 placeholder="••••••••"
-                className="w-full px-3.5 py-2.75 pr-11 bg-white/6 border border-white/12 rounded-lg text-sm text-white placeholder-gray-600 outline-none transition-all focus:border-indigo-500 focus:bg-indigo-500/10 focus:ring-2 focus:ring-indigo-500/20"
+                className={`w-full px-3.5 py-2.75 pr-11 bg-white/6 border rounded-lg text-sm text-white placeholder-gray-600 outline-none transition-all focus:bg-indigo-500/10 focus:ring-2 focus:ring-indigo-500/20 ${error.password ? "border-red-500 focus:border-red-500" : "border-white/12 focus:border-indigo-500"}`}
               />
               <button
                 type="button"
@@ -199,6 +203,7 @@ export default function LoginPage() {
                 {showPw ? "🙈" : "👁️"}
               </button>
             </div>
+            {error.password && <p className="text-red-400 text-[11px] mt-1">{error.password}</p>}
           </div>
 
           {/* Remember Me */}
