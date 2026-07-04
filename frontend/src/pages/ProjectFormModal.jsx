@@ -63,6 +63,22 @@ function monthMeta(key) {
   if (!m) return null;
   return { year: 2000 + parseInt(m[2], 10), idx: MONTH_IDX[m[1]] ?? 0 };
 }
+// Sort month keys chronologically (e.g. Jul'26 above Aug'26).
+function sortMonths(keys) {
+  return [...keys].sort((a, b) => {
+    const ma = monthMeta(a), mb = monthMeta(b);
+    if (!ma || !mb) return 0;
+    return ma.year !== mb.year ? ma.year - mb.year : ma.idx - mb.idx;
+  });
+}
+// Wide month-year range for the per-row picker so past months can be backfilled.
+const MONTH_PICKER_OPTIONS = (() => {
+  const out = [];
+  const cy = new Date().getFullYear();
+  for (let yr = cy - 3; yr <= cy + 4; yr++)
+    for (let mi = 0; mi < 12; mi++) out.push(makeMonthKey(yr, mi));
+  return out;
+})();
 // Site Progress % = cumulative achieved % up to and including TODAY's month.
 // achievedObj values are whole-number percents here (e.g. 20 for 20%).
 function cumulativeAchievedPct(achievedObj) {
@@ -141,8 +157,44 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
   const [error, setError] = useState(null);
   const [visibleMonths, setVisibleMonths] = useState([currentMonthKey()]);
 
+  // Suggest the month immediately after the last month present.
+  // Seeded from the Down Payment Month when no months exist yet.
+  const suggestNextMonth = (months) => {
+    const sorted = sortMonths(months);
+    let cand = sorted.length
+      ? nextMonthKey(sorted[sorted.length - 1])
+      : form.down_payment_month
+      ? nextMonthKey(form.down_payment_month)
+      : currentMonthKey();
+    // Skip any month already present so the suggestion is always free.
+    let guard = 0;
+    while (sorted.includes(cand) && guard++ < 200) cand = nextMonthKey(cand);
+    return cand;
+  };
+
   const addMonth = () =>
-    setVisibleMonths((prev) => [...prev, nextMonthKey(prev[prev.length - 1])]);
+    setVisibleMonths((prev) => sortMonths([...prev, suggestNextMonth(prev)]));
+
+  // Change a row's month via the picker: move that row's data to the new key,
+  // prevent duplicates, and keep rows sorted chronologically.
+  const changeMonth = (oldKey, newKey) => {
+    if (!newKey || oldKey === newKey || visibleMonths.includes(newKey)) return;
+    const rename = (setter) =>
+      setter((prev) => {
+        if (!(oldKey in prev)) return prev;
+        const next = { ...prev };
+        next[newKey] = next[oldKey];
+        delete next[oldKey];
+        return next;
+      });
+    rename(setTarget);
+    rename(setClaimed);
+    rename(setReceived);
+    rename(setAchieved);
+    setVisibleMonths((prev) =>
+      sortMonths(prev.map((k) => (k === oldKey ? newKey : k)))
+    );
+  };
 
   // Prefill when editing
   useEffect(() => {
@@ -199,6 +251,22 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     }
   }, [project]);
 
+  // Add mode only: when the Down Payment Month changes while the grid is still
+  // pristine (a single row, no data entered anywhere), re-seed the first row to
+  // the month right after it. Once the user edits data or adds months, leave it.
+  const handleDownPaymentMonthChange = (value) => {
+    setForm((f) => ({ ...f, down_payment_month: value }));
+    if (isEdit) return;
+    const noData =
+      Object.keys(target).length === 0 &&
+      Object.keys(claimed).length === 0 &&
+      Object.keys(received).length === 0 &&
+      Object.keys(achieved).length === 0;
+    if (visibleMonths.length === 1 && noData) {
+      setVisibleMonths([value ? nextMonthKey(value) : currentMonthKey()]);
+    }
+  };
+
   const num = (v) => {
     const x = parseFloat(v);
     return isNaN(x) ? 0 : x;
@@ -211,6 +279,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     const downPct = contract > 0 ? Math.min(downAmt / contract, 1) : 0;
     const sumT = Object.values(target).reduce((s, v) => s + num(v) / 100, 0);
     const sumC = Object.values(claimed).reduce((s, v) => s + num(v) / 100, 0);
+    const sumA = Object.values(achieved).reduce((s, v) => s + num(v) / 100, 0);
     const sumR = Object.values(received).reduce((s, v) => s + num(v), 0);
     const autoSitePct = cumulativeAchievedPct(achieved);
     const totalClaimedRaw = downPct + sumC;
@@ -219,6 +288,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     return {
       totalTarget: Math.min(sumT, 1),
       totalTargetRaw: sumT,
+      totalAchievedRaw: sumA,
       totalClaimed: Math.min(totalClaimedRaw, 1),
       totalClaimedRaw,
       claimedMonthlySum: sumC,
@@ -257,6 +327,58 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     return result;
   }, [target, claimed, achieved, visibleMonths]);
 
+  // ── Part A hard validation (per-month ≤100, totals ≤100, no negatives) ──
+  // Runs on every change; blocks the save button and submission when it fails.
+  const validation = useMemo(() => {
+    const NEG = "Value cannot be negative";
+    const OVER = "Value cannot exceed 100%";
+    const isNeg = (v) => v != null && v !== "" && num(v) < 0;
+    const isOver = (v) => num(v) > 100;
+
+    const months = {};
+    visibleMonths.forEach((m) => {
+      const e = {};
+      if (isNeg(target[m])) e.target = NEG;
+      else if (isOver(target[m])) e.target = OVER;
+      if (isNeg(achieved[m])) e.achieved = NEG;
+      else if (isOver(achieved[m])) e.achieved = OVER;
+      if (isNeg(claimed[m])) e.claimed = NEG;
+      else if (isOver(claimed[m])) e.claimed = OVER;
+      if (isNeg(received[m])) e.received = NEG;
+      if (Object.keys(e).length) months[m] = e;
+    });
+
+    const contract_sum = isNeg(form.contract_sum) ? NEG : null;
+    const down_payment = isNeg(form.down_payment) ? NEG : null;
+
+    const totals = {};
+    if (calc.totalTargetRaw > 1.001)
+      totals.target = `Total Target is ${Math.round(calc.totalTargetRaw * 100)}% — cannot exceed 100%`;
+    if (calc.totalAchievedRaw > 1.001)
+      totals.achieved = `Total Achieved is ${Math.round(calc.totalAchievedRaw * 100)}% — cannot exceed 100%`;
+    if (calc.totalClaimedRaw > 1.001)
+      totals.claimed = `Total Claimed is ${Math.round(calc.totalClaimedRaw * 100)}% — cannot exceed 100%`;
+
+    const hasErrors =
+      !!contract_sum ||
+      !!down_payment ||
+      Object.keys(months).length > 0 ||
+      Object.keys(totals).length > 0;
+
+    return { months, contract_sum, down_payment, totals, hasErrors };
+  }, [
+    form.contract_sum,
+    form.down_payment,
+    target,
+    claimed,
+    received,
+    achieved,
+    visibleMonths,
+    calc.totalTargetRaw,
+    calc.totalAchievedRaw,
+    calc.totalClaimedRaw,
+  ]);
+
   const setMonth = (setter) => (month, val) =>
     setter((prev) => {
       const next = { ...prev };
@@ -268,6 +390,26 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
   const handleSubmit = async () => {
     if (!form.project_name.trim()) {
       setError("Project name is required");
+      return;
+    }
+    // Part A: block submission while any hard validation rule is violated.
+    if (validation.hasErrors) {
+      const first =
+        validation.contract_sum && `Contract Sum: ${validation.contract_sum}`;
+      const firstDown =
+        validation.down_payment && `Down Payment: ${validation.down_payment}`;
+      const firstTotal = Object.values(validation.totals)[0];
+      const firstMonthKey = Object.keys(validation.months)[0];
+      const firstMonth =
+        firstMonthKey &&
+        `${firstMonthKey}: ${Object.values(validation.months[firstMonthKey])[0]}`;
+      setError(
+        first ||
+          firstDown ||
+          firstTotal ||
+          firstMonth ||
+          "Please fix the highlighted fields before saving."
+      );
       return;
     }
     const contractSum = num(form.contract_sum);
@@ -543,7 +685,10 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
             <div>
               <label style={lbl}>Contract Sum ($)</label>
               <input
-                style={inp}
+                style={{
+                  ...inp,
+                  borderColor: validation.contract_sum ? C.red : C.border,
+                }}
                 type="number"
                 min="0"
                 value={form.contract_sum}
@@ -552,6 +697,11 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                 }
                 placeholder="0"
               />
+              {validation.contract_sum && (
+                <div style={{ fontSize: 11, color: C.red, marginTop: 4 }}>
+                  {validation.contract_sum}
+                </div>
+              )}
             </div>
             <div>
               <label style={lbl}>Down Payment ($)</label>
@@ -559,8 +709,9 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                 style={{
                   ...inp,
                   borderColor:
-                    num(form.down_payment) > num(form.contract_sum) &&
-                    num(form.contract_sum) > 0
+                    validation.down_payment ||
+                    (num(form.down_payment) > num(form.contract_sum) &&
+                      num(form.contract_sum) > 0)
                       ? C.red
                       : C.border,
                 }}
@@ -572,12 +723,18 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                 }
                 placeholder="0"
               />
-              {num(form.down_payment) > num(form.contract_sum) &&
+              {validation.down_payment ? (
+                <div style={{ fontSize: 11, color: C.red, marginTop: 4 }}>
+                  {validation.down_payment}
+                </div>
+              ) : (
+                num(form.down_payment) > num(form.contract_sum) &&
                 num(form.contract_sum) > 0 && (
                   <div style={{ fontSize: 11, color: C.red, marginTop: 4 }}>
                     Cannot exceed contract sum
                   </div>
-                )}
+                )
+              )}
             </div>
             <div>
               <label style={lbl}>
@@ -595,9 +752,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                       : C.border,
                 }}
                 value={form.down_payment_month}
-                onChange={(e) =>
-                  setForm({ ...form, down_payment_month: e.target.value })
-                }
+                onChange={(e) => handleDownPaymentMonthChange(e.target.value)}
               >
                 <option value="">—</option>
                 {DROPDOWN_MONTHS.map((m) => (
@@ -674,7 +829,8 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
           <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10 }}>
             Target %, Claimed % and Achieved % as numbers (e.g. 25 for 25%).
             Received in dollars. Achieved % = actual site progress that month.
-            Leave blank for no activity.
+            Leave blank for no activity. Pick any month from the dropdown to
+            backfill an earlier month — rows sort automatically.
           </div>
 
           <div
@@ -687,7 +843,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "70px 1fr 1fr 1fr 1fr",
+                gridTemplateColumns: "116px 1fr 1fr 1fr 1fr",
                 background: C.cardAlt,
                 padding: "8px 12px",
                 fontSize: 10,
@@ -704,32 +860,68 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
               <div style={{ color: C.green }}>Received $</div>
             </div>
             <div style={{ maxHeight: 320, overflowY: "auto" }}>
-              {visibleMonths.map((m, i) => (
+              {visibleMonths.map((m, i) => {
+                const mErr = validation.months[m] || {};
+                return (
                 <div
                   key={m}
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "70px 1fr 1fr 1fr 1fr",
-                    gap: 8,
-                    padding: "5px 12px",
-                    alignItems: "center",
+                    padding: "1px 0",
                     background:
                       i % 2 ? "transparent" : "rgba(255,255,255,0.015)",
                   }}
                 >
-                  <div style={{ fontSize: 12, color: C.textMuted }}>{m}</div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "116px 1fr 1fr 1fr 1fr",
+                    gap: 8,
+                    padding: "5px 12px",
+                    alignItems: "center",
+                  }}
+                >
+                  {/* Month-year picker — any past/current/future month; duplicates disabled */}
+                  <select
+                    style={{ ...inp, padding: "5px 6px", fontSize: 12 }}
+                    value={m}
+                    onChange={(e) => changeMonth(m, e.target.value)}
+                    title="Pick month & year — earlier months can be backfilled"
+                  >
+                    {!MONTH_PICKER_OPTIONS.includes(m) && (
+                      <option value={m}>{m}</option>
+                    )}
+                    {MONTH_PICKER_OPTIONS.map((opt) => {
+                      const taken = opt !== m && visibleMonths.includes(opt);
+                      return (
+                        <option key={opt} value={opt} disabled={taken}>
+                          {opt}
+                          {taken ? " — added" : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
                   <input
-                    style={{ ...inp, padding: "5px 8px" }}
+                    style={{
+                      ...inp,
+                      padding: "5px 8px",
+                      ...(mErr.target ? { borderColor: C.red } : {}),
+                    }}
                     type="number"
                     min="0"
+                    max="100"
                     placeholder="—"
                     value={target[m] ?? ""}
                     onChange={(e) => setMonth(setTarget)(m, e.target.value)}
                   />
                   <input
-                    style={{ ...inp, padding: "5px 8px" }}
+                    style={{
+                      ...inp,
+                      padding: "5px 8px",
+                      ...(mErr.achieved ? { borderColor: C.red } : {}),
+                    }}
                     type="number"
                     min="0"
+                    max="100"
                     placeholder="—"
                     value={achieved[m] ?? ""}
                     onChange={(e) => setMonth(setAchieved)(m, e.target.value)}
@@ -743,9 +935,11 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                         : cumulativeCheck[m]?.exceedsTarget || cumulativeCheck[m]?.exceedsAchieved
                         ? { borderColor: C.red }
                         : {}),
+                      ...(mErr.claimed ? { borderColor: C.red } : {}),
                     }}
                     type="number"
                     min="0"
+                    max="100"
                     placeholder="—"
                     disabled={!(num(target[m]) > 0)}
                     title={
@@ -767,6 +961,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                       ...(m === form.down_payment_month && num(form.down_payment) > 0 && num(received[m]) > 0
                         ? { borderColor: C.red }
                         : {}),
+                      ...(mErr.received ? { borderColor: C.red } : {}),
                     }}
                     type="number"
                     min="0"
@@ -776,7 +971,21 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                     onChange={(e) => setMonth(setReceived)(m, e.target.value)}
                   />
                 </div>
-              ))}
+                {Object.keys(mErr).length > 0 && (
+                  <div style={{ padding: "0 12px 5px", fontSize: 11, color: C.red }}>
+                    {[
+                      mErr.target && `Target %: ${mErr.target}`,
+                      mErr.achieved && `Achieved %: ${mErr.achieved}`,
+                      mErr.claimed && `Claimed %: ${mErr.claimed}`,
+                      mErr.received && `Received $: ${mErr.received}`,
+                    ]
+                      .filter(Boolean)
+                      .join("  ·  ")}
+                  </div>
+                )}
+                </div>
+                );
+              })}
             </div>
           </div>
 
@@ -918,16 +1127,18 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
           </button>
           <button
             onClick={handleSubmit}
-            disabled={saving}
+            disabled={saving || validation.hasErrors}
+            title={validation.hasErrors ? "Fix the highlighted fields before saving" : ""}
             style={{
               padding: "9px 20px",
               borderRadius: 8,
               border: "none",
-              background: C.blue,
-              color: "#06121f",
+              background: validation.hasErrors ? C.border : C.blue,
+              color: validation.hasErrors ? C.textMuted : "#06121f",
               fontSize: 13,
               fontWeight: 700,
-              cursor: saving ? "not-allowed" : "pointer",
+              cursor: saving || validation.hasErrors ? "not-allowed" : "pointer",
+              opacity: validation.hasErrors ? 0.7 : 1,
               display: "flex",
               alignItems: "center",
               gap: 6,
