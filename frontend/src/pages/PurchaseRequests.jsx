@@ -217,6 +217,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     const locations = rows.map((s) => ({
       loc: s.location_code || "—",
       qty: Number(s.quantity_in_stock) || 0,
+      row: s, // source inventory row, used to link on button click
     }));
     return { locations, total: locations.reduce((sum, l) => sum + l.qty, 0) };
   };
@@ -407,6 +408,38 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                   <input type="number" className={`${inp} bg-[#F9FAFB] cursor-not-allowed`} value={autoBuy} readOnly title="Auto-calculated: Total Qty − Stock Qty" />
                 </div>
               </div>
+
+              {/* Per-location quick-fill buttons — click to pull that pallet's stock into From stock */}
+              {(() => {
+                const info = getStockInfo(it.description);
+                const inStock = info ? info.locations.filter((l) => l.qty > 0) : [];
+                if (inStock.length === 0) return null;
+                const total = Number(it.qty) || 0;
+                return (
+                  <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[#9CA3AF]">Pull from stock:</span>
+                    {inStock.map((l) => {
+                      const active = it.inventory_id && String(it.inventory_id) === String(l.row.id);
+                      const fill = total > 0 ? Math.min(l.qty, total) : 0;
+                      return (
+                        <button key={l.row.id} type="button"
+                          disabled={total <= 0}
+                          onClick={() => useFromStock(i, l.row)}
+                          title={total <= 0 ? "Enter Total Qty first" : `Fill From stock with ${fill} from ${l.loc}${l.qty > total ? ` (capped at ${total})` : ""}`}
+                          className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                            total <= 0
+                              ? "cursor-not-allowed border-[#E5E7EB] bg-[#F9FAFB] text-[#9CA3AF]"
+                              : active
+                              ? "border-[#059669] bg-[#ECFDF5] text-[#059669]"
+                              : "border-[#C7D2FE] bg-[#EEF2FF] text-[#6366F1] hover:bg-[#E0E7FF]"
+                          }`}>
+                          {l.loc} · {l.qty}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {/* Stock toggle */}
               <div className="px-3 pb-3">
