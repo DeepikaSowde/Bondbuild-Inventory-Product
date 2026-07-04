@@ -206,6 +206,10 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     setDescSuggest({ idx: i, list: matches });
   };
 
+  // Claimable stock = physical on hand minus what's already reserved by other
+  // raised STOCK POs. This is what a drafter can actually pull from.
+  const availOf = (s) => Math.max(0, (Number(s?.quantity_in_stock) || 0) - (Number(s?.reserved_qty) || 0));
+
   // Derive stock availability for a description by matching it to the catalogue.
   // Aggregates every inventory row sharing that item's label (all its locations).
   // Returns null for free-text (non-catalogue) descriptions so no tag is shown.
@@ -216,7 +220,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     if (rows.length === 0) return null;
     const locations = rows.map((s) => ({
       loc: s.location_code || "—",
-      qty: Number(s.quantity_in_stock) || 0,
+      qty: availOf(s),
       row: s, // source inventory row, used to link on button click
     }));
     return { locations, total: locations.reduce((sum, l) => sum + l.qty, 0) };
@@ -227,7 +231,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     setForm((f) => ({ ...f, items: f.items.map((it, x) => {
       if (x !== i) return it;
       const total = Number(it.qty) || 0;
-      const avail = Number(s.quantity_in_stock) || 0;
+      const avail = availOf(s);
       const stock = Math.min(total, avail);
       const buy = Math.max(0, total - stock);
       return {
@@ -473,7 +477,9 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                         <tbody>
                           {stockList.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-[#9CA3AF]">No stock loaded.</td></tr>}
                           {stockList.map((s) => {
-                            const enough = Number(s.quantity_in_stock) > 0;
+                            const avail = availOf(s);
+                            const reserved = Number(s.reserved_qty) || 0;
+                            const enough = avail > 0;
                             return (
                               <tr key={s.id}>
                                 <td className="border-b border-[#F3F4F6] px-2.5 py-1.5">{s.location_code || "—"}</td>
@@ -482,7 +488,10 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                                   {s.profile_name && <div className="text-[10px] text-[#9CA3AF] mt-0.5">{s.profile_name}</div>}
                                 </td>
                                 <td className="border-b border-[#F3F4F6] px-2.5 py-1.5">{s.size || s.item_name || "—"}</td>
-                                <td className="border-b border-[#F3F4F6] px-2.5 py-1.5 font-bold text-[#059669]">{s.quantity_in_stock}</td>
+                                <td className="border-b border-[#F3F4F6] px-2.5 py-1.5 font-bold text-[#059669]">
+                                  {avail}
+                                  {reserved > 0 && <span className="ml-1 text-[10px] font-semibold text-[#D97706]">({reserved} blocked)</span>}
+                                </td>
                                 <td className="border-b border-[#F3F4F6] px-2.5 py-1.5">
                                   <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${enough ? "bg-[#ECFDF5] text-[#059669]" : "bg-[#FEF2F2] text-[#DC2626]"}`}>{enough ? "IN STOCK" : "OUT"}</span>
                                 </td>

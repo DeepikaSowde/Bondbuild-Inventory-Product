@@ -57,7 +57,12 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
             <Td>{p.po_type === "STOCK" ? <span className="text-[#6366F1]">From stock <span className="text-[11px] text-[#9CA3AF]">@ {p.source_location}</span></span> : p.supplier_name}</Td>
             <Td>{p.po_date?.slice(0, 10)}</Td>
             {canSeeAmount && <Td align="right">{money(p.amount)}</Td>}
-            <Td><Badge status={p.status} /></Td>
+            <Td>
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                <Badge status={p.status} />
+                {p.overdue && <span className="rounded bg-[#FEF2F2] px-2 py-0.5 text-[11px] font-bold text-[#DC2626]" title="STOCK PO open >30 days — awaiting the FIC. Consider cancelling to release the reserved stock.">⏰ Overdue</span>}
+              </span>
+            </Td>
             <Td>{p.delivery_stage ? <span className="rounded bg-[#FEF3C7] px-2 py-0.5 text-[11px] font-bold text-[#D97706]">{stageLabel(p.delivery_stage)}</span> : <span className="text-[#9CA3AF]">—</span>}</Td>
             <Td align="right"><Btn variant="ghost" small onClick={() => api.po(p.po_no).then(setView)}>Open</Btn></Td>
           </tr>

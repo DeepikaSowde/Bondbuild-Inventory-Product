@@ -281,16 +281,39 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
     const stockItems = pr.items.filter((it) => Number(it.stock_qty) > 0);
     if (!stockItems.length) return fail(res, 400, "This PR has no from-stock items");
     await withTransaction(async (c) => {
-      // price stock from inventory + flip AWAITING_PURCHASER -> PENDING_FIC
-      await c.query(
-        `UPDATE pr_items pi
-         SET stock_status = 'PENDING_FIC',
-             stock_unit_price = COALESCE(inv.unit_price, pi.stock_unit_price, 0)
-         FROM inventory inv
-         WHERE pi.inventory_id = inv.id AND pi.pr_id = $1
-           AND pi.stock_qty > 0 AND pi.stock_status = 'AWAITING_PURCHASER'`,
+      // Reserve the stock, then flip AWAITING_PURCHASER -> PENDING_FIC.
+      // Each item locks its inventory row, checks that enough is still
+      // un-reserved (quantity_in_stock - reserved_qty), and bumps reserved_qty.
+      // If any item can't be covered, the whole send-to-FIC rolls back so a
+      // second Purchaser can't over-claim the same pallet.
+      const toSend = await c.query(
+        `SELECT id, inventory_id, stock_qty, profile_code
+           FROM pr_items
+          WHERE pr_id = $1 AND stock_qty > 0
+            AND stock_status = 'AWAITING_PURCHASER' AND inventory_id IS NOT NULL`,
         [pr.id]
       );
+      for (const it of toSend.rows) {
+        const invr = await c.query(
+          "SELECT quantity_in_stock, reserved_qty, unit_price FROM inventory WHERE id = $1 FOR UPDATE",
+          [it.inventory_id]
+        );
+        if (!invr.rows.length) throw new Error(`Inventory item missing for ${it.profile_code}`);
+        const avail = Number(invr.rows[0].quantity_in_stock) - Number(invr.rows[0].reserved_qty);
+        if (avail < Number(it.stock_qty))
+          throw new Error(`Only ${avail} of ${it.profile_code} still available (rest already reserved) — needed ${it.stock_qty}`);
+        await c.query(
+          "UPDATE inventory SET reserved_qty = reserved_qty + $1 WHERE id = $2",
+          [it.stock_qty, it.inventory_id]
+        );
+        await c.query(
+          `UPDATE pr_items
+              SET stock_status = 'PENDING_FIC',
+                  stock_unit_price = COALESCE($1, stock_unit_price, 0)
+            WHERE id = $2`,
+          [invr.rows[0].unit_price, it.id]
+        );
+      }
 
       // Create the STOCK PO(s) — one per source pallet/location, value = inventory price.
       // Only if not already created (re-send safe).
@@ -339,7 +362,11 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
     const sentPR = await getPR(pr.pr_no);
     Email.stockToFic(sentPR);
     ok(res, sentPR);
-  } catch (e) { fail(res, 500, e.message); }
+  } catch (e) {
+    // Reservation conflicts (over-claimed stock) are a 409, not a server error.
+    const conflict = /still available|already reserved/i.test(e.message);
+    fail(res, conflict ? 409 : 500, e.message);
+  }
 });
 
 // ── FIC reduces stock for one PR item (PR→inventory action) ──

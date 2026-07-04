@@ -47,7 +47,11 @@ router.get("/", async (req, res) => {
       params.push(`%${q}%`);
       where.push(`(po_no ILIKE $${params.length} OR project_name ILIKE $${params.length} OR supplier_name ILIKE $${params.length})`);
     }
-    const sql = `SELECT * FROM purchase_orders ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY po_date DESC, id DESC`;
+    // `overdue` is computed at read time (no stored state, no scheduler): a STOCK
+    // PO still OPEN more than 30 days after it was raised is awaiting the FIC.
+    const sql = `SELECT *,
+        (po_type = 'STOCK' AND status = 'OPEN' AND po_date < NOW() - INTERVAL '30 days') AS overdue
+      FROM purchase_orders ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY po_date DESC, id DESC`;
     const { rows } = await db.query(sql, params);
     ok(res, rows, { count: rows.length });
   } catch (e) { fail(res, 500, e.message); }
@@ -203,6 +207,31 @@ router.post("/:poNo/cancel", canDo("cancel_po"), async (req, res) => {
         "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'CANCEL','OPEN','CANCELLED',$2,$3,$4)",
         [po.id, req.user.name, req.user.role, req.body?.reason || ""]
       );
+      // Cancelling a STOCK PO releases its reservation: the promised pieces go
+      // back to "available", and the PR items return to the Purchaser to
+      // re-source (stock again, or switch to buy). Physical stock is untouched.
+      if (po.po_type === "STOCK") {
+        // Match the PO's location group exactly the way the STOCK PO was built
+        // at send-to-FIC (key = stock_location || 'Stock'), so multi-location
+        // PRs release only the items belonging to *this* PO.
+        const held = await c.query(
+          `SELECT id, inventory_id, stock_qty FROM pr_items
+            WHERE pr_id = $1 AND COALESCE(stock_location, 'Stock') = COALESCE($2, 'Stock')
+              AND stock_qty > 0 AND stock_status = 'PENDING_FIC' AND inventory_id IS NOT NULL
+            FOR UPDATE`,
+          [po.pr_id, po.source_location]
+        );
+        for (const it of held.rows) {
+          await c.query(
+            "UPDATE inventory SET reserved_qty = GREATEST(0, reserved_qty - $1) WHERE id = $2",
+            [it.stock_qty, it.inventory_id]
+          );
+          await c.query(
+            "UPDATE pr_items SET stock_status = 'AWAITING_PURCHASER' WHERE id = $1",
+            [it.id]
+          );
+        }
+      }
     });
     ok(res, await getPO(po.po_no));
   } catch (e) { fail(res, 500, e.message); }

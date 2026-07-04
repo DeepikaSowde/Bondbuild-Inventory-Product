@@ -668,28 +668,48 @@ export default function StockPage() {
                       }}
                     >
                       {col.key === "stock_status" ? (
-                        <span
-                          style={{
-                            fontSize: 11,
-                            fontWeight: 700,
-                            whiteSpace: "nowrap",
-                            color:
-                              item[col.key] === "OK"
-                                ? "#059669"
-                                : item[col.key] === "LOW_STOCK"
-                                  ? "#D97706"
-                                  : "#DC2626",
-                            background:
-                              item[col.key] === "OK"
-                                ? "#ECFDF5"
-                                : item[col.key] === "LOW_STOCK"
-                                  ? "#FEF3C7"
-                                  : "#FEF2F2",
-                            padding: "3px 10px",
-                            borderRadius: 20,
-                          }}
-                        >
-                          {item[col.key]}
+                        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              whiteSpace: "nowrap",
+                              color:
+                                item[col.key] === "OK"
+                                  ? "#059669"
+                                  : item[col.key] === "LOW_STOCK"
+                                    ? "#D97706"
+                                    : "#DC2626",
+                              background:
+                                item[col.key] === "OK"
+                                  ? "#ECFDF5"
+                                  : item[col.key] === "LOW_STOCK"
+                                    ? "#FEF3C7"
+                                    : "#FEF2F2",
+                              padding: "3px 10px",
+                              borderRadius: 20,
+                            }}
+                          >
+                            {item[col.key]}
+                          </span>
+                          {Number(item.reserved_qty) > 0 && (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                whiteSpace: "nowrap",
+                                color: Number(item.reserved_qty) >= Number(item.quantity_in_stock) ? "#DC2626" : "#D97706",
+                                background: Number(item.reserved_qty) >= Number(item.quantity_in_stock) ? "#FEF2F2" : "#FEF3C7",
+                                padding: "3px 10px",
+                                borderRadius: 20,
+                              }}
+                              title="Reserved by a raised STOCK PO, not yet issued"
+                            >
+                              {Number(item.reserved_qty) >= Number(item.quantity_in_stock)
+                                ? "🔒 BLOCKED"
+                                : `🔒 ${item.reserved_qty} BLOCKED`}
+                            </span>
+                          )}
                         </span>
                       ) : col.key === "unit_price" ||
                         col.key === "total_value" ? (
@@ -699,6 +719,11 @@ export default function StockPage() {
                       ) : col.key === "quantity_in_stock" ? (
                         <span style={{ fontWeight: 700, fontSize: 13 }}>
                           {item[col.key]}
+                          {Number(item.reserved_qty) > 0 && (
+                            <span style={{ fontWeight: 600, fontSize: 11, color: "#6B7280", marginLeft: 6 }}>
+                              ({Math.max(0, Number(item.quantity_in_stock) - Number(item.reserved_qty))} free)
+                            </span>
+                          )}
                         </span>
                       ) : (
                         item[col.key]
