@@ -9,6 +9,10 @@ const emptyItem = () => ({
   remarks: "", stock_qty: "", inventory_id: "", stock_location: "", buy_qty: "",
 });
 
+// Human label for an inventory row — also what a picked suggestion writes into Description.
+const stockLabelOf = (s) =>
+  [s.profile_name, s.size].filter(Boolean).join(" ") || s.item_name || s.item_code || "";
+
 export default function PurchaseRequests({ user, perms = {}, notify, refreshInbox }) {
   const [prs, setPRs] = useState([]);
   const [filter, setFilter] = useState("All");
@@ -126,6 +130,12 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   const [stockLoaded, setStockLoaded] = useState(false);
   const [descSuggest, setDescSuggest] = useState({ idx: -1, list: [] });
 
+  // Load factory stock once on open so availability tags can show for any item
+  // (including descriptions pre-filled when editing an existing PR).
+  useEffect(() => {
+    api.inventory().then((l) => { setStockList(l); setStockLoaded(true); }).catch(() => {});
+  }, []);
+
   const setItem = (i, key, val) => setForm((f) => ({
     ...f,
     items: f.items.map((it, x) => {
@@ -176,13 +186,39 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
       try { list = await api.inventory(); setStockList(list); setStockLoaded(true); } catch { return; }
     }
     const q = val.toLowerCase();
-    const matches = list.filter((s) =>
-      (s.profile_name && s.profile_name.toLowerCase().includes(q)) ||
-      (s.size && s.size.toLowerCase().includes(q)) ||
-      (s.item_code && s.item_code.toLowerCase().includes(q)) ||
-      (s.item_name && s.item_name.toLowerCase().includes(q))
-    ).slice(0, 8);
+    // Filter by partial text, then collapse rows that share a label (same item in
+    // multiple locations) so each catalogue item appears once in the dropdown.
+    const seen = new Set();
+    const matches = [];
+    for (const s of list) {
+      if (matches.length >= 8) break;
+      const hit =
+        (s.profile_name && s.profile_name.toLowerCase().includes(q)) ||
+        (s.size && s.size.toLowerCase().includes(q)) ||
+        (s.item_code && s.item_code.toLowerCase().includes(q)) ||
+        (s.item_name && s.item_name.toLowerCase().includes(q));
+      if (!hit) continue;
+      const key = stockLabelOf(s).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      matches.push(s);
+    }
     setDescSuggest({ idx: i, list: matches });
+  };
+
+  // Derive stock availability for a description by matching it to the catalogue.
+  // Aggregates every inventory row sharing that item's label (all its locations).
+  // Returns null for free-text (non-catalogue) descriptions so no tag is shown.
+  const getStockInfo = (description) => {
+    const d = (description || "").trim().toLowerCase();
+    if (!d || stockList.length === 0) return null;
+    const rows = stockList.filter((s) => stockLabelOf(s).toLowerCase() === d);
+    if (rows.length === 0) return null;
+    const locations = rows.map((s) => ({
+      loc: s.location_code || "—",
+      qty: Number(s.quantity_in_stock) || 0,
+    }));
+    return { locations, total: locations.reduce((sum, l) => sum + l.qty, 0) };
   };
 
   // "Use from Stock": link the inventory row, pre-fill From-Stock qty, set code/description
@@ -297,7 +333,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                     {descSuggest.idx === i && descSuggest.list.length > 0 && (
                       <div className="absolute left-0 top-full z-50 mt-0.5 w-full rounded-lg border border-[#E5E7EB] bg-white shadow-lg">
                         {descSuggest.list.map((s) => {
-                          const label = [s.profile_name, s.size].filter(Boolean).join(" ") || s.item_name || s.item_code;
+                          const label = stockLabelOf(s);
                           return (
                             <button key={s.id} type="button"
                               className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] hover:bg-[#EEF2FF] first:rounded-t-lg last:rounded-b-lg"
@@ -311,6 +347,27 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                       </div>
                     )}
                   </div>
+                  {/* Stock availability tag — shows for catalogue items, hidden for free-text */}
+                  {(() => {
+                    const info = getStockInfo(it.description);
+                    if (!info) return null;
+                    const inStock = info.locations.filter((l) => l.qty > 0);
+                    if (inStock.length === 0)
+                      return (
+                        <div className="mt-1 text-[11px] font-semibold text-[#DC2626]">
+                          ⛔ Out of Stock (Avail: 0)
+                        </div>
+                      );
+                    return (
+                      <div className="mt-1 text-[11px] font-semibold text-[#059669]">
+                        📦 From Stock{" "}
+                        {inStock.map((l) => `@${l.loc} (Avail: ${l.qty})`).join(", ")}
+                        {inStock.length > 1 && (
+                          <span className="font-normal text-[#6B7280]"> · Total Avail: {info.total}</span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div><label className={lbl}>Colour</label><input className={inp} value={it.colour} onChange={(e) => setItem(i, "colour", e.target.value)} placeholder="e.g. SS, RAL 7016" /></div>
               </div>
