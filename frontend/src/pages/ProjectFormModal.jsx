@@ -327,6 +327,27 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     return result;
   }, [target, claimed, achieved, visibleMonths]);
 
+  // ── Soft (non-blocking) warnings: cumulative Claimed running ahead of the
+  // cumulative Target / Achieved. These inform but never prevent saving. ──
+  const claimWarnings = useMemo(() => {
+    const out = [];
+    const firstT = visibleMonths.find((m) => cumulativeCheck[m]?.exceedsTarget);
+    if (firstT) {
+      const c = cumulativeCheck[firstT];
+      out.push(
+        `Cumulative Claimed (${Math.round(c.cumClaimed)}%) exceeds Cumulative Target (${Math.round(c.cumTarget)}%) at ${firstT}. Monthly claims can vary, but ideally the running total stays within the running target.`
+      );
+    }
+    const firstA = visibleMonths.find((m) => cumulativeCheck[m]?.exceedsAchieved);
+    if (firstA) {
+      const c = cumulativeCheck[firstA];
+      out.push(
+        `Cumulative Claimed (${Math.round(c.cumClaimed)}%) exceeds Cumulative Achieved (${Math.round(c.cumAchieved)}%) at ${firstA}. Ideally you only claim work that has been achieved.`
+      );
+    }
+    return out;
+  }, [cumulativeCheck, visibleMonths]);
+
   // ── Part A hard validation (per-month ≤100, totals ≤100, no negatives) ──
   // Runs on every change; blocks the save button and submission when it fails.
   const validation = useMemo(() => {
@@ -474,41 +495,9 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setError(`Claimed % requires Target % to be set first for: ${monthsClaimedWithoutTarget.slice(0, 3).join(", ")}${monthsClaimedWithoutTarget.length > 3 ? "…" : ""}`);
       return;
     }
-    let cumT = 0, cumC = 0, cumulativeViolation = null;
-    for (const m of visibleMonths) {
-      cumT += num(target[m]);
-      cumC += num(claimed[m]);
-      if (cumC > cumT + 0.01 && cumC > 0) {
-        cumulativeViolation = { month: m, cumTarget: cumT, cumClaimed: cumC };
-        break;
-      }
-    }
-    if (cumulativeViolation) {
-      setError(
-        `Cumulative Claimed (${Math.round(cumulativeViolation.cumClaimed)}%) exceeds Cumulative Target (${Math.round(cumulativeViolation.cumTarget)}%) at ${cumulativeViolation.month}. Monthly claims can vary but the running total must not exceed the running target.`
-      );
-      return;
-    }
-    let cumA = 0, cumC2 = 0, achievedViolation = null;
-    for (const m of visibleMonths) {
-      cumA += num(achieved[m]);
-      cumC2 += num(claimed[m]);
-      if (cumA > 0 && cumC2 > cumA + 0.01 && cumC2 > 0) {
-        achievedViolation = { month: m, cumAchieved: cumA, cumClaimed: cumC2 };
-        break;
-      }
-    }
-    if (achievedViolation) {
-      setError(
-        `Cumulative Claimed (${Math.round(achievedViolation.cumClaimed)}%) exceeds Cumulative Achieved (${Math.round(achievedViolation.cumAchieved)}%) at ${achievedViolation.month}. You can only claim work that has been achieved.`
-      );
-      return;
-    }
-    const totalClaimedSum = Object.values(claimed).reduce((s, v) => s + num(v), 0);
-    if (totalClaimedSum > calc.autoSitePct && calc.autoSitePct > 0) {
-      setError(`Total Claimed (${Math.round(totalClaimedSum)}%) cannot exceed Site Progress (${Math.round(calc.autoSitePct)}%)`);
-      return;
-    }
+    // NOTE: Cumulative Claimed running ahead of cumulative Target / Achieved
+    // (and of Site Progress) are now non-blocking warnings shown via
+    // `claimWarnings` in the form body — they no longer prevent saving.
     if (calc.claimedMonthlySum > 1) {
       setError(`Monthly Claimed % total is ${Math.round(calc.claimedMonthlySum * 100)}% — cannot exceed 100%`);
       return;
@@ -933,7 +922,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                       ...(!(num(target[m]) > 0)
                         ? { opacity: 0.35, cursor: "not-allowed", background: "#0c0e16" }
                         : cumulativeCheck[m]?.exceedsTarget || cumulativeCheck[m]?.exceedsAchieved
-                        ? { borderColor: C.red }
+                        ? { borderColor: C.amber } // soft warning, not a blocker
                         : {}),
                       ...(mErr.claimed ? { borderColor: C.red } : {}),
                     }}
@@ -1010,6 +999,25 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
           >
             <Plus size={13} /> Add Month
           </button>
+
+          {/* Soft (non-blocking) warnings: cumulative Claimed ahead of Target / Achieved */}
+          {claimWarnings.map((msg, idx) => (
+            <div key={idx} style={{
+              background: "#1c1500",
+              border: `1px solid ${C.amber}`,
+              borderRadius: 8,
+              padding: "9px 14px",
+              fontSize: 12,
+              color: C.amber,
+              marginTop: 12,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+            }}>
+              <span>⚠️</span>
+              <span>{msg}</span>
+            </div>
+          ))}
 
           {/* Soft warning: site progress ahead of claimed */}
           {calc.autoSitePct > calc.totalClaimed * 100 && calc.autoSitePct > 0 && (
