@@ -301,7 +301,7 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
         if (!invr.rows.length) throw new Error(`Inventory item missing for ${it.profile_code}`);
         const avail = Number(invr.rows[0].quantity_in_stock) - Number(invr.rows[0].reserved_qty);
         if (avail < Number(it.stock_qty))
-          throw new Error(`Only ${avail} of ${it.profile_code} still available (rest already reserved) — needed ${it.stock_qty}`);
+          throw new Error(`Only ${avail} of ${it.profile_code} still available (rest already reserved) — needed ${it.stock_qty}. Please raise new PO`);
         await c.query(
           "UPDATE inventory SET reserved_qty = reserved_qty + $1 WHERE id = $2",
           [it.stock_qty, it.inventory_id]
