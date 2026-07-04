@@ -245,7 +245,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   };
 
   const submit = async () => {
-    if (!form.job_no.trim()) return notify("Job No is required", "error");
+    if (!jobValid) return notify("Job No must contain at least one letter or number", "error");
     if (!form.requested_by.trim()) return notify("Requested By is required", "error");
     if (!form.items.some((it) => it.description.trim())) return notify("Description is required — add at least one item with a description", "error");
     if (form.items.some((it) => Number(it.qty) < 0)) return notify("Quantity cannot be negative", "error");
@@ -272,6 +272,10 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     } catch (e) { notify(apiError(e), "error"); } finally { setBusy(false); }
   };
 
+  // Job No must contain at least one letter or digit — blocks blank and
+  // punctuation-only junk like "" or " " that would otherwise pass a trim check.
+  const jobValid = /[a-z0-9]/i.test(form.job_no || "");
+
   const lbl = "block text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF] mb-1";
   const inp = "w-full box-border border border-[#E5E7EB] rounded-lg px-2.5 py-2 text-[12px] outline-none bg-white focus:border-[#6366F1]";
 
@@ -283,7 +287,15 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
 
       {/* Header fields */}
       <div className="mb-4 grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-3">
-        <Field label="Job No *"><Input value={form.job_no} onChange={(e) => setForm({ ...form, job_no: e.target.value })} onBlur={lookupJob} placeholder="JN426" /></Field>
+        <Field label="Job No *">
+          <Input value={form.job_no} onChange={(e) => setForm({ ...form, job_no: e.target.value })} onBlur={lookupJob} placeholder="JN426"
+            className={!jobValid ? "!border-[#DC2626] focus:!border-[#DC2626]" : ""} />
+          {!jobValid && (
+            <span className="mt-1 block text-[10px] font-semibold text-[#DC2626]">
+              {form.job_no.trim() ? "Must contain a letter or number" : "Job No is required"}
+            </span>
+          )}
+        </Field>
         <Field label="Project name"><Input value={form.project_name} maxLength={200} onChange={(e) => setForm({ ...form, project_name: e.target.value })} placeholder="12 Harlyn Road" /></Field>
         <Field label="Location / scope"><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
         <Field label="Date required"><Input value={form.date_required} onChange={(e) => setForm({ ...form, date_required: e.target.value })} placeholder="ASAP, 01-Apr-26" /></Field>
@@ -532,7 +544,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
 
       <div className="mt-5 flex justify-end gap-2.5">
         <Btn variant="soft" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={submit} disabled={busy}>{editPR ? "Save" : "Submit request"}</Btn>
+        <Btn onClick={submit} disabled={busy || !jobValid}>{editPR ? "Save" : "Submit request"}</Btn>
       </div>
     </Modal>
   );
