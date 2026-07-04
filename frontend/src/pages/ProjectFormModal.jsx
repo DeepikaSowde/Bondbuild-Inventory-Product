@@ -7,28 +7,32 @@ import { useState, useMemo, useEffect } from "react";
 import api from "../services/api";
 import { X, Plus, Trash2, Save, Loader2 } from "lucide-react";
 
-// Month keys MUST match the dashboard/parser exactly
-const MONTHS = [
-  "Jan'25",
-  "Feb'25",
-  "Mar'25",
-  "Apr'25",
-  "May'25",
-  "June'25",
-  "July'25",
-  "Aug'25",
-  "Sept'25",
-  "Oct'25",
-  "Nov'25",
-  "Dec'25",
-  "Jan'26",
-  "Feb'26",
-  "Mar'26",
-  "Apr'26",
-  "May'26",
-  "Jun'26",
-  "July'26",
-];
+const MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function makeMonthKey(year, monthIdx) {
+  return `${MONTH_LABELS[monthIdx]}'${String(year).slice(2)}`;
+}
+function currentMonthKey() {
+  const n = new Date();
+  return makeMonthKey(n.getFullYear(), n.getMonth());
+}
+function nextMonthKey(key) {
+  const m = String(key).match(/^([A-Za-z]+)'(\d{2})$/);
+  if (!m) return makeMonthKey(new Date().getFullYear(), new Date().getMonth() + 1);
+  const yr = 2000 + parseInt(m[2], 10);
+  // normalise label to 0-11 index via MONTH_IDX
+  const idx = MONTH_IDX[m[1]] ?? 0;
+  const nextIdx = (idx + 1) % 12;
+  return makeMonthKey(nextIdx === 0 ? yr + 1 : yr, nextIdx);
+}
+// Dropdown options for Down Payment Month — Jan'25 → Dec'27
+const DROPDOWN_MONTHS = (() => {
+  const out = [];
+  for (let yr = 2025; yr <= 2027; yr++)
+    for (let mi = 0; mi < 12; mi++) out.push(makeMonthKey(yr, mi));
+  return out;
+})();
+
 const STATUSES = ["Upcoming Project", "In Progress", "Completed", "Closed"];
 const RISK_LEVELS = [
   { v: "high", l: "High" },
@@ -135,6 +139,10 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
   const [achieved, setAchieved] = useState({}); // {month: decimal} actual site progress %
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [visibleMonths, setVisibleMonths] = useState([currentMonthKey()]);
+
+  const addMonth = () =>
+    setVisibleMonths((prev) => [...prev, nextMonthKey(prev[prev.length - 1])]);
 
   // Prefill when editing
   useEffect(() => {
@@ -161,18 +169,33 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
         });
         return out;
       };
-      setTarget(toPct(project.target_monthly || project.targetMonthly));
-      setClaimed(toPct(project.claimed_monthly || project.claimedMonthly));
-      setReceived(project.received_monthly || project.receivedMonthly || {});
-      // achieved is stored as decimals (0-1) in DB; show as whole percents in the form
-      const rawAchieved =
-        project.achieved_monthly || project.achievedMonthly || {};
+      const tgt = toPct(project.target_monthly || project.targetMonthly);
+      const clm = toPct(project.claimed_monthly || project.claimedMonthly);
+      const rcv = project.received_monthly || project.receivedMonthly || {};
+      const rawAchieved = project.achieved_monthly || project.achievedMonthly || {};
       const achievedPct = {};
       Object.entries(rawAchieved).forEach(([m, v]) => {
         const x = parseFloat(v);
         if (!isNaN(x)) achievedPct[m] = x <= 1 ? Math.round(x * 1000) / 10 : x;
       });
+      setTarget(tgt);
+      setClaimed(clm);
+      setReceived(rcv);
       setAchieved(achievedPct);
+
+      // Build visible month list from existing data (sorted chronologically)
+      const dataMonths = new Set([
+        ...Object.keys(tgt), ...Object.keys(clm),
+        ...Object.keys(rcv), ...Object.keys(achievedPct),
+      ]);
+      const sorted = [...dataMonths].sort((a, b) => {
+        const ma = monthMeta(a), mb = monthMeta(b);
+        if (!ma || !mb) return 0;
+        return ma.year !== mb.year ? ma.year - mb.year : ma.idx - mb.idx;
+      });
+      const curr = currentMonthKey();
+      if (!sorted.includes(curr)) sorted.push(curr);
+      setVisibleMonths(sorted.length > 0 ? sorted : [curr]);
     }
   }, [project]);
 
@@ -219,7 +242,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
   const cumulativeCheck = useMemo(() => {
     let cumT = 0, cumC = 0, cumA = 0;
     const result = {};
-    MONTHS.forEach((m) => {
+    visibleMonths.forEach((m) => {
       cumT += num(target[m]);
       cumC += num(claimed[m]);
       cumA += num(achieved[m]);
@@ -232,7 +255,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       };
     });
     return result;
-  }, [target, claimed, achieved]);
+  }, [target, claimed, achieved, visibleMonths]);
 
   const setMonth = (setter) => (month, val) =>
     setter((prev) => {
@@ -257,21 +280,21 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setError("Down Payment cannot be negative");
       return;
     }
-    const negativeMonths = MONTHS.filter(
+    const negativeMonths = visibleMonths.filter(
       (m) => num(target[m]) < 0 || num(achieved[m]) < 0 || num(claimed[m]) < 0 || num(received[m]) < 0
     );
     if (negativeMonths.length > 0) {
       setError(`Negative values are not allowed. Check: ${negativeMonths.slice(0, 3).join(", ")}`);
       return;
     }
-    const monthsOver100 = MONTHS.filter(
+    const monthsOver100 = visibleMonths.filter(
       (m) => num(target[m]) > 100 || num(achieved[m]) > 100 || num(claimed[m]) > 100
     );
     if (monthsOver100.length > 0) {
       setError(`Monthly % values cannot exceed 100%. Check: ${monthsOver100.slice(0, 3).join(", ")}`);
       return;
     }
-    const hasMonthlyData = MONTHS.some(
+    const hasMonthlyData = visibleMonths.some(
       (m) => num(target[m]) > 0 || num(achieved[m]) > 0 || num(claimed[m]) > 0 || num(received[m]) > 0
     );
     if (contractSum === 0 && (downPayment > 0 || hasMonthlyData)) {
@@ -310,7 +333,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       return;
     }
     let cumT = 0, cumC = 0, cumulativeViolation = null;
-    for (const m of MONTHS) {
+    for (const m of visibleMonths) {
       cumT += num(target[m]);
       cumC += num(claimed[m]);
       if (cumC > cumT + 0.01 && cumC > 0) {
@@ -325,7 +348,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       return;
     }
     let cumA = 0, cumC2 = 0, achievedViolation = null;
-    for (const m of MONTHS) {
+    for (const m of visibleMonths) {
       cumA += num(achieved[m]);
       cumC2 += num(claimed[m]);
       if (cumA > 0 && cumC2 > cumA + 0.01 && cumC2 > 0) {
@@ -577,7 +600,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                 }
               >
                 <option value="">—</option>
-                {MONTHS.map((m) => (
+                {DROPDOWN_MONTHS.map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>
@@ -680,8 +703,8 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
               <div style={{ color: C.purple }}>Claimed %</div>
               <div style={{ color: C.green }}>Received $</div>
             </div>
-            <div style={{ maxHeight: 260, overflowY: "auto" }}>
-              {MONTHS.map((m, i) => (
+            <div style={{ maxHeight: 320, overflowY: "auto" }}>
+              {visibleMonths.map((m, i) => (
                 <div
                   key={m}
                   style={{
@@ -756,6 +779,28 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
               ))}
             </div>
           </div>
+
+          {/* Add Month button */}
+          <button
+            type="button"
+            onClick={addMonth}
+            style={{
+              marginTop: 10,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              background: "transparent",
+              border: `1px dashed ${C.border}`,
+              borderRadius: 8,
+              padding: "7px 16px",
+              fontSize: 12,
+              fontWeight: 600,
+              color: C.blue,
+              cursor: "pointer",
+            }}
+          >
+            <Plus size={13} /> Add Month
+          </button>
 
           {/* Soft warning: site progress ahead of claimed */}
           {calc.autoSitePct > calc.totalClaimed * 100 && calc.autoSitePct > 0 && (
