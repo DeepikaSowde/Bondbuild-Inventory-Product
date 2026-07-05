@@ -1815,21 +1815,27 @@ export default function ProjectProgressModule() {
       let targetAmt = 0,
         claimedAmt = 0,
         receivedAmt = 0,
+        // Contract-weighted work progress (fractions), for target-vs-achieved:
+        targetWork = 0,
+        achievedWork = 0,
         projectCount = 0;
       filtered.forEach((p) => {
         const tv = p.targetMonthly[m] || 0;
         const cv = p.claimedMonthly[m] || 0;
         const rv = p.receivedMonthly[m] || 0;
-        if (tv > 0 || rv > 0) {
+        const av = (p.achievedMonthly || {})[m] || 0;
+        if (tv > 0 || rv > 0 || av > 0) {
           targetAmt += p.contractSum * tv;
           claimedAmt += p.contractSum * cv;
           receivedAmt += rv;
+          targetWork += p.contractSum * tv;
+          achievedWork += p.contractSum * av;
           projectCount++;
         }
       });
       const gap = Math.max(0, targetAmt - receivedAmt);
-      const achievementRate =
-        targetAmt > 0 ? Math.min(1, receivedAmt / targetAmt) : 0;
+      // Achievement = actual work progress vs planned work progress (not money).
+      const achievementRate = targetWork > 0 ? achievedWork / targetWork : 0;
       return {
         month: m.replace("'25", "").replace("'26", ""),
         fullMonth: m,
@@ -5233,8 +5239,8 @@ export default function ProjectProgressModule() {
                 {/* ── Achievement rate heatmap-style row ── */}
                 <Card>
                   <CardHead
-                    title="Monthly achievement rate — target vs received"
-                    sub="How much of each month's target was actually received"
+                    title="Monthly achievement rate — target vs achieved"
+                    sub="How much of each month's planned work was actually achieved (work progress, not money)"
                   />
                   <div style={{ padding: "16px 20px" }}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
