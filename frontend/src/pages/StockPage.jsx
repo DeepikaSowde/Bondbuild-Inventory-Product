@@ -839,7 +839,6 @@ export default function StockPage() {
             zIndex: 1000,
             padding: 16,
           }}
-          onClick={() => !saving && setAddOpen(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -1055,7 +1054,6 @@ export default function StockPage() {
       {editItem && (
         <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
-          onClick={() => !saving && closeEdit()}
         >
           <div
             onClick={(e) => e.stopPropagation()}

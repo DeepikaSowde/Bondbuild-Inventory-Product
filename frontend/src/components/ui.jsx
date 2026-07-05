@@ -78,7 +78,6 @@ export function Modal({ title, onClose, children, wide, noBackdropClose }) {
   }, [onClose, noBackdropClose]);
   return (
     <div
-      onMouseDown={(e) => e.target === e.currentTarget && !noBackdropClose && onClose()}
       className="fixed inset-0 z-[100] grid place-items-center p-6 bg-[#0F0E1A]/45"
     >
       <div className={`flex max-h-[90vh] w-full flex-col rounded-2xl bg-white shadow-[0_20px_60px_rgba(0,0,0,0.25)] ${wide ? "max-w-[940px]" : "max-w-[540px]"}`}>
