@@ -1213,8 +1213,11 @@ function computeRisk(p) {
   return { level: "low", label: "Low", color: C.green };
 }
 
-function computeYearSummary(projects, year) {
-  const months = year === "2025" ? MONTHS_2025 : MONTHS_2026;
+function computeYearSummary(projects, year, monthsOverride) {
+  // monthsOverride lets callers pass an explicit month list (used by the
+  // dynamic multi-year comparison); otherwise fall back to the fixed lists.
+  const months =
+    monthsOverride || (year === "2025" ? MONTHS_2025 : MONTHS_2026);
   const active = projects.filter((p) =>
     months.some(
       (m) => (p.receivedMonthly[m] || 0) > 0 || (p.targetMonthly[m] || 0) > 0,
@@ -2028,6 +2031,29 @@ export default function ProjectProgressModule() {
     () => computeYearSummary(filtered, "2026"),
     [filtered],
   );
+
+  // ── Dynamic multi-year comparison (auto-detects every year present in data) ──
+  // Add 2027/2028 data and it appears here automatically, sorted ascending.
+  const yearComparison = useMemo(() => {
+    const yearMonths = {}; // year -> Set of month keys seen in the data
+    filtered.forEach((p) => {
+      ["receivedMonthly", "targetMonthly", "claimedMonthly", "achievedMonthly"].forEach(
+        (f) => {
+          Object.keys(p[f] || {}).forEach((k) => {
+            const yr = monthMeta(k).year;
+            (yearMonths[yr] = yearMonths[yr] || new Set()).add(k);
+          });
+        },
+      );
+    });
+    return Object.keys(yearMonths)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .map((yr) => ({
+        year: yr,
+        ...computeYearSummary(filtered, String(yr), [...yearMonths[yr]]),
+      }));
+  }, [filtered]);
 
   // ── Sorted table ──
   const sorted = useMemo(
@@ -5764,8 +5790,11 @@ export default function ProjectProgressModule() {
             };
 
             // Horizontal comparison bar for two years side by side
-            const CompareBar = ({ label, v2025, v2026, color }) => {
-              const max = Math.max(v2025, v2026, 1);
+            // Distinct color per year (cycles if there are more years than colors).
+            const YEAR_COLORS = ["#60a5fa", "#2dd4bf", "#a78bfa", "#fbbf24", "#f472b6"];
+            // values: [{ year, value }], one entry per year present in the data.
+            const CompareBar = ({ label, values }) => {
+              const max = Math.max(...values.map((d) => d.value), 1);
               return (
                 <div style={{ marginBottom: 14 }}>
                   <div
@@ -5775,85 +5804,70 @@ export default function ProjectProgressModule() {
                       fontSize: 11,
                       color: C.textMuted,
                       marginBottom: 5,
+                      gap: 8,
+                      flexWrap: "wrap",
                     }}
                   >
                     <span>{label}</span>
-                    <div style={{ display: "flex", gap: 16 }}>
-                      <span style={{ color: "#60a5fa", fontWeight: 600 }}>
-                        2025: {fmtM(v2025)}
-                      </span>
-                      <span style={{ color: "#2dd4bf", fontWeight: 600 }}>
-                        2026: {fmtM(v2026)}
-                      </span>
+                    <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                      {values.map((d, i) => (
+                        <span
+                          key={d.year}
+                          style={{
+                            color: YEAR_COLORS[i % YEAR_COLORS.length],
+                            fontWeight: 600,
+                          }}
+                        >
+                          {d.year}: {fmtM(d.value)}
+                        </span>
+                      ))}
                     </div>
                   </div>
                   <div
                     style={{ display: "flex", flexDirection: "column", gap: 4 }}
                   >
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 8 }}
-                    >
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: "#60a5fa",
-                          width: 28,
-                          textAlign: "right",
-                        }}
-                      >
-                        25
-                      </div>
-                      <div
-                        style={{
-                          flex: 1,
-                          background: C.border,
-                          borderRadius: 3,
-                          height: 8,
-                          overflow: "hidden",
-                        }}
-                      >
+                    {values.map((d, i) => {
+                      const col = YEAR_COLORS[i % YEAR_COLORS.length];
+                      return (
                         <div
+                          key={d.year}
                           style={{
-                            width: `${(v2025 / max) * 100}%`,
-                            height: "100%",
-                            background: "#60a5fa",
-                            borderRadius: 3,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
                           }}
-                        />
-                      </div>
-                    </div>
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 8 }}
-                    >
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: "#2dd4bf",
-                          width: 28,
-                          textAlign: "right",
-                        }}
-                      >
-                        26
-                      </div>
-                      <div
-                        style={{
-                          flex: 1,
-                          background: C.border,
-                          borderRadius: 3,
-                          height: 8,
-                          overflow: "hidden",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: `${(v2026 / max) * 100}%`,
-                            height: "100%",
-                            background: "#2dd4bf",
-                            borderRadius: 3,
-                          }}
-                        />
-                      </div>
-                    </div>
+                        >
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: col,
+                              width: 28,
+                              textAlign: "right",
+                            }}
+                          >
+                            {String(d.year).slice(2)}
+                          </div>
+                          <div
+                            style={{
+                              flex: 1,
+                              background: C.border,
+                              borderRadius: 3,
+                              height: 8,
+                              overflow: "hidden",
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: `${(d.value / max) * 100}%`,
+                                height: "100%",
+                                background: col,
+                                borderRadius: 3,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -6069,36 +6083,44 @@ export default function ProjectProgressModule() {
                   })}
                 </div>
 
-                {/* ── Side-by-side comparison bars ── */}
+                {/* ── Side-by-side comparison bars (dynamic across all years) ── */}
                 <Card>
                   <CardHead
-                    title="FY 2025 vs FY 2026 — head to head"
+                    title={`${
+                      yearComparison.length <= 2
+                        ? yearComparison.map((y) => `FY ${y.year}`).join(" vs ")
+                        : `FY ${yearComparison[0].year}–${yearComparison[yearComparison.length - 1].year}`
+                    } — head to head`}
                     sub="All values from filtered projects"
                   />
                   <div style={{ padding: "18px 22px" }}>
                     <CompareBar
                       label="Contract Sum"
-                      v2025={sum2025.totalContract}
-                      v2026={sum2026.totalContract}
-                      color="#60a5fa"
+                      values={yearComparison.map((y) => ({
+                        year: y.year,
+                        value: y.totalContract,
+                      }))}
                     />
                     <CompareBar
                       label="Year Received"
-                      v2025={sum2025.yearReceived}
-                      v2026={sum2026.yearReceived}
-                      color={C.green}
+                      values={yearComparison.map((y) => ({
+                        year: y.year,
+                        value: y.yearReceived,
+                      }))}
                     />
                     <CompareBar
                       label="Total Claimed"
-                      v2025={sum2025.totalClaimed}
-                      v2026={sum2026.totalClaimed}
-                      color={C.purple}
+                      values={yearComparison.map((y) => ({
+                        year: y.year,
+                        value: y.totalClaimed,
+                      }))}
                     />
                     <CompareBar
                       label="Total Pending"
-                      v2025={sum2025.totalPending}
-                      v2026={sum2026.totalPending}
-                      color={C.amber}
+                      values={yearComparison.map((y) => ({
+                        year: y.year,
+                        value: y.totalPending,
+                      }))}
                     />
                   </div>
                 </Card>
