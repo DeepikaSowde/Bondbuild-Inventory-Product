@@ -1228,6 +1228,7 @@ function computeYearSummary(projects, year) {
         s + months.reduce((ms, m) => ms + (p.receivedMonthly[m] || 0), 0),
       0,
     ),
+    lifetimeReceived: active.reduce((s, p) => s + p.totalReceived, 0),
     totalClaimed: active.reduce(
       (s, p) => s + p.contractSum * p.totalClaimedPct,
       0,
@@ -4813,7 +4814,6 @@ export default function ProjectProgressModule() {
                         style={{ fontSize: 14, fontWeight: 700, color: C.text }}
                       >
                         FY {monthlyYear} — Monthly Claimed / Received
-                        {monthlyYear === "2026" ? " + Forecast" : ""}
                       </div>
                       <div
                         style={{
@@ -4822,8 +4822,7 @@ export default function ProjectProgressModule() {
                           marginTop: 2,
                         }}
                       >
-                        Past months show Claimed $ &amp; Received $ · future
-                        months show Target $ (forecast)
+                        Claimed $ &amp; Received $ (money) per month
                       </div>
                     </div>
                     <YearTabs value={monthlyYear} onChange={setMonthlyYear} />
@@ -4843,7 +4842,6 @@ export default function ProjectProgressModule() {
                       {[
                         ["Claimed $", C.purple],
                         ["Received $", C.green],
-                        ["Target $ (forecast)", "#60a5fa"],
                       ].map(([l, c]) => (
                         <span
                           key={l}
@@ -4985,17 +4983,6 @@ export default function ProjectProgressModule() {
                               </div>
                             );
                           }}
-                        />
-                        {/* Forecast target bar (only has values in future months) */}
-                        <Bar
-                          dataKey="Target $"
-                          name="Target $ (forecast)"
-                          fill="url(#forecastHatch)"
-                          stroke="#60a5fa"
-                          strokeOpacity={0.5}
-                          strokeDasharray="4 2"
-                          maxBarSize={30}
-                          radius={[3, 3, 0, 0]}
                         />
                         {/* Actuals (only have values in past months) */}
                         <Bar
@@ -5960,7 +5947,7 @@ export default function ProjectProgressModule() {
                           <YearRing
                             pct={collRate}
                             color={C.green}
-                            label="collected"
+                            label="received"
                             value={fmtM(s.yearReceived)}
                           />
                           <YearRing
@@ -5977,7 +5964,7 @@ export default function ProjectProgressModule() {
                           />
                         </div>
 
-                        {/* 4 metric rows with mini bars */}
+                        {/* metric rows with mini bars */}
                         <div style={{ padding: "10px 20px" }}>
                           {[
                             {
@@ -5987,16 +5974,26 @@ export default function ProjectProgressModule() {
                               c: "#93c5fd",
                             },
                             {
-                              l: "Year Received",
-                              v: s.yearReceived,
-                              pct: collRate,
-                              c: C.green,
-                            },
-                            {
                               l: "Total Claimed",
                               v: s.totalClaimed,
                               pct: claimRate,
                               c: C.purple,
+                            },
+                            {
+                              l: "Received to Date",
+                              v: s.lifetimeReceived,
+                              pct:
+                                s.totalContract > 0
+                                  ? s.lifetimeReceived / s.totalContract
+                                  : 0,
+                              c: C.green,
+                            },
+                            {
+                              l: "Year Received",
+                              v: s.yearReceived,
+                              pct: collRate,
+                              c: C.green,
+                              nested: true,
                             },
                             {
                               l: "Total Pending",
@@ -6009,6 +6006,7 @@ export default function ProjectProgressModule() {
                               key={row.l}
                               style={{
                                 padding: "10px 0",
+                                paddingLeft: row.nested ? 16 : 0,
                                 borderBottom:
                                   i < arr.length - 1
                                     ? `1px solid ${C.border}`
@@ -6024,11 +6022,12 @@ export default function ProjectProgressModule() {
                               >
                                 <span
                                   style={{
-                                    fontSize: 12,
-                                    color: "#c4c9d8",
+                                    fontSize: row.nested ? 11 : 12,
+                                    color: row.nested ? C.textMuted : "#c4c9d8",
                                     fontWeight: 500,
                                   }}
                                 >
+                                  {row.nested ? "↳ " : ""}
                                   {row.l}
                                 </span>
                                 <span
