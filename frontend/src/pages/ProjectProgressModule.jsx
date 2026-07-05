@@ -6369,7 +6369,6 @@ export default function ProjectProgressModule() {
 
       {detailProject && (
         <div
-          onClick={() => setDetailProject(null)}
           style={{
             position: "fixed",
             inset: 0,

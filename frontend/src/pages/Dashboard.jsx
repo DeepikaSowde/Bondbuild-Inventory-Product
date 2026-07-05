@@ -567,7 +567,6 @@ export default function Dashboard() {
       {detail && (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8"
-          onClick={() => setDetail(null)}
         >
           <div
             className="mt-4 w-full max-w-3xl rounded-2xl bg-white p-6 shadow-xl"
