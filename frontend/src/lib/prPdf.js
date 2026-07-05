@@ -68,9 +68,10 @@ export async function exportPrPdf(pr) {
 
   // ── Header: title + logo ──
   if (logo) {
-    const scale = Math.min(110 / logo.w, 58 / logo.h);
+    const scale = Math.min(100 / logo.w, 52 / logo.h);
     const lw = logo.w * scale, lh = logo.h * scale;
-    try { doc.addImage(logo.dataUrl, logo.fmt, W - M - lw, 22, lw, lh); } catch { /* ignore */ }
+    // sit fully above the info box (top at y=72) with clearance
+    try { doc.addImage(logo.dataUrl, logo.fmt, W - M - lw, 8, lw, lh); } catch { /* ignore */ }
   } else {
     doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(178, 42, 30);
     doc.text("bdb", W - M, 40, { align: "right" });
