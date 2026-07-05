@@ -9,7 +9,7 @@ const TYPE_COLORS = {
   Other:  { bg: "#F3F4F6", text: "#6B7280" },
 };
 
-const BLANK = { name: "", type: "Local", contact_person: "", phone: "", email: "", address: "" };
+const BLANK = { name: "", type: "Local", contact_person: "", phone: "", fax: "", email: "", address: "" };
 const TYPES = ["Local", "China", "Europe", "Other"];
 
 function TypeBadge({ type }) {
@@ -43,6 +43,7 @@ function SupplierCard({ supplier, canEdit, onEdit, onDelete }) {
         <div className="mb-4 space-y-[3px] text-[12px] text-[#6B7280]">
           {s.contact_person && <div>👤 {s.contact_person}</div>}
           {s.phone        && <div>📞 {s.phone}</div>}
+          {s.fax          && <div>📠 {s.fax}</div>}
           {s.email        && <div>✉️ {s.email}</div>}
           {s.address      && <div>📍 {s.address}</div>}
         </div>
@@ -98,6 +99,10 @@ function SupplierForm({ initial, onSave, onClose, saving }) {
 
           <Field label="Phone / WhatsApp">
             <Input value={form.phone} onChange={set("phone")} placeholder="+65 9123 4567" />
+          </Field>
+
+          <Field label="Fax">
+            <Input value={form.fax} onChange={set("fax")} placeholder="+65 6xxx xxxx" />
           </Field>
 
           <Field label="Email">
@@ -194,9 +199,9 @@ export default function SupplierDirectory({ notify, canEdit = true }) {
 
   function exportExcel() {
     // Build CSV and trigger download
-    const headers = ["Name", "Type", "Contact Person", "Phone", "Email", "Address"];
+    const headers = ["Name", "Type", "Contact Person", "Phone", "Fax", "Email", "Address"];
     const rows = filtered.map((s) => [
-      s.name, s.type, s.contact_person || "", s.phone || "", s.email || "", (s.address || "").replace(/\n/g, " "),
+      s.name, s.type, s.contact_person || "", s.phone || "", s.fax || "", s.email || "", (s.address || "").replace(/\n/g, " "),
     ]);
     const csv = [headers, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });

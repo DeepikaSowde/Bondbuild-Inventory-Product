@@ -57,13 +57,13 @@ router.get("/suppliers", protect, async (_req, res) => {
 });
 
 router.post("/suppliers", protect, async (req, res) => {
-  const { name, type, contact_person, phone, email, address } = req.body || {};
+  const { name, type, contact_person, phone, email, address, fax } = req.body || {};
   if (!name) return fail(res, 400, "Supplier name is required");
   try {
     const { rows } = await db.query(
-      `INSERT INTO po_suppliers (name, type, contact_person, phone, email, address)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [name, type || "Local", contact_person || null, phone || null, email || null, address || null]
+      `INSERT INTO po_suppliers (name, type, contact_person, phone, email, address, fax)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [name, type || "Local", contact_person || null, phone || null, email || null, address || null, fax || null]
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) {
@@ -72,14 +72,14 @@ router.post("/suppliers", protect, async (req, res) => {
 });
 
 router.put("/suppliers/:id", protect, async (req, res) => {
-  const { name, type, contact_person, phone, email, address } = req.body || {};
+  const { name, type, contact_person, phone, email, address, fax } = req.body || {};
   if (!name) return fail(res, 400, "Supplier name is required");
   try {
     const { rows } = await db.query(
       `UPDATE po_suppliers
-       SET name=$1, type=$2, contact_person=$3, phone=$4, email=$5, address=$6, updated_at=NOW()
-       WHERE id=$7 AND is_active=TRUE RETURNING *`,
-      [name, type || "Local", contact_person || null, phone || null, email || null, address || null, req.params.id]
+       SET name=$1, type=$2, contact_person=$3, phone=$4, email=$5, address=$6, fax=$7, updated_at=NOW()
+       WHERE id=$8 AND is_active=TRUE RETURNING *`,
+      [name, type || "Local", contact_person || null, phone || null, email || null, address || null, fax || null, req.params.id]
     );
     if (!rows[0]) return fail(res, 404, "Supplier not found");
     ok(res, rows[0]);

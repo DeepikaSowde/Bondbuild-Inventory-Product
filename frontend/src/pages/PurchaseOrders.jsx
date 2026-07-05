@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiError } from "../lib/api";
 import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money } from "../components/ui";
 import { Table, Td } from "../components/Table";
+import { exportPoPdf } from "../lib/poPdf";
 
 export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox }) {
   const [pos, setPOs] = useState([]);
@@ -64,7 +65,13 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
               </span>
             </Td>
             <Td>{p.delivery_stage ? <span className="rounded bg-[#FEF3C7] px-2 py-0.5 text-[11px] font-bold text-[#D97706]">{stageLabel(p.delivery_stage)}</span> : <span className="text-[#9CA3AF]">—</span>}</Td>
-            <Td align="right"><Btn variant="ghost" small onClick={() => api.po(p.po_no).then(setView)}>Open</Btn></Td>
+            <Td align="right">
+              <span className="inline-flex justify-end gap-1.5">
+                <Btn variant="ghost" small title="Download PDF"
+                  onClick={() => api.po(p.po_no).then((full) => exportPoPdf(full, { showPrice: canSeePrice })).catch((e) => notify(apiError(e), "error"))}>PDF</Btn>
+                <Btn variant="ghost" small onClick={() => api.po(p.po_no).then(setView)}>Open</Btn>
+              </span>
+            </Td>
           </tr>
         ))}
       </Table>
@@ -200,6 +207,7 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
       <PhotoGallery photos={po.receive_photos || []} />
 
       <div className="mt-5 flex justify-end gap-2.5">
+        <Btn variant="soft" disabled={busy} onClick={() => exportPoPdf(po, { showPrice: canSeePrice })}>⬇ PDF</Btn>
         {canManage && po.status === "OPEN" && (
           <Btn variant="soft" disabled={busy} onClick={() => act(() => api.updatePO(po.po_no, d), "Saved")}>Save details</Btn>
         )}

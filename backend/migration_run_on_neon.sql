@@ -347,6 +347,10 @@ ALTER TABLE purchase_orders
 ALTER TABLE inventory
   ADD COLUMN IF NOT EXISTS reserved_qty INTEGER NOT NULL DEFAULT 0;
 
+-- B4. Supplier fax number (shown on the Purchase Order PDF).
+ALTER TABLE po_suppliers
+  ADD COLUMN IF NOT EXISTS fax TEXT;
+
 
 -- ════════════════════════════════════════════════════════════
 -- BLOCK C — NEW TABLES FROM RECENT SESSION

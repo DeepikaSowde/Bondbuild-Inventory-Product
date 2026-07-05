@@ -25,7 +25,16 @@ async function getPO(poNo, client = db) {
     "SELECT id, original_name, mime_type, size_bytes, uploaded_by, created_at FROM po_receive_photos WHERE po_id=$1 ORDER BY id",
     [rows[0].id]
   );
-  return { ...rows[0], items: items.rows, tracking: track.rows[0] || null, receive_photos: photos.rows };
+  // supplier contact block (for the PO PDF): address / phone / fax / attn
+  let supplier = null;
+  if (rows[0].supplier_id) {
+    const s = await client.query(
+      "SELECT contact_person, phone, email, address, fax FROM po_suppliers WHERE id=$1",
+      [rows[0].supplier_id]
+    );
+    supplier = s.rows[0] || null;
+  }
+  return { ...rows[0], items: items.rows, tracking: track.rows[0] || null, receive_photos: photos.rows, supplier };
 }
 
 async function notify(client, rolesList, title, body, type, refPr, refPo) {
