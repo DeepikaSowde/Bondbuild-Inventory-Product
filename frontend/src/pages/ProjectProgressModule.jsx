@@ -1910,22 +1910,21 @@ export default function ProjectProgressModule() {
         const tv = p.targetMonthly[m] || 0;
         const cv = p.claimedMonthly[m] || 0;
         const rv = p.receivedMonthly[m] || 0;
-        if (tv > 0 || rv > 0) {
-          const targetAmt = p.contractSum * tv;
+        const av = (p.achievedMonthly || {})[m] || 0;
+        if (tv > 0 || rv > 0 || av > 0) {
           const claimedAmt = p.contractSum * cv;
-          const gap = Math.max(0, targetAmt - rv);
-          const ach = targetAmt > 0 ? Math.min(1, rv / targetAmt) : 0;
+          // Gap = money claimed but not yet received (outstanding to collect).
+          const gap = Math.max(0, claimedAmt - rv);
           rows.push({
             project: p.name,
             status: p.status,
             month: m,
-            targetPct: tv,
+            targetPct: tv, // planned work %
+            achievedPct: av, // actual work completed %
             claimedPct: cv,
-            targetAmt: Math.round(targetAmt),
             claimedAmt: Math.round(claimedAmt),
             receivedAmt: Math.round(rv),
             gap: Math.round(gap),
-            achievement: ach,
             contract: p.contractSum,
           });
         }
@@ -4698,43 +4697,6 @@ export default function ProjectProgressModule() {
         ════════════════════════════════════ */}
         {activeTab === "monthlyTarget" &&
           (() => {
-            // Achievement rate badge
-            const AchBadge = ({ rate }) => {
-              const col =
-                rate >= 0.9
-                  ? C.green
-                  : rate >= 0.6
-                    ? C.blue
-                    : rate >= 0.3
-                      ? C.amber
-                      : C.red;
-              const bg =
-                rate >= 0.9
-                  ? "#0d2218"
-                  : rate >= 0.6
-                    ? "#0d1a2e"
-                    : rate >= 0.3
-                      ? "#1f1a0d"
-                      : "#200d10";
-              return (
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    padding: "2px 8px",
-                    borderRadius: 20,
-                    background: bg,
-                    color: col,
-                  }}
-                >
-                  {Math.round(rate * 100)}%
-                </span>
-              );
-            };
-
             return (
               <div
                 style={{ display: "flex", flexDirection: "column", gap: 16 }}
@@ -5393,12 +5355,11 @@ export default function ProjectProgressModule() {
                             "Status",
                             "Month",
                             "Target %",
-                            "Target $",
+                            "Achieved %",
                             "Claimed %",
                             "Claimed $",
                             "Received $",
                             "Gap $",
-                            "Achievement",
                           ].map((h) => (
                             <th
                               key={h}
@@ -5423,7 +5384,7 @@ export default function ProjectProgressModule() {
                         {perProjectTargetRows.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={10}
+                              colSpan={9}
                               style={{
                                 padding: "30px",
                                 textAlign: "center",
@@ -5509,14 +5470,44 @@ export default function ProjectProgressModule() {
                                   </span>
                                 </div>
                               </td>
-                              <td
-                                style={{
-                                  padding: "9px 14px",
-                                  color: "#93c5fd",
-                                  fontWeight: 600,
-                                }}
-                              >
-                                {fmtFull(r.targetAmt)}
+                              {/* Achieved % with bar (actual work completed) */}
+                              <td style={{ padding: "9px 14px" }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      width: 40,
+                                      background: C.border,
+                                      borderRadius: 2,
+                                      height: 4,
+                                      overflow: "hidden",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        width: `${Math.min(100, r.achievedPct * 100)}%`,
+                                        height: "100%",
+                                        background: C.green,
+                                      }}
+                                    />
+                                  </div>
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      color: C.green,
+                                    }}
+                                  >
+                                    {r.achievedPct > 0
+                                      ? fmtPct(r.achievedPct)
+                                      : "—"}
+                                  </span>
+                                </div>
                               </td>
                               {/* Claimed % with bar */}
                               <td style={{ padding: "9px 14px" }}>
@@ -5579,9 +5570,6 @@ export default function ProjectProgressModule() {
                                 }}
                               >
                                 {r.gap > 0 ? fmtFull(r.gap) : "—"}
-                              </td>
-                              <td style={{ padding: "9px 14px" }}>
-                                <AchBadge rate={r.achievement} />
                               </td>
                             </tr>
                           ))
