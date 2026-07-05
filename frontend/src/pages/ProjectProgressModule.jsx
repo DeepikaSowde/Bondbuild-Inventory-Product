@@ -1859,6 +1859,7 @@ export default function ProjectProgressModule() {
       let targetAmt = 0,
         claimedAmt = 0,
         receivedAmt = 0,
+        contractBase = 0,
         projectCount = 0;
       filtered.forEach((p) => {
         const tv = p.targetMonthly[m] || 0;
@@ -1868,9 +1869,13 @@ export default function ProjectProgressModule() {
           targetAmt += p.contractSum * tv;
           claimedAmt += p.contractSum * cv;
           receivedAmt += rv;
+          // Weight the target % by contract size (only projects active this month).
+          if (tv > 0) contractBase += p.contractSum;
           projectCount++;
         }
       });
+      // Contract-weighted average target % for the month (work planned, not money).
+      const targetPct = contractBase > 0 ? targetAmt / contractBase : 0;
       return {
         month: m.replace("'25", "").replace("'26", ""),
         fullMonth: m,
@@ -1881,6 +1886,8 @@ export default function ProjectProgressModule() {
         "Received $": isForecast ? 0 : Math.round(receivedAmt),
         // Raw values for the table (always available):
         targetRaw: Math.round(targetAmt),
+        targetPct, // work-progress target as a fraction (0–1)
+        contractBase, // Σ contract of projects with a target this month (for weighting totals)
         claimedRaw: Math.round(claimedAmt),
         receivedRaw: Math.round(receivedAmt),
         projectCount,
@@ -5007,7 +5014,7 @@ export default function ProjectProgressModule() {
                 <Card>
                   <CardHead
                     title={`FY ${monthlyYear} — Monthly Summary`}
-                    sub="Balance = Target − Received (plan shortfall) · forecast months show Target only"
+                    sub="Target % = planned work progress (contract-weighted) · Balance = Claimed − Received (outstanding to collect)"
                   />
                   <div style={{ overflowX: "auto" }}>
                     <table
@@ -5021,7 +5028,7 @@ export default function ProjectProgressModule() {
                         <tr style={{ background: C.cardAlt }}>
                           {[
                             "Month",
-                            "Target $",
+                            "Target %",
                             "Claimed $",
                             "Received $",
                             "Balance $",
@@ -5051,15 +5058,16 @@ export default function ProjectProgressModule() {
                       </thead>
                       <tbody>
                         {yearMonthlyData.map((d, i, arr) => {
-                          // Target shown for ALL months; Claimed/Received for actual months.
-                          const target = d.targetRaw;
+                          // Target % shown for ALL months; Claimed/Received for actual months.
+                          const targetPct = d.targetPct;
                           const claimed = d.isForecast ? 0 : d.claimedRaw;
                           const received = d.isForecast ? 0 : d.receivedRaw;
+                          // Balance = outstanding to collect (money claimed but not yet received).
                           const balance = d.isForecast
                             ? 0
-                            : Math.max(0, Math.round(target - received));
+                            : Math.max(0, Math.round(claimed - received));
                           const empty =
-                            target === 0 && claimed === 0 && received === 0;
+                            targetPct === 0 && claimed === 0 && received === 0;
                           return (
                             <tr
                               key={d.fullMonth}
@@ -5094,7 +5102,9 @@ export default function ProjectProgressModule() {
                                   color: "#93c5fd",
                                 }}
                               >
-                                {target > 0 ? fmtFull(target) : "—"}
+                                {targetPct > 0
+                                  ? `${(targetPct * 100).toFixed(1)}%`
+                                  : "—"}
                               </td>
                               <td
                                 style={{
@@ -5160,10 +5170,17 @@ export default function ProjectProgressModule() {
                       </tbody>
                       <tfoot>
                         {(() => {
-                          const tT = yearMonthlyData.reduce(
+                          // Contract-weighted average target % across the year.
+                          const tTargetAmt = yearMonthlyData.reduce(
                             (s, d) => s + d.targetRaw,
                             0,
                           );
+                          const tContractBase = yearMonthlyData.reduce(
+                            (s, d) => s + d.contractBase,
+                            0,
+                          );
+                          const tTargetPct =
+                            tContractBase > 0 ? tTargetAmt / tContractBase : 0;
                           const tC = yearMonthlyData.reduce(
                             (s, d) => s + (d.isForecast ? 0 : d.claimedRaw),
                             0,
@@ -5172,17 +5189,8 @@ export default function ProjectProgressModule() {
                             (s, d) => s + (d.isForecast ? 0 : d.receivedRaw),
                             0,
                           );
-                          const tG = yearMonthlyData.reduce(
-                            (s, d) =>
-                              s +
-                              (d.isForecast
-                                ? 0
-                                : Math.max(
-                                    0,
-                                    Math.round(d.targetRaw - d.receivedRaw),
-                                  )),
-                            0,
-                          );
+                          // Balance total = Claimed − Received (outstanding to collect).
+                          const tG = Math.max(0, tC - tR);
                           const cell = {
                             padding: "10px 14px",
                             textAlign: "right",
@@ -5200,7 +5208,9 @@ export default function ProjectProgressModule() {
                                 TOTAL
                               </td>
                               <td style={{ ...cell, color: "#93c5fd" }}>
-                                {tT > 0 ? fmtFull(tT) : "—"}
+                                {tTargetPct > 0
+                                  ? `${(tTargetPct * 100).toFixed(1)}%`
+                                  : "—"}
                               </td>
                               <td style={{ ...cell, color: C.purple }}>
                                 {tC > 0 ? fmtFull(tC) : "—"}
