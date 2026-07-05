@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiError, downloadAttachment } from "../lib/api";
 import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money } from "../components/ui";
 import { Table, Td } from "../components/Table";
+import { exportPrPdf } from "../lib/prPdf";
 
 const emptyItem = () => ({
   profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
@@ -72,7 +73,13 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
             <Td>{p.date_required || "—"}</Td>
             <Td align="center">{p.item_count}</Td>
             <Td><Badge status={p.status} /></Td>
-            <Td align="right"><Btn variant="ghost" small onClick={() => api.pr(p.pr_no).then(setViewPR)}>Open</Btn></Td>
+            <Td align="right">
+              <span className="inline-flex justify-end gap-1.5">
+                <Btn variant="ghost" small title="Download PDF"
+                  onClick={() => api.pr(p.pr_no).then(exportPrPdf).catch((e) => notify(apiError(e), "error"))}>PDF</Btn>
+                <Btn variant="ghost" small onClick={() => api.pr(p.pr_no).then(setViewPR)}>Open</Btn>
+              </span>
+            </Td>
           </tr>
         ))}
       </Table>
@@ -702,6 +709,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
       </div>
 
       <div className="mt-5 flex justify-end gap-2.5">
+        <Btn variant="soft" onClick={() => exportPrPdf(pr).catch((e) => notify(apiError(e), "error"))}>⬇ PDF</Btn>
         {(pApprove || pReject) && pr.status === "PENDING" && (
           <>
             {pReject && <Btn variant="danger" onClick={onReject} disabled={busy}>Reject / send back</Btn>}
