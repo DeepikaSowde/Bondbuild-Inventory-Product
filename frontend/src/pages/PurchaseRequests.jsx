@@ -10,6 +10,15 @@ const emptyItem = () => ({
   remarks: "", stock_qty: "", inventory_id: "", stock_location: "", buy_qty: "",
 });
 
+// Format a native date input value (YYYY-MM-DD) into the free-text style
+// "01-Apr-26" used by the Date required field.
+const MON_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const fmtDateReq = (iso) => {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}-${MON_ABBR[parseInt(m, 10) - 1]}-${y.slice(2)}`;
+};
+
 // Human label for an inventory row — also what a picked suggestion writes into Description.
 const stockLabelOf = (s) =>
   [s.profile_name, s.size].filter(Boolean).join(" ") || s.item_name || s.item_code || "";
@@ -309,7 +318,12 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
         </Field>
         <Field label="Project name"><Input value={form.project_name} maxLength={200} onChange={(e) => setForm({ ...form, project_name: e.target.value })} placeholder="12 Harlyn Road" /></Field>
         <Field label="Location / scope"><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
-        <Field label="Date required"><Input value={form.date_required} onChange={(e) => setForm({ ...form, date_required: e.target.value })} placeholder="ASAP, 01-Apr-26" /></Field>
+        <Field label="Date required">
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1"><Input value={form.date_required} onChange={(e) => setForm({ ...form, date_required: e.target.value })} placeholder="ASAP, 01-Apr-26" /></div>
+            <Input type="date" className="!w-[9.5rem] flex-none" title="Pick a date" onChange={(e) => setForm({ ...form, date_required: fmtDateReq(e.target.value) })} />
+          </div>
+        </Field>
         <Field label="Date issued"><Input type="date" value={form.date_issued} onChange={(e) => setForm({ ...form, date_issued: e.target.value })} /></Field>
         <Field label="PIC (person in charge)"><Input value={form.pic} onChange={(e) => setForm({ ...form, pic: e.target.value })} /></Field>
         <Field label="Requested by *"><Input value={form.requested_by} onChange={(e) => setForm({ ...form, requested_by: e.target.value })} /></Field>
