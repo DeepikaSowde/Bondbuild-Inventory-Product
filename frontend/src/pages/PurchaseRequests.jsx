@@ -807,9 +807,11 @@ function PRAttachments({ pr, notify, onChanged }) {
     catch (err) { notify(apiError(err), "error"); }
     finally { setBusy(false); e.target.value = ""; }
   };
-  const remove = async (id) => {
+  const remove = async (a) => {
+    // Confirm before permanently deleting an already-uploaded file.
+    if (!window.confirm(`Delete attachment "${a.original_name}"?\n\nThis removes the file permanently and can't be undone.`)) return;
     setBusy(true);
-    try { await api.deleteAttachment(id); await refresh(); notify("Attachment removed"); }
+    try { await api.deleteAttachment(a.id); await refresh(); notify("Attachment removed"); }
     catch (err) { notify(apiError(err), "error"); } finally { setBusy(false); }
   };
   const download = async (a) => {
@@ -836,7 +838,7 @@ function PRAttachments({ pr, notify, onChanged }) {
               <button onClick={() => download(a)} className="truncate text-left text-[#6366F1] hover:underline" title={a.original_name}>
                 📄 {a.original_name} <span className="text-[#9CA3AF]">({kb(a.size_bytes)})</span>
               </button>
-              <button onClick={() => remove(a.id)} disabled={busy} className="ml-2 shrink-0 text-[#EF4444]">✕</button>
+              <button onClick={() => remove(a)} disabled={busy} className="ml-2 shrink-0 text-[#EF4444]">✕</button>
             </div>
           ))}
         </div>
