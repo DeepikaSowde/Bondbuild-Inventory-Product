@@ -1312,6 +1312,7 @@ const Badge = ({ status }) => {
         borderRadius: 20,
         background: s.bg,
         color: s.text,
+        whiteSpace: "nowrap",
       }}
     >
       <span
@@ -4288,7 +4289,7 @@ export default function ProjectProgressModule() {
                             { k: "_split", l: "Received / Pending", w: "16%" },
                             {
                               k: "_rings",
-                              l: "Target · Progress · Claimed",
+                              l: "Target · Site · Claimed",
                               w: "14%",
                             },
                             { k: "_risk", l: "Risk", w: "8%" },
