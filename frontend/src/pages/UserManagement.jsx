@@ -51,6 +51,16 @@ const DEFAULT_FIELD_PERMS = {
   },
 };
 
+// Password policy: 8–128 chars, at least one letter, one number, one special char.
+const passwordError = (pw) => {
+  if (typeof pw !== "string" || pw.length < 8 || pw.length > 128)
+    return "Password must be 8–128 characters";
+  if (!/[A-Za-z]/.test(pw)) return "Password must include at least one letter";
+  if (!/[0-9]/.test(pw)) return "Password must include at least one number";
+  if (!/[^A-Za-z0-9]/.test(pw)) return "Password must include at least one special character (e.g. !@#$)";
+  return null;
+};
+
 function UsersModule({
   users,
   setUsers,
@@ -90,68 +100,66 @@ function UsersModule({
   };
 
   const openEdit = (u) => {
-    setForm({ ...u });
+    setForm({ ...u, password: "" }); // password blank on edit → keeps input controlled
     setEditUser(u);
     setShowForm(true);
   };
 
   const handleSave = async () => {
-    if (!form.name.trim()) {
-      showNotify("Name is required", "error");
-      return;
-    }
-    if (!form.username.trim()) {
-      showNotify("User ID is required", "error");
-      return;
-    }
-    if (form.username.trim().length < 3) {
-      showNotify("User ID must be at least 3 characters", "error");
-      return;
-    }
-    if (!/^[a-zA-Z0-9._]+$/.test(form.username.trim())) {
-      showNotify("User ID can only contain letters, numbers, dot (.) and underscore (_). No spaces or special characters.", "error");
-      return;
-    }
-    if (!form.password.trim() && !editUser) {
-      showNotify("Password is required", "error");
-      return;
-    }
+    const name = form.name.trim();
+    const username = form.username.trim();
+    const password = form.password || ""; // never trim a password
 
+    // Required + length
+    if (!name) return showNotify("Name is required", "error");
+    if (name.length > 60) return showNotify("Name must be 60 characters or fewer", "error");
+    if (!username) return showNotify("User ID is required", "error");
+    if (username.length < 3 || username.length > 30)
+      return showNotify("User ID must be 3–30 characters", "error");
+    // Special characters (User ID whitelist)
+    if (!/^[a-zA-Z0-9._]+$/.test(username))
+      return showNotify("User ID can only contain letters, numbers, dot (.) and underscore (_). No spaces or special characters.", "error");
+    // Password: required on add; on edit only validated when a new one is typed
+    if (!editUser || password) {
+      const pErr = passwordError(password);
+      if (pErr) return showNotify(pErr, "error");
+    }
+    // Duplicate prevention (case-insensitive, excludes self)
     const dup = users.find(
-      (u) =>
-        u.username.toLowerCase() === form.username.toLowerCase() &&
-        u.id !== editUser?.id,
+      (u) => u.username.toLowerCase() === username.toLowerCase() && u.id !== editUser?.id,
     );
-    if (dup) {
-      showNotify("User ID already exists", "error");
-      return;
+    if (dup) return showNotify("User ID already exists", "error");
+    // Self-lockout guards
+    if (editUser && editUser.id === currentUser?.id) {
+      if (form.status !== "Active")
+        return showNotify("You can't set your own account to Inactive", "error");
+      if (form.role !== editUser.role)
+        return showNotify("You can't change your own role", "error");
     }
 
     try {
       if (editUser) {
-        // Update user
-        await api.put(`/auth/users/${editUser.id}`, {
-          name: form.name,
-          username: form.username,
+        const { data } = await api.put(`/auth/users/${editUser.id}`, {
+          name,
+          username,
           role: form.role,
           status: form.status,
-          ...(form.password && { password: form.password }),
+          ...(password && { password }),
         });
         setUsers((prev) =>
-          prev.map((u) => (u.id === editUser.id ? { ...u, ...form } : u)),
+          prev.map((u) => (u.id === editUser.id ? { ...u, ...data } : u)),
         );
-        showNotify(`${form.name} updated ✅`);
+        showNotify(`${name} updated ✅`);
       } else {
-        // Add new user
-        const response = await api.post("/auth/users", {
-          name: form.name,
-          username: form.username,
-          password: form.password,
+        const { data } = await api.post("/auth/users", {
+          name,
+          username,
+          password,
           role: form.role,
           status: form.status,
         });
-        setUsers((prev) => [...prev, response.data]);
-        showNotify(`${form.name} added ✅`);
+        setUsers((prev) => [...prev, data]);
+        showNotify(`${name} added ✅`);
       }
       setShowForm(false);
     } catch (err) {
@@ -785,7 +793,7 @@ function UsersModule({
                     outline: "none",
                   }}
                 >
-                  {ROLES.map((r) => (
+                  {(editUser?.role === "Admin" ? [...ROLES, "Admin"] : ROLES).map((r) => (
                     <option key={r} value={r}>
                       {r}
                     </option>
@@ -848,7 +856,7 @@ function UsersModule({
                     onChange={(e) =>
                       setForm((f) => ({ ...f, password: e.target.value }))
                     }
-                    placeholder="Minimum 6 characters"
+                    placeholder="8–128 chars · letter, number & special"
                     style={{
                       width: "100%",
                       boxSizing: "border-box",
