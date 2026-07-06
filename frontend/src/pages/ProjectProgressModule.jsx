@@ -1405,7 +1405,7 @@ function CollectionGauge({ pct }) {
         gap: 4,
       }}
     >
-      <svg width={140} height={110} style={{ overflow: "visible" }}>
+      <svg width={140} height={130} style={{ overflow: "visible" }}>
         <path
           d={`M ${arcX(startAngle)} ${arcY(startAngle)} A ${r} ${r} 0 1 1 ${arcX(startAngle + 270)} ${arcY(startAngle + 270)}`}
           fill="none"
@@ -1460,8 +1460,8 @@ function CollectionGauge({ pct }) {
           100%
         </text>
       </svg>
-      <div style={{ fontSize: 11, color: C.textMuted, marginTop: -8 }}>
-        Collection rate
+      <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
+        Received Rate
       </div>
     </div>
   );
@@ -5798,81 +5798,81 @@ export default function ProjectProgressModule() {
               );
             };
 
-            // Horizontal comparison bar for two years side by side
-            // Distinct color per year (cycles if there are more years than colors).
-            const YEAR_COLORS = ["#60a5fa", "#2dd4bf", "#a78bfa", "#fbbf24", "#f472b6"];
+            // Vertical grouped bars for years side by side.
+            // Warm/cool alternate so adjacent year columns contrast strongly
+            // (cycles if there are more years than colors).
+            const YEAR_COLORS = ["#60a5fa", "#fbbf24", "#2dd4bf", "#f472b6", "#a78bfa"];
             // values: [{ year, value }], one entry per year present in the data.
             const CompareBar = ({ label, values }) => {
               const max = Math.max(...values.map((d) => d.value), 1);
+              const PLOT_H = 130; // px height of the tallest column
               return (
-                <div style={{ marginBottom: 14 }}>
+                <div style={{ marginBottom: 8 }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: C.textMuted,
+                      marginBottom: 8,
+                    }}
+                  >
+                    {label}
+                  </div>
+                  {/* grouped vertical columns, one per year */}
                   <div
                     style={{
                       display: "flex",
-                      justifyContent: "space-between",
-                      fontSize: 11,
-                      color: C.textMuted,
-                      marginBottom: 5,
-                      gap: 8,
-                      flexWrap: "wrap",
+                      alignItems: "flex-end",
+                      gap: 14,
+                      height: PLOT_H + 34,
+                      borderBottom: `1px solid ${C.border}`,
                     }}
-                  >
-                    <span>{label}</span>
-                    <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                      {values.map((d, i) => (
-                        <span
-                          key={d.year}
-                          style={{
-                            color: YEAR_COLORS[i % YEAR_COLORS.length],
-                            fontWeight: 600,
-                          }}
-                        >
-                          {d.year}: {fmtM(d.value)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div
-                    style={{ display: "flex", flexDirection: "column", gap: 4 }}
                   >
                     {values.map((d, i) => {
                       const col = YEAR_COLORS[i % YEAR_COLORS.length];
+                      const barH = Math.max(2, (d.value / max) * PLOT_H);
                       return (
                         <div
                           key={d.year}
                           style={{
+                            flex: 1,
+                            minWidth: 0,
                             display: "flex",
+                            flexDirection: "column",
                             alignItems: "center",
-                            gap: 8,
+                            justifyContent: "flex-end",
+                            height: "100%",
                           }}
                         >
                           <div
                             style={{
-                              fontSize: 10,
+                              fontSize: 11,
+                              fontWeight: 700,
                               color: col,
-                              width: 28,
-                              textAlign: "right",
+                              marginBottom: 4,
+                              whiteSpace: "nowrap",
                             }}
                           >
-                            {String(d.year).slice(2)}
+                            {fmtM(d.value)}
                           </div>
                           <div
                             style={{
-                              flex: 1,
-                              background: C.border,
-                              borderRadius: 3,
-                              height: 8,
-                              overflow: "hidden",
+                              width: "100%",
+                              maxWidth: 56,
+                              height: barH,
+                              background: col,
+                              borderRadius: "4px 4px 0 0",
+                              transition: "height .3s ease",
+                            }}
+                          />
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: C.textMuted,
+                              marginTop: 6,
                             }}
                           >
-                            <div
-                              style={{
-                                width: `${(d.value / max) * 100}%`,
-                                height: "100%",
-                                background: col,
-                                borderRadius: 3,
-                              }}
-                            />
+                            {d.year}
                           </div>
                         </div>
                       );
@@ -6102,7 +6102,15 @@ export default function ProjectProgressModule() {
                     } — head to head`}
                     sub="All values from filtered projects"
                   />
-                  <div style={{ padding: "18px 22px" }}>
+                  <div
+                    style={{
+                      padding: "18px 22px",
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit,minmax(260px,1fr))",
+                      gap: 24,
+                    }}
+                  >
                     <CompareBar
                       label="Contract Sum"
                       values={yearComparison.map((y) => ({
