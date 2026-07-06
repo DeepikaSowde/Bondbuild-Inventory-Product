@@ -202,6 +202,7 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
 
       {/* Delivery Status Tracker — FIC / Supervisor click a stage */}
       <DeliveryTracker po={po} canTrack={canTrack && po.status === "OPEN"} busy={busy}
+        canReceive={canReceive} onReceive={onOpenReceive}
         onSet={(stage) => act(() => api.setDeliveryStage(po.po_no, stage), stage ? "Delivery stage updated" : "Stage cleared")} />
 
       <PhotoGallery photos={po.receive_photos || []} />
@@ -239,11 +240,12 @@ export const STOCK_STAGES = [
 export const STAGES = [...BUY_STAGES, ...STOCK_STAGES];
 export const stageLabel = (key) => STAGES.find((s) => s.key === key)?.label || "—";
 
-function DeliveryTracker({ po, canTrack, busy, onSet }) {
+function DeliveryTracker({ po, canTrack, canReceive, onReceive, busy, onSet }) {
   const isStock    = po.po_type === "STOCK";
   const stages     = isStock ? STOCK_STAGES : BUY_STAGES;
   const current    = po.delivery_stage;
   const currentIdx = stages.findIndex((s) => s.key === current);
+  const isOpen     = po.status === "OPEN";
 
   return (
     <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
@@ -261,8 +263,17 @@ function DeliveryTracker({ po, canTrack, busy, onSet }) {
           const isPast    = currentIdx > -1 && i < currentIdx;
           const isCurrent = s.key === current;
           const isFuture  = i > currentIdx;
-          // Only future stages are clickable
-          const clickable = canTrack && !busy && isFuture;
+          // The last stage (Received/Collected) is reached only via the
+          // Receive-goods flow; clicking it opens that modal.
+          const isFinal   = i === stages.length - 1;
+          const clickable = isFinal
+            ? canReceive && !busy && isOpen && !isCurrent
+            : canTrack && !busy && isFuture;
+          const handleClick = () => {
+            if (!clickable) return;
+            if (isFinal) onReceive();
+            else onSet(s.key);
+          };
 
           const base = "rounded-xl border p-3 text-center transition-all";
           const cls  = isCurrent
@@ -277,10 +288,11 @@ function DeliveryTracker({ po, canTrack, busy, onSet }) {
             <button
               key={s.key}
               disabled={!clickable}
-              onClick={() => clickable && onSet(s.key)}
+              onClick={handleClick}
               title={
                 isPast    ? "Already passed — cannot go back"
                 : isCurrent ? "Current stage"
+                : isFinal   ? (clickable ? "Click to confirm goods received (photos + name)" : "Reached via Receive goods")
                 : canTrack  ? "Click to advance to this stage"
                 : ""
               }
@@ -300,9 +312,9 @@ function DeliveryTracker({ po, canTrack, busy, onSet }) {
         })}
       </div>
 
-      {canTrack && (
+      {(canTrack || canReceive) && isOpen && (
         <div className="mt-2 text-center text-[11px] text-[#9CA3AF]">
-          Click a future stage to advance · completed stages are locked
+          Click a future stage to advance · the final stage opens “Receive goods” · completed stages are locked
         </div>
       )}
     </div>

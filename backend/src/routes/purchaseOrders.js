@@ -163,6 +163,11 @@ router.put("/:poNo/delivery-stage", canDo("set_delivery"), async (req, res) => {
     if (!stage || !stageOrder.includes(stage))
       return fail(res, 400, "Invalid delivery stage");
 
+    // The final stage (Received/Collected) represents goods actually received —
+    // it may only be set through the Receive-goods flow (photos + stock update).
+    if (stage === stageOrder[stageOrder.length - 1])
+      return fail(res, 400, "Use 'Receive goods' to mark this PO as received/collected.");
+
     const currentIdx = po.delivery_stage ? stageOrder.indexOf(po.delivery_stage) : -1;
     const newIdx     = stageOrder.indexOf(stage);
 
@@ -187,9 +192,12 @@ router.post("/:poNo/receive", canDo("receive_po"), async (req, res) => {
     const po = await getPO(req.params.poNo);
     if (!po) return fail(res, 404, "PO not found");
     if (po.status !== "OPEN") return fail(res, 409, `PO is already ${po.status}`);
+    // Receiving also advances the tracker to its final stage so the delivery
+    // status and the PO status can't disagree.
+    const finalStage = po.po_type === "STOCK" ? "COLLECTED" : "RECEIVED_FACTORY";
     await withTransaction(async (c) => {
       await c.query(
-        "UPDATE purchase_orders SET status='CLOSED', goods_received_date=CURRENT_DATE WHERE id=$1", [po.id]
+        "UPDATE purchase_orders SET status='CLOSED', goods_received_date=CURRENT_DATE, delivery_stage=$2 WHERE id=$1", [po.id, finalStage]
       );
       await c.query(
         "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'RECEIVE','OPEN','CLOSED',$2,$3,$4)",
