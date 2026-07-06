@@ -4157,6 +4157,12 @@ export default function ProjectProgressModule() {
                       c: C.amber,
                     },
                     {
+                      l: "Low risk",
+                      v: filtered.filter((p) => computeRisk(p).level === "low")
+                        .length,
+                      c: C.green,
+                    },
+                    {
                       l: "Fully collected",
                       v: filtered.filter(
                         (p) => computeBalance(p) <= 0 && p.contractSum > 0,
@@ -4281,7 +4287,7 @@ export default function ProjectProgressModule() {
                             { k: "_split", l: "Received / Pending", w: "16%" },
                             {
                               k: "_rings",
-                              l: "Site · Claimed · Target",
+                              l: "Target · Progress · Claimed",
                               w: "14%",
                             },
                             { k: "_risk", l: "Risk", w: "8%" },
@@ -4483,17 +4489,17 @@ export default function ProjectProgressModule() {
                                     }}
                                   >
                                     {[
+                                      { pct: ct, color: C.blue, lbl: "target" },
                                       {
                                         pct: p.siteProgress,
                                         color: siteColor,
-                                        lbl: "site",
+                                        lbl: "progress",
                                       },
                                       {
                                         pct: cc,
                                         color: C.purple,
                                         lbl: "claim",
                                       },
-                                      { pct: ct, color: C.blue, lbl: "target" },
                                     ].map(({ pct, color, lbl }) => (
                                       <div
                                         key={lbl}
