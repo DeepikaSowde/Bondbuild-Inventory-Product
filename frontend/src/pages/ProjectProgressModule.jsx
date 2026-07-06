@@ -4099,9 +4099,10 @@ export default function ProjectProgressModule() {
                     fill="none"
                     stroke={color}
                     strokeWidth={4}
-                    strokeDasharray={`${dash} ${circ}`}
-                    strokeDashoffset={circ * 0.25}
+                    strokeDasharray={circ}
+                    strokeDashoffset={circ - dash}
                     strokeLinecap="round"
+                    transform={`rotate(-90 ${cx} ${cy})`}
                   />
                   )}
                   <text
@@ -5758,9 +5759,10 @@ export default function ProjectProgressModule() {
                       fill="none"
                       stroke={color}
                       strokeWidth={7}
-                      strokeDasharray={`${dash} ${circ}`}
-                      strokeDashoffset={circ * 0.25}
+                      strokeDasharray={circ}
+                      strokeDashoffset={circ - dash}
                       strokeLinecap="round"
+                      transform={`rotate(-90 ${cx} ${cy})`}
                     />
                     <text
                       x={cx}
