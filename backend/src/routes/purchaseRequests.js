@@ -20,6 +20,16 @@ const fail = (res, code, error) => res.status(code).json({ success: false, error
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const asUuid = (v) => (typeof v === "string" && UUID_RE.test(v) ? v : null);
 
+// Description length cap — must match the frontend textarea maxLength (500).
+// Returns an error message for the first over-limit item, or null if all OK.
+const DESC_MAX = 500;
+const checkDescLength = (items) => {
+  const over = items.find((it) => (it.description || "").trim().length > DESC_MAX);
+  return over
+    ? `Description exceeds the ${DESC_MAX}-character limit (${over.description.trim().length} chars)`
+    : null;
+};
+
 async function getPR(prNo, client = db) {
   const { rows } = await client.query("SELECT * FROM purchase_requests WHERE pr_no = $1", [prNo]);
   if (!rows[0]) return null;
@@ -94,6 +104,8 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
   if (!f.job_no || !f.requested_by) return fail(res, 400, "Job No and Requested By are required");
   const items = (f.items || []).filter((it) => it.description?.trim());
   if (!items.length) return fail(res, 400, "At least one item with a description is required");
+  const descErr = checkDescLength(items);
+  if (descErr) return fail(res, 400, descErr);
   try {
     const prNo = await withTransaction(async (c) => {
       const num = await c.query("SELECT next_pr_no() AS pr_no");
@@ -150,6 +162,8 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
     const f = req.body || {};
     const items = (f.items || []).filter((it) => it.description?.trim());
     if (!items.length) return fail(res, 400, "At least one item is required");
+    const descErr = checkDescLength(items);
+    if (descErr) return fail(res, 400, descErr);
     await withTransaction(async (c) => {
       await c.query(
         `UPDATE purchase_requests SET job_no=$2, project_name=$3, location=$4,
