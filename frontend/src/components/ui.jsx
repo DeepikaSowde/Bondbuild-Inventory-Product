@@ -110,3 +110,16 @@ export function EmptyRow({ colSpan, children }) {
 
 export const money = (n) =>
   n == null || n === "" ? "—" : "S$ " + Number(n).toLocaleString("en-SG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Project-wide date display format: dd/mm/yyyy.
+// - "2026-04-01" or ISO timestamps -> parses the date part directly (no TZ shift).
+// - Anything that isn't a real date (e.g. "ASAP") passes through unchanged.
+export const fmtDate = (v) => {
+  if (v == null || v === "") return "";
+  const s = String(v);
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+};

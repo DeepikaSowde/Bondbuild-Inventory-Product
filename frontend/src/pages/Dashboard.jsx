@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import api from "../services/api";
 import * as XLSX from "xlsx";
+import { fmtDate } from "../components/ui";
 
 // S$ formatter: 2400 -> "2.4k", 420 -> "420"
 function money(n) {
@@ -450,9 +451,7 @@ export default function Dashboard() {
                 </span>
                 <span className="flex-1" />
                 <span className="text-[12px] text-[#9CA3AF]">
-                  {(pr.date_issued || pr.created_at || "")
-                    .toString()
-                    .slice(0, 10)}
+                  {fmtDate(pr.date_issued || pr.created_at)}
                 </span>
                 <StatusBadge status={pr.status} />
               </button>
@@ -507,7 +506,7 @@ export default function Dashboard() {
                   </span>
                 )}
                 <span className="text-[12px] text-[#9CA3AF]">
-                  {(po.created_at || "").toString().slice(0, 10)}
+                  {fmtDate(po.created_at)}
                 </span>
                 <StatusBadge status={po.status} />
               </button>

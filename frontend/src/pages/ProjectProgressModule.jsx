@@ -2130,7 +2130,8 @@ export default function ProjectProgressModule() {
       const boldTop    = { ...thinBorder("FF2A4A6F"), top: { style: "medium", color: { argb: "FF2A4A6F" } }, bottom: { style: "medium", color: { argb: "FF2A4A6F" } } };
 
       // ── Row 1: Title ──
-      const today = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+      const _t = new Date();
+      const today = `${String(_t.getDate()).padStart(2, "0")}/${String(_t.getMonth() + 1).padStart(2, "0")}/${_t.getFullYear()}`;
       const titleRow = ws.addRow([`Bond Build SG  |  Project Management Report  |  Exported: ${today}`]);
       titleRow.height = 34;
       ws.mergeCells(1, 1, 1, totalCols);

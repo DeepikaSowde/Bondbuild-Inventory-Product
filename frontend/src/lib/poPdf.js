@@ -25,12 +25,14 @@ const OBLIGATIONS = [
   "f) Ensure that our company's Contractor Guideline are read, understood and communicated to all affected personnel.",
 ];
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const fmtDate = (v) => {
   if (!v) return "";
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return String(v).slice(0, 10);
-  return `${String(d.getDate()).padStart(2, "0")}-${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`;
+  const s = String(v);
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
 };
 const num2 = (n) => (Number(n) > 0 ? Number(n).toLocaleString("en-SG", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "");
 

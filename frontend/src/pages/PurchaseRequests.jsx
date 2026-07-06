@@ -1,7 +1,7 @@
 // pages/PurchaseRequests.jsx — Tailwind version
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiError, downloadAttachment } from "../lib/api";
-import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money } from "../components/ui";
+import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money, fmtDate } from "../components/ui";
 import { Table, Td } from "../components/Table";
 import { exportPrPdf } from "../lib/prPdf";
 
@@ -10,13 +10,12 @@ const emptyItem = () => ({
   remarks: "", stock_qty: "", inventory_id: "", stock_location: "", buy_qty: "",
 });
 
-// Format a native date input value (YYYY-MM-DD) into the free-text style
-// "01-Apr-26" used by the Date required field.
-const MON_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Format a native date input value (YYYY-MM-DD) into the project-wide
+// dd/mm/yyyy style used by the Date required field.
 const fmtDateReq = (iso) => {
   if (!iso) return "";
   const [y, m, d] = iso.split("-");
-  return `${d}-${MON_ABBR[parseInt(m, 10) - 1]}-${y.slice(2)}`;
+  return `${d}/${m}/${y}`;
 };
 
 // Human label for an inventory row — also what a picked suggestion writes into Description.
@@ -296,11 +295,27 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   // punctuation-only junk like "" or " " that would otherwise pass a trim check.
   const jobValid = /[a-z0-9]/i.test(form.job_no || "");
 
+  // Guard the close (X / Cancel) so unsaved attachments and details aren't lost silently.
+  const guardedClose = () => {
+    const enteredNew =
+      !editPR &&
+      (form.job_no || form.project_name || form.location || form.approved_by ||
+        form.checked_by || form.pic || form.remarks ||
+        form.items.some((it) => it.profile_code || it.description || it.qty));
+    if (heldFiles.length > 0 || enteredNew) {
+      const msg = heldFiles.length > 0
+        ? `You have ${heldFiles.length} attached file(s) and unsaved details that haven't been submitted yet. Close and discard them?`
+        : "You have unsaved details that haven't been submitted yet. Close and discard them?";
+      if (!window.confirm(msg)) return;
+    }
+    onClose();
+  };
+
   const lbl = "block text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF] mb-1";
   const inp = "w-full box-border border border-[#E5E7EB] rounded-lg px-2.5 py-2 text-[12px] outline-none bg-white focus:border-[#6366F1]";
 
   return (
-    <Modal wide noBackdropClose title={editPR ? `Edit ${editPR.pr_no}` : `New purchase request · ${nextNo}`} onClose={onClose}>
+    <Modal wide noBackdropClose title={editPR ? `Edit ${editPR.pr_no}` : `New purchase request · ${nextNo}`} onClose={guardedClose}>
       {editPR?.rejection_reason && (
         <div className="mb-3.5 rounded-lg bg-[#FFF7E6] px-3.5 py-2.5 text-[13px] text-[#92400E]">Sent back: {editPR.rejection_reason}</div>
       )}
@@ -320,7 +335,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
         <Field label="Location / scope"><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
         <Field label="Date required">
           <div className="flex items-center gap-2">
-            <div className="min-w-0 flex-1"><Input value={form.date_required} onChange={(e) => setForm({ ...form, date_required: e.target.value })} placeholder="ASAP, 01-Apr-26" /></div>
+            <div className="min-w-0 flex-1"><Input value={form.date_required} onChange={(e) => setForm({ ...form, date_required: e.target.value })} placeholder="ASAP, 01/04/2026" /></div>
             <Input type="date" className="!w-[9.5rem] flex-none" title="Pick a date" onChange={(e) => setForm({ ...form, date_required: fmtDateReq(e.target.value) })} />
           </div>
         </Field>
@@ -573,7 +588,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
       </div>
 
       <div className="mt-5 flex justify-end gap-2.5">
-        <Btn variant="soft" onClick={onClose}>Cancel</Btn>
+        <Btn variant="soft" onClick={guardedClose}>Cancel</Btn>
         <Btn onClick={submit} disabled={busy || !jobValid}>{editPR ? "Save" : "Submit request"}</Btn>
       </div>
     </Modal>
@@ -612,7 +627,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
   const td = "border-b border-[#F3F4F6] px-2.5 py-2";
 
   const meta = [["Status", <Badge status={pr.status} />], ["Job", pr.job_no], ["Project", pr.project_name || "—"],
-    ["Requested by", pr.requested_by], ["Required", pr.date_required || "—"], ["Date issued", pr.date_issued?.slice(0, 10) || "—"], ["Approved by", pr.approved_by || "—"]];
+    ["Requested by", pr.requested_by], ["Required", pr.date_required || "—"], ["Date issued", fmtDate(pr.date_issued) || "—"], ["Approved by", pr.approved_by || "—"]];
 
   return (
     <Modal wide title={`Purchase request ${pr.pr_no}`} onClose={onClose}>

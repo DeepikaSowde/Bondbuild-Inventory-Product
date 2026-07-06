@@ -12,7 +12,17 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
 const money = (n) => "S$ " + (Number(n) || 0).toFixed(2);
-const dt = (v) => (v ? String(v).slice(0, 10) : "");
+// Display dates as dd/mm/yyyy (project-wide format). Free text passes through.
+const dt = (v) => {
+  if (!v) return "";
+  const s = String(v);
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+};
+// ISO for filenames only (slashes are illegal in filenames).
 const today = () => new Date().toISOString().slice(0, 10);
 
 // shared: pull both lists from the backend

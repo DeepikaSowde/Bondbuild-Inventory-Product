@@ -1,7 +1,7 @@
 // pages/PurchaseOrders.jsx — Tailwind version
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiError } from "../lib/api";
-import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money } from "../components/ui";
+import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money, fmtDate } from "../components/ui";
 import { Table, Td } from "../components/Table";
 import { exportPoPdf } from "../lib/poPdf";
 
@@ -56,7 +56,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
             <Td mono>{p.pr_no || "—"}</Td>
             <Td>{p.project_name || "—"}</Td>
             <Td>{p.po_type === "STOCK" ? <span className="text-[#6366F1]">From stock <span className="text-[11px] text-[#9CA3AF]">@ {p.source_location}</span></span> : p.supplier_name}</Td>
-            <Td>{p.po_date?.slice(0, 10)}</Td>
+            <Td>{fmtDate(p.po_date)}</Td>
             {canSeeAmount && <Td align="right">{money(p.amount)}</Td>}
             <Td>
               <span className="inline-flex flex-wrap items-center gap-1.5">
@@ -137,7 +137,7 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
 
   const meta = [["Status", <Badge status={po.status} />], ["Supplier", po.supplier_name], ["Type", po.supplier_type],
     ["Job", po.job_no || "—"], ["From PR", po.pr_no || "—"], ["Prepared by", po.prepared_by || "—"],
-    ["PO date", po.po_date?.slice(0, 10)], ["Received", po.goods_received_date?.slice(0, 10) || "—"]];
+    ["PO date", fmtDate(po.po_date)], ["Received", fmtDate(po.goods_received_date) || "—"]];
 
   return (
     <Modal wide title={`Purchase order ${po.po_no}`} onClose={onClose}>
@@ -331,6 +331,15 @@ function ReceiveModal({ po, onClose, onConfirmed, busy }) {
     setPreviews((p) => p.filter((_, i) => i !== idx));
   };
 
+  // FIC should upload receiving photos. If none were added, warn before closing the PO.
+  const confirmReceive = () => {
+    if (files.length === 0 &&
+        !window.confirm("⚠️ You haven't uploaded any receiving photos.\n\nConfirm goods received without photos?")) {
+      return;
+    }
+    onConfirmed(receivedBy, files);
+  };
+
   const summary = po.items?.map((it) => `${it.description} ${it.qty} ${it.unit}`).join(" · ") || "";
 
   return (
@@ -345,7 +354,7 @@ function ReceiveModal({ po, onClose, onConfirmed, busy }) {
 
         {/* Info notices */}
         <div className="rounded-xl border border-[#D1FAE5] bg-[#ECFDF5] px-4 py-3 text-[13px] text-[#065F46]">
-          ✅ This will mark the PO as <strong>CLOSED</strong>, record goods received on <strong>{new Date().toISOString().slice(0, 10)}</strong>, and update factory stock.
+          ✅ This will mark the PO as <strong>CLOSED</strong>, record goods received on <strong>{fmtDate(new Date())}</strong>, and update factory stock.
         </div>
         <div className="rounded-xl border border-[#DBEAFE] bg-[#EFF6FF] px-4 py-3 text-[13px] text-[#1E40AF]">
           🔔 <strong>Site Supervisor will be notified</strong> — please ensure supervisor confirms receipt of goods.
@@ -428,7 +437,7 @@ function ReceiveModal({ po, onClose, onConfirmed, busy }) {
           <Btn
             variant="success"
             disabled={busy}
-            onClick={() => onConfirmed(receivedBy, files)}
+            onClick={confirmReceive}
           >
             {busy ? "Saving…" : "✅ Confirm Goods Received"}
           </Btn>
