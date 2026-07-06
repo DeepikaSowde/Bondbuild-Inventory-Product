@@ -716,7 +716,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                     </td>
                     {canSeePrice && (
                       <td className={`${td} w-[110px]`}>
-                        {assignMode ? <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} /> : money(it.unit_price)}
+                        {assignMode ? <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} className={Number(it.unit_price) > 0 ? "" : "!border-[#DC2626]"} placeholder="0.00" /> : money(it.unit_price)}
                       </td>
                     )}
                     {canSeePrice && <td className={td}>{money((Number(it.buy_qty) || 0) * (Number(it.unit_price) || 0))}</td>}
@@ -767,8 +767,10 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
           const hasStock = items.some((it) => Number(it.stock_qty) > 0);
           const hasBuy = items.some((it) => Number(it.buy_qty) > 0);
           const anyAwaiting = items.some((it) => Number(it.stock_qty) > 0 && it.stock_status === "AWAITING_PURCHASER");
-          const allBuyHaveSupplier = items.filter((it) => Number(it.buy_qty) > 0).every((it) => it.supplier_id);
-          const saveAssign = async () => api.assignItems(pr.pr_no, items.filter((it) => Number(it.buy_qty) > 0).map((it) => ({ id: it.id, supplier_id: it.supplier_id || null, supplier_name: it.supplier_name, unit_price: Number(it.unit_price) || 0 })));
+          const buyItems = items.filter((it) => Number(it.buy_qty) > 0);
+          const allBuyHaveSupplier = buyItems.every((it) => it.supplier_id);
+          const allBuyHavePrice = buyItems.every((it) => Number(it.unit_price) > 0);
+          const saveAssign = async () => api.assignItems(pr.pr_no, buyItems.map((it) => ({ id: it.id, supplier_id: it.supplier_id || null, supplier_name: it.supplier_name, unit_price: Number(it.unit_price) || 0 })));
           return (
             <>
               <Btn variant="soft" disabled={busy} onClick={() => act(saveAssign, "Saved")}>Save prices</Btn>
@@ -776,9 +778,10 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                 <Btn variant="warning" disabled={busy} onClick={() => act(async () => { await saveAssign(); await api.sendToFic(pr.pr_no); }, "Stock info sent to Factory In-charge — Stock PO created")}>Send stock to FIC</Btn>
               )}
               {pGenerate && hasBuy && (
-                <Btn disabled={busy || !allBuyHaveSupplier}
-                  title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first" : ""}
+                <Btn disabled={busy || !allBuyHaveSupplier || !allBuyHavePrice}
+                  title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first" : !allBuyHavePrice ? "Enter a unit price (> 0) for every buy item first" : ""}
                   onClick={() => act(async () => {
+                    if (!allBuyHavePrice) throw new Error("Enter a unit price for every buy item before generating the PO");
                     await saveAssign();
                     const r = await api.generatePOs(pr.pr_no);
                     notify(`${r.created_pos.length} Buy PO(s) created: ${r.created_pos.join(", ")}`, "success");

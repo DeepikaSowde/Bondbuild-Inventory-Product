@@ -428,8 +428,10 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
     if (!["APPROVED","PO_RAISED"].includes(pr.status)) return fail(res, 409, `POs come from approved PRs (current: ${pr.status})`);
     const buyItems = pr.items.filter((it) => Number(it.buy_qty) > 0);
     if (!buyItems.length) return fail(res, 400, "No buy-quantity items on this PR");
-    for (const it of buyItems)
+    for (const it of buyItems) {
       if (!it.supplier_id) return fail(res, 400, `Assign a supplier to "${it.description}" first`);
+      if (!(Number(it.unit_price) > 0)) return fail(res, 400, `Enter a unit price (> 0) for "${it.description}" before generating the PO`);
+    }
 
     // don't create buy POs twice
     const existingBuy = await db.query(
