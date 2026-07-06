@@ -130,13 +130,26 @@ export async function exportPrPdf(pr) {
   doc.text(String(pr.pic || ""), rightX + 78, boxTop + 52);
 
   // ── Items table ──
-  const body = items.map((it, i) => [
+  // A material can be stored as several rows (one per source pallet + a buy row)
+  // sharing a line_no. Group them back so the requisition prints one line per
+  // material with the total qty and the buy supplier(s).
+  const order = [];
+  const byLine = new Map();
+  for (const it of items) {
+    const key = it.line_no != null ? `l${it.line_no}` : `id${it.id}`;
+    if (!byLine.has(key)) { byLine.set(key, { ...it, qty: 0, _suppliers: [] }); order.push(key); }
+    const g = byLine.get(key);
+    g.qty += Number(it.qty) || 0;
+    if (it.supplier_name && !g._suppliers.includes(it.supplier_name)) g._suppliers.push(it.supplier_name);
+  }
+  const grouped = order.map((k) => byLine.get(k));
+  const body = grouped.map((it, i) => [
     i + 1,
     it.description || "",
     it.colour || "",
-    it.qty ?? "",
+    it.qty || "",
     it.unit || "",
-    it.supplier_name || "",
+    it._suppliers.join(", "),
     it.remarks || "",
   ]);
   // pad with blank ruled rows to resemble the paper form

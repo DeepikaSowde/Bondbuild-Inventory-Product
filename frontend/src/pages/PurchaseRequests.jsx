@@ -7,7 +7,8 @@ import { exportPrPdf } from "../lib/prPdf";
 
 const emptyItem = () => ({
   profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
-  remarks: "", stock_qty: "", inventory_id: "", stock_location: "", buy_qty: "",
+  remarks: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
+  unit_price: "", allocations: [],
 });
 
 // Format a native date input value (YYYY-MM-DD) into the project-wide
@@ -33,6 +34,87 @@ const checkUploadFiles = (files) => {
 // Human label for an inventory row — also what a picked suggestion writes into Description.
 const stockLabelOf = (s) =>
   [s.profile_name, s.size].filter(Boolean).join(" ") || s.item_name || s.item_code || "";
+
+// ── Multi-source items ────────────────────────────────────────────────────────
+// A visual PR item pulls one material from several pallets (allocations) plus an
+// optional supplier buy. The DB stores ONE flat pr_items row per source, so we
+// FLATTEN a visual item into rows on save (all rows share a line_no) and GROUP
+// rows back by line_no on load. The backend reservation / PO logic already works
+// one-source-per-row, so nothing downstream changes.
+const stockSumOf = (it) => (it.allocations || []).reduce((s, a) => s + (Number(a.stock_qty) || 0), 0);
+const buyQtyOf = (it) => Math.max(0, (Number(it.qty) || 0) - stockSumOf(it));
+
+// Visual items -> flat pr_items rows. line_no (1-based item index) groups them.
+function flattenItems(visualItems) {
+  const out = [];
+  visualItems.forEach((it, idx) => {
+    const line_no = idx + 1;
+    const base = {
+      line_no, profile_code: it.profile_code || "", description: it.description.trim(),
+      colour: it.colour || "", unit: it.unit || "pcs", remarks: it.remarks || "",
+    };
+    const allocs = (it.allocations || []).filter((a) => a.inventory_id && Number(a.stock_qty) > 0);
+    for (const a of allocs) {
+      out.push({
+        ...base, qty: Number(a.stock_qty) || 0,
+        stock_qty: Number(a.stock_qty) || 0, inventory_id: a.inventory_id || null,
+        stock_location: a.stock_location || "", buy_qty: 0,
+        supplier_id: null, supplier_name: null, supplier_type: it.supplier_type || "Local", unit_price: 0,
+      });
+    }
+    const buy = buyQtyOf(it);
+    if (buy > 0) {
+      out.push({
+        ...base, qty: buy, stock_qty: 0, inventory_id: null, stock_location: "", buy_qty: buy,
+        supplier_id: it.supplier_id || null, supplier_name: it.supplier_name || null,
+        supplier_type: it.supplier_type || "Local", unit_price: Number(it.unit_price) || 0,
+      });
+    }
+    // description present but nothing sourced yet — keep a plain row so it isn't lost
+    if (!allocs.length && buy <= 0) {
+      out.push({
+        ...base, qty: Number(it.qty) || 0, stock_qty: 0, inventory_id: null, stock_location: "", buy_qty: 0,
+        supplier_id: it.supplier_id || null, supplier_name: it.supplier_name || null,
+        supplier_type: it.supplier_type || "Local", unit_price: 0,
+      });
+    }
+  });
+  return out;
+}
+
+// Flat pr_items rows (grouped by line_no) -> editable visual items. Also handles
+// legacy rows that carried both stock_qty and buy_qty on a single line.
+function groupItemsForEdit(rawItems) {
+  const order = [];
+  const byLine = new Map();
+  for (const it of rawItems) {
+    const key = it.line_no != null ? `l${it.line_no}` : `id${it.id}`;
+    if (!byLine.has(key)) { byLine.set(key, []); order.push(key); }
+    byLine.get(key).push(it);
+  }
+  return order.map((key) => {
+    const rows = byLine.get(key);
+    const base = rows[0];
+    const allocations = rows
+      .filter((r) => Number(r.stock_qty) > 0)
+      .map((r) => ({
+        inventory_id: r.inventory_id || "", stock_location: r.stock_location || "",
+        available_stock_qty: "", // backfilled from live stock once it loads
+        stock_qty: String(Number(r.stock_qty) || 0),
+      }));
+    const buyRow = rows.find((r) => Number(r.buy_qty) > 0);
+    // total = every portion added up (works for split rows and legacy combined rows)
+    const total = rows.reduce(
+      (s, r) => s + Math.max(0, Number(r.stock_qty) || 0) + Math.max(0, Number(r.buy_qty) || 0), 0);
+    return {
+      profile_code: base.profile_code || "", description: base.description || "", colour: base.colour || "",
+      qty: total ? String(total) : (base.qty ?? ""), unit: base.unit || "pcs", remarks: base.remarks || "",
+      supplier_id: buyRow?.supplier_id || "", supplier_name: buyRow?.supplier_name || "",
+      supplier_type: (buyRow || base).supplier_type || "Local", unit_price: buyRow?.unit_price || "",
+      allocations,
+    };
+  });
+}
 
 export default function PurchaseRequests({ user, perms = {}, notify, refreshInbox }) {
   const [prs, setPRs] = useState([]);
@@ -132,19 +214,14 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   const blankItem = () => ({
     profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
     remarks: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
-    stock_qty: "", inventory_id: "", stock_location: "", buy_qty: "", available_stock_qty: "",
+    unit_price: "", allocations: [],
   });
   const [form, setForm] = useState(() => editPR ? {
     job_no: editPR.job_no, project_name: editPR.project_name || "", location: editPR.location || "",
     date_required: editPR.date_required || "", date_issued: editPR.date_issued?.slice(0, 10) || "",
     pic: editPR.pic || "", requested_by: editPR.requested_by, checked_by: editPR.checked_by || "",
     approved_by: editPR.approved_by || "", remarks: editPR.remarks || "",
-    items: editPR.items.map((it) => ({
-      profile_code: it.profile_code || "", description: it.description, colour: it.colour || "",
-      qty: it.qty, unit: it.unit, remarks: it.remarks || "",
-      supplier_id: it.supplier_id || "", supplier_name: it.supplier_name || "", supplier_type: it.supplier_type || "Local",
-      stock_qty: it.stock_qty || "", inventory_id: it.inventory_id || "", stock_location: it.stock_location || "", buy_qty: it.buy_qty || "",
-    })),
+    items: groupItemsForEdit(editPR.items),
   } : {
     job_no: "", project_name: "", location: "", date_required: "", date_issued: "",
     pic: "", requested_by: user.name, checked_by: "", approved_by: "", remarks: "", items: [blankItem()],
@@ -167,29 +244,73 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     ...f,
     items: f.items.map((it, x) => {
       if (x !== i) return it;
-      const updated = { ...it, [key]: val };
-      if (key === "qty") {
-        if (val !== "" && (isNaN(Number(val)) || Number(val) < 0)) return f;
-        const total = Number(val) || 0;
-        const avail = Number(it.available_stock_qty) || 0;
-        const maxStock = avail > 0 ? Math.min(total, avail) : 0;
-        const stock = Math.min(Number(it.stock_qty) || 0, maxStock);
-        updated.stock_qty = it.inventory_id ? String(stock) : it.stock_qty;
-        updated.buy_qty = String(Math.max(0, total - (Number(updated.stock_qty) || 0)));
-      }
-      if (key === "stock_qty") {
-        const total = Number(it.qty) || 0;
-        const avail = Number(it.available_stock_qty) || 0;
-        const max = avail > 0 ? Math.min(total, avail) : total;
-        const capped = Math.min(Math.max(0, Number(val) || 0), max);
-        updated.stock_qty = String(capped);
-        updated.buy_qty = String(Math.max(0, total - capped));
-      }
-      return updated;
+      if (key === "qty" && val !== "" && (isNaN(Number(val)) || Number(val) < 0)) return it;
+      return { ...it, [key]: val };
     }),
   }));
   const removeItem = (i) => setForm((f) => ({ ...f, items: f.items.filter((_, x) => x !== i) }));
   const addItem = () => setForm((f) => ({ ...f, items: [...f.items, blankItem()] }));
+
+  // ── Stock allocations (one visual item -> many pallets) ──
+  // Add a pallet as a new allocation, pre-filled with what it can cover.
+  const addAllocation = (i, s) => setForm((f) => ({
+    ...f,
+    items: f.items.map((it, x) => {
+      if (x !== i) return it;
+      if ((it.allocations || []).some((a) => String(a.inventory_id) === String(s.id))) return it; // no duplicate pallet
+      const total = Number(it.qty) || 0;
+      const avail = availOf(s);
+      const remaining = Math.max(0, total - stockSumOf(it));
+      const qty = total > 0 ? Math.min(avail, remaining) : 0;
+      return {
+        ...it,
+        profile_code: it.profile_code || s.item_code || "",
+        description: it.description || [s.profile_name, s.size].filter(Boolean).join(" "),
+        allocations: [
+          ...(it.allocations || []),
+          { inventory_id: s.id, stock_location: s.location_code || "", available_stock_qty: String(avail), stock_qty: String(qty) },
+        ],
+      };
+    }),
+  }));
+  // Edit one allocation's pull qty (capped at that pallet's availability).
+  const setAllocQty = (i, aIdx, val) => setForm((f) => ({
+    ...f,
+    items: f.items.map((it, x) => {
+      if (x !== i) return it;
+      return {
+        ...it,
+        allocations: it.allocations.map((a, y) => {
+          if (y !== aIdx) return a;
+          if (val === "") return { ...a, stock_qty: "" };
+          const max = a.available_stock_qty !== "" ? Number(a.available_stock_qty) : Infinity;
+          const capped = Math.min(Math.max(0, Number(val) || 0), max);
+          return { ...a, stock_qty: String(capped) };
+        }),
+      };
+    }),
+  }));
+  const removeAllocation = (i, aIdx) => setForm((f) => ({
+    ...f,
+    items: f.items.map((it, x) => x === i ? { ...it, allocations: it.allocations.filter((_, y) => y !== aIdx) } : it),
+  }));
+  // Greedily fill from every in-stock pallet in order; the remainder becomes Buy.
+  const autoFillStock = (i) => setForm((f) => ({
+    ...f,
+    items: f.items.map((it, x) => {
+      if (x !== i) return it;
+      const info = getStockInfo(it.description);
+      const inStock = info ? info.locations.filter((l) => l.qty > 0) : [];
+      let left = Number(it.qty) || 0;
+      const allocations = [];
+      for (const l of inStock) {
+        if (left <= 0) break;
+        const take = Math.min(l.qty, left);
+        if (take > 0) { allocations.push({ inventory_id: l.row.id, stock_location: l.loc, available_stock_qty: String(l.qty), stock_qty: String(take) }); left -= take; }
+      }
+      return { ...it, profile_code: it.profile_code || (inStock[0]?.row.item_code || ""), allocations };
+    }),
+  }));
 
   const lookupJob = async () => {
     if (!form.job_no.trim()) return;
@@ -253,27 +374,23 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     return { locations, total: locations.reduce((sum, l) => sum + l.qty, 0) };
   };
 
-  // "Use from Stock": link the inventory row, pre-fill From-Stock qty, set code/description
-  const useFromStock = (i, s) => {
-    setForm((f) => ({ ...f, items: f.items.map((it, x) => {
-      if (x !== i) return it;
-      const total = Number(it.qty) || 0;
-      const avail = availOf(s);
-      const stock = Math.min(total, avail);
-      const buy = Math.max(0, total - stock);
-      return {
+  // When editing an existing PR, allocations arrive without live availability
+  // (it isn't stored on the row). Backfill it from factory stock once loaded so
+  // the pull-qty inputs cap correctly.
+  useEffect(() => {
+    if (!stockLoaded) return;
+    setForm((f) => ({
+      ...f,
+      items: f.items.map((it) => ({
         ...it,
-        inventory_id: s.id,
-        stock_location: s.location_code,
-        profile_code: s.item_code || it.profile_code,
-        description: it.description || [s.profile_name, s.size].filter(Boolean).join(" "),
-        available_stock_qty: String(avail),
-        stock_qty: String(stock),
-        buy_qty: String(buy),
-      };
-    }) }));
-    setStockOpen(null);
-  };
+        allocations: (it.allocations || []).map((a) => {
+          if (a.available_stock_qty !== "" || !a.inventory_id) return a;
+          const inv = stockList.find((s) => String(s.id) === String(a.inventory_id));
+          return inv ? { ...a, available_stock_qty: String(availOf(inv)), stock_location: a.stock_location || inv.location_code } : a;
+        }),
+      })),
+    }));
+  }, [stockLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async () => {
     if (!jobValid) return notify("Job No must contain at least one letter or number", "error");
@@ -281,15 +398,15 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     if (!form.items.some((it) => it.description.trim())) return notify("Description is required — add at least one item with a description", "error");
     if (form.items.some((it) => Number(it.qty) < 0)) return notify("Quantity cannot be negative", "error");
     if (!form.items.some((it) => Number(it.qty) > 0)) return notify("Quantity is required — at least one item must have a quantity greater than 0", "error");
-    const buyNeedsSupplier = form.items.find((it) => it.description.trim() && Number(it.buy_qty) > 0 && !it.supplier_id);
+    const over = form.items.find((it) => it.description.trim() && stockSumOf(it) > (Number(it.qty) || 0));
+    if (over) return notify(`"${over.description.trim()}" pulls ${stockSumOf(over)} from stock but its total qty is only ${Number(over.qty) || 0} — lower a pallet quantity or raise the total`, "error");
+    const buyNeedsSupplier = form.items.find((it) => it.description.trim() && buyQtyOf(it) > 0 && !it.supplier_id);
     if (buyNeedsSupplier) return notify(`Select a supplier for "${buyNeedsSupplier.description.trim() || buyNeedsSupplier.profile_code || "the buy item"}" — items with a buy quantity need a supplier`, "error");
     setBusy(true);
     try {
       try { await api.poProject(form.job_no.trim()); }
       catch { await api.addPoProject({ job_no: form.job_no.trim(), project_name: form.project_name || form.job_no, location: form.location }); }
-      const payload = { ...form, items: form.items.filter((it) => it.description.trim()).map((it) => ({
-        ...it, qty: Number(it.qty) || 0, stock_qty: Number(it.stock_qty) || 0, buy_qty: Number(it.buy_qty) || 0, inventory_id: it.inventory_id || null,
-      })) };
+      const payload = { ...form, items: flattenItems(form.items.filter((it) => it.description.trim())) };
       if (editPR) { await api.updatePR(editPR.pr_no, { ...payload, resubmit: editPR.status === "SEND_BACK" }); notify(`${editPR.pr_no} updated${editPR.status === "SEND_BACK" ? " and resubmitted" : ""}`); }
       else {
         const pr = await api.createPR(payload);
@@ -365,8 +482,14 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
       <div className="grid gap-4">
         {form.items.map((it, i) => {
           const totalQty = Number(it.qty) || 0;
-          const stockQty = Number(it.stock_qty) || 0;
-          const autoBuy = Math.max(0, totalQty - stockQty);
+          const stockSum = stockSumOf(it);
+          const buyQty = Math.max(0, totalQty - stockSum);
+          const overAlloc = stockSum > totalQty;
+          const info = getStockInfo(it.description);
+          const inStock = info ? info.locations.filter((l) => l.qty > 0) : [];
+          const usedInv = new Set((it.allocations || []).map((a) => String(a.inventory_id)));
+          const pStock = totalQty > 0 ? Math.min(100, (stockSum / totalQty) * 100) : 0;
+          const pBuy = totalQty > 0 ? Math.min(100 - pStock, (buyQty / totalQty) * 100) : 0;
           return (
             <div key={i} className="rounded-xl border border-[#E5E7EB]">
               {/* purple header */}
@@ -445,68 +568,113 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                 <div><label className={lbl}>Unit</label>
                   <select className={inp} value={it.unit} onChange={(e) => setItem(i, "unit", e.target.value)}>{["pcs", "m", "set", "lot", "kg"].map((u) => <option key={u}>{u}</option>)}</select>
                 </div>
-                <div><label className={lbl}>Supplier {Number(it.buy_qty) > 0 ? <span className="text-[#DC2626]">*required</span> : <span className="text-[#D97706]">(suggested)</span>}</label>
-                  <select className={`${inp} ${Number(it.buy_qty) > 0 && !it.supplier_id ? "!border-[#DC2626]" : ""}`} value={it.supplier_id} onChange={(e) => { const s = suppliers.find((s) => String(s.id) === e.target.value); setItem(i, "supplier_id", e.target.value); setItem(i, "supplier_name", s?.name || ""); if (s) setItem(i, "supplier_type", s.type); }}>
-                    <option value="">{Number(it.buy_qty) > 0 ? "— Select supplier —" : "— Select supplier (optional) —"}</option>
+                <div><label className={lbl}>Supplier {buyQty > 0 ? <span className="text-[#DC2626]">*required</span> : <span className="text-[#D97706]">(for buy qty)</span>}</label>
+                  <select className={`${inp} ${buyQty > 0 && !it.supplier_id ? "!border-[#DC2626]" : ""}`} value={it.supplier_id} onChange={(e) => { const s = suppliers.find((s) => String(s.id) === e.target.value); setItem(i, "supplier_id", e.target.value); setItem(i, "supplier_name", s?.name || ""); if (s) setItem(i, "supplier_type", s.type); }}>
+                    <option value="">{buyQty > 0 ? "— Select supplier —" : "— Select supplier (optional) —"}</option>
                     {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
-                  {Number(it.buy_qty) > 0 && !it.supplier_id && <span className="mt-0.5 block text-[10px] font-semibold text-[#DC2626]">Buy qty needs a supplier</span>}
+                  {buyQty > 0 && !it.supplier_id && <span className="mt-0.5 block text-[10px] font-semibold text-[#DC2626]">Buy qty needs a supplier</span>}
                 </div>
                 <div><label className={lbl}>Type</label>
                   <select className={inp} value={it.supplier_type} onChange={(e) => setItem(i, "supplier_type", e.target.value)}>{["Local", "China", "Europe", "Other"].map((t) => <option key={t}>{t}</option>)}</select>
                 </div>
               </div>
 
-              {/* Row 3: the split — From stock + Buy qty */}
-              <div className="grid grid-cols-[1fr_140px_140px] items-end gap-2.5 px-3 pb-2">
-                <div><label className={lbl}>Remarks ({(it.remarks || "").length}/200)</label><input className={inp} value={it.remarks || ""} maxLength={200} onChange={(e) => setItem(i, "remarks", e.target.value)} placeholder="e.g. URGENT, Preference (P&M)" /></div>
-                <div>
-                  <label className={lbl}>From stock {it.stock_location && <span className="text-[#059669]">@ {it.stock_location}</span>}{it.available_stock_qty !== "" && <span className="text-[#9CA3AF]"> (avail: {it.available_stock_qty})</span>}</label>
-                  <input type="number" min="0"
-                    max={it.available_stock_qty !== "" ? Math.min(totalQty, Number(it.available_stock_qty)) : totalQty}
-                    className={inp} value={it.stock_qty}
-                    disabled={!it.inventory_id}
-                    title={it.inventory_id ? `Max: ${Math.min(totalQty, Number(it.available_stock_qty) || totalQty)}` : "Use 'Use from Stock' below to link an item"}
-                    onChange={(e) => setItem(i, "stock_qty", e.target.value)}
-                    placeholder={it.inventory_id ? "" : "use stock ↓"} />
-                </div>
-                <div>
-                  <label className={lbl}>Buy qty <span className="text-[#9CA3AF]">(auto)</span></label>
-                  <input type="number" className={`${inp} bg-[#F9FAFB] cursor-not-allowed`} value={autoBuy} readOnly title="Auto-calculated: Total Qty − Stock Qty" />
-                </div>
+              {/* Remarks */}
+              <div className="px-3 pb-1.5">
+                <label className={lbl}>Remarks ({(it.remarks || "").length}/200)</label>
+                <input className={inp} value={it.remarks || ""} maxLength={200} onChange={(e) => setItem(i, "remarks", e.target.value)} placeholder="e.g. URGENT, Preference (P&M)" />
               </div>
 
-              {/* Per-location quick-fill buttons — click to pull that pallet's stock into From stock */}
-              {(() => {
-                const info = getStockInfo(it.description);
-                const inStock = info ? info.locations.filter((l) => l.qty > 0) : [];
-                if (inStock.length === 0) return null;
-                const total = Number(it.qty) || 0;
-                return (
-                  <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2">
+              {/* Fulfil-from ledger — pull one material from several pallets; the remainder is a Buy */}
+              <div className="mx-3 mb-2 rounded-lg border border-[#E5E7EB] bg-[#FBFBFD] px-3 py-2.5">
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF]">Fulfil from — pull stock, rest is buy</span>
+                  {inStock.length > 0 && (
+                    <button type="button" disabled={totalQty <= 0} onClick={() => autoFillStock(i)}
+                      title={totalQty <= 0 ? "Enter Total Qty first" : "Fill from every pallet in order; remainder becomes Buy"}
+                      className={`ml-auto rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${totalQty <= 0 ? "cursor-not-allowed bg-[#F3F4F6] text-[#9CA3AF]" : "bg-[#6366F1] text-white hover:bg-[#4F46E5]"}`}>
+                      ⚡ Auto-fill
+                    </button>
+                  )}
+                </div>
+
+                {/* pallet chips — click to add that pallet as an allocation */}
+                {inStock.length > 0 && (
+                  <div className="mb-2 flex flex-wrap items-center gap-1.5">
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-[#9CA3AF]">Pull from stock:</span>
                     {inStock.map((l) => {
-                      const active = it.inventory_id && String(it.inventory_id) === String(l.row.id);
-                      const fill = total > 0 ? Math.min(l.qty, total) : 0;
+                      const added = usedInv.has(String(l.row.id));
+                      const disabled = totalQty <= 0 || added;
                       return (
-                        <button key={l.row.id} type="button"
-                          disabled={total <= 0}
-                          onClick={() => useFromStock(i, l.row)}
-                          title={total <= 0 ? "Enter Total Qty first" : `Fill From stock with ${fill} from ${l.loc}${l.qty > total ? ` (capped at ${total})` : ""}`}
+                        <button key={l.row.id} type="button" disabled={disabled} onClick={() => addAllocation(i, l.row)}
+                          title={added ? "Already added below" : totalQty <= 0 ? "Enter Total Qty first" : `Add ${l.loc} (avail ${l.qty})`}
                           className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                            total <= 0
-                              ? "cursor-not-allowed border-[#E5E7EB] bg-[#F9FAFB] text-[#9CA3AF]"
-                              : active
-                              ? "border-[#059669] bg-[#ECFDF5] text-[#059669]"
-                              : "border-[#C7D2FE] bg-[#EEF2FF] text-[#6366F1] hover:bg-[#E0E7FF]"
-                          }`}>
-                          {l.loc} · {l.qty}
+                            added ? "border-[#A7F3D0] bg-[#ECFDF5] text-[#059669]"
+                              : disabled ? "cursor-not-allowed border-[#E5E7EB] bg-[#F9FAFB] text-[#9CA3AF]"
+                              : "border-[#C7D2FE] bg-[#EEF2FF] text-[#6366F1] hover:bg-[#E0E7FF]"}`}>
+                          {added ? "✓ " : "+ "}{l.loc} · {l.qty}
                         </button>
                       );
                     })}
                   </div>
-                );
-              })()}
+                )}
+
+                {/* allocation rows + auto buy remainder */}
+                <div className="grid gap-1.5">
+                  {(it.allocations || []).map((a, aIdx) => {
+                    const aOver = a.available_stock_qty !== "" && Number(a.stock_qty) > Number(a.available_stock_qty);
+                    return (
+                      <div key={aIdx} className="grid grid-cols-[16px_1fr_110px_26px] items-center gap-2 rounded-md border border-[#E5E7EB] border-l-[3px] border-l-[#059669] bg-white px-2.5 py-1.5">
+                        <span className="text-[13px]">📦</span>
+                        <div className="min-w-0">
+                          <div className="truncate text-[12px] font-semibold text-[#374151]">{a.stock_location || "Stock"}</div>
+                          <div className="text-[10px] text-[#9CA3AF]">Reserved against this pallet{a.available_stock_qty !== "" ? ` · avail ${a.available_stock_qty}` : ""}</div>
+                        </div>
+                        <input type="number" min="0" max={a.available_stock_qty !== "" ? Number(a.available_stock_qty) : undefined}
+                          className={`${inp} py-1 text-right ${aOver ? "!border-[#DC2626] text-[#DC2626]" : ""}`}
+                          value={a.stock_qty} onChange={(e) => setAllocQty(i, aIdx, e.target.value)} placeholder="0" />
+                        <button type="button" onClick={() => removeAllocation(i, aIdx)} title="Remove pallet"
+                          className="rounded text-center text-[14px] text-[#9CA3AF] hover:bg-[#FEF2F2] hover:text-[#DC2626]">✕</button>
+                      </div>
+                    );
+                  })}
+
+                  {buyQty > 0 && (
+                    <div className="grid grid-cols-[16px_1fr_110px_26px] items-center gap-2 rounded-md border border-[#E5E7EB] border-l-[3px] border-l-[#D97706] bg-white px-2.5 py-1.5">
+                      <span className="text-[13px]">🛒</span>
+                      <div className="min-w-0">
+                        <div className="truncate text-[12px] font-semibold text-[#374151]">Buy{it.supplier_name ? ` — ${it.supplier_name}` : ""}</div>
+                        <div className="text-[10px] text-[#9CA3AF]">{it.supplier_id ? "Becomes a PO on approval" : "Select a supplier above"}</div>
+                      </div>
+                      <input type="number" className={`${inp} py-1 text-right bg-[#F9FAFB] cursor-not-allowed`} value={buyQty} readOnly title="Auto = Total − stock allocated" />
+                      <span />
+                    </div>
+                  )}
+
+                  {(it.allocations || []).length === 0 && buyQty <= 0 && (
+                    <div className="rounded-md border border-dashed border-[#E5E7EB] px-2.5 py-2 text-center text-[11px] italic text-[#9CA3AF]">
+                      Enter a Total Qty, then add a pallet or Auto-fill. With no pallets the whole qty becomes a Buy.
+                    </div>
+                  )}
+                </div>
+
+                {/* running tally */}
+                <div className="mt-2">
+                  <div className="flex h-1.5 overflow-hidden rounded-full bg-[#EEF0F4]">
+                    <div className="bg-[#059669]" style={{ width: `${pStock}%` }} />
+                    <div className="bg-[#D97706]" style={{ width: `${pBuy}%` }} />
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between text-[11.5px]">
+                    <span className="text-[#6B7280]">From stock <b className="text-[#059669]">{stockSum}</b> · Buy <b className="text-[#D97706]">{buyQty}</b> · Total <b className="text-[#374151]">{totalQty}</b></span>
+                    {overAlloc
+                      ? <span className="rounded-full bg-[#FEF2F2] px-2 py-0.5 text-[10.5px] font-bold text-[#DC2626]">{stockSum - totalQty} over — reduce a pallet</span>
+                      : totalQty > 0
+                      ? <span className="rounded-full bg-[#ECFDF5] px-2 py-0.5 text-[10.5px] font-bold text-[#059669]">✓ balanced</span>
+                      : <span className="text-[10.5px] text-[#9CA3AF]">enter total qty</span>}
+                  </div>
+                </div>
+              </div>
 
               {/* Stock toggle */}
               <div className="px-3 pb-3">
@@ -531,6 +699,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                             const avail = availOf(s);
                             const reserved = Number(s.reserved_qty) || 0;
                             const enough = avail > 0;
+                            const added = usedInv.has(String(s.id));
                             return (
                               <tr key={s.id}>
                                 <td className="border-b border-[#F3F4F6] px-2.5 py-1.5">{s.location_code || "—"}</td>
@@ -547,8 +716,10 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                                   <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${enough ? "bg-[#ECFDF5] text-[#059669]" : "bg-[#FEF2F2] text-[#DC2626]"}`}>{enough ? "IN STOCK" : "OUT"}</span>
                                 </td>
                                 <td className="border-b border-[#F3F4F6] px-2.5 py-1.5">
-                                  {enough
-                                    ? <button onClick={() => useFromStock(i, s)} className="whitespace-nowrap rounded-md bg-[#059669] px-3 py-1 text-[11px] font-bold text-white">✅ Use from Stock</button>
+                                  {added
+                                    ? <span className="whitespace-nowrap rounded-md bg-[#ECFDF5] px-3 py-1 text-[11px] font-bold text-[#059669]">✓ Added</span>
+                                    : enough
+                                    ? <button onClick={() => { addAllocation(i, s); setStockOpen(null); }} className="whitespace-nowrap rounded-md bg-[#059669] px-3 py-1 text-[11px] font-bold text-white">✅ Use from Stock</button>
                                     : <span className="text-[10px] text-[#9CA3AF]">Insufficient</span>}
                                 </td>
                               </tr>

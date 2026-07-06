@@ -73,7 +73,9 @@ router.get("/", async (req, res) => {
     const { rows } = await db.query(sql, params);
     const withCounts = await Promise.all(rows.map(async (pr) => {
       const c = await db.query(
-        "SELECT COUNT(*)::int n, COALESCE(SUM(stock_qty),0) s, COALESCE(SUM(buy_qty),0) b FROM pr_items WHERE pr_id=$1",
+        // count distinct line_no so a material split across pallets + a buy still
+        // reads as one logical item, not several rows
+        "SELECT COUNT(DISTINCT line_no)::int n, COALESCE(SUM(stock_qty),0) s, COALESCE(SUM(buy_qty),0) b FROM pr_items WHERE pr_id=$1",
         [pr.id]
       );
       return { ...pr, item_count: c.rows[0].n, total_stock_qty: c.rows[0].s, total_buy_qty: c.rows[0].b };
@@ -122,13 +124,17 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
       let line = 1;
       for (const it of items) {
         const stockQty = Number(it.stock_qty) || 0;
+        // A single visual item may arrive as several rows sharing a line_no (one
+        // per source pallet + a buy row). Honour the client's line_no so they stay
+        // grouped; fall back to a running counter for older/legacy payloads.
+        const lineNo = Number(it.line_no) || line++;
         await c.query(
           `INSERT INTO pr_items
            (pr_id, line_no, profile_code, description, colour, qty, unit, remarks,
             stock_qty, inventory_id, stock_location, stock_status, buy_qty,
             supplier_id, supplier_name, supplier_type, unit_price)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-          [prId, line++, it.profile_code, it.description.trim(), it.colour,
+          [prId, lineNo, it.profile_code, it.description.trim(), it.colour,
            Number(it.qty) || 0, it.unit || "pcs", it.remarks, stockQty,
            it.inventory_id || null, it.stock_location,
            stockQty > 0 ? "AWAITING_PURCHASER" : "NONE", Number(it.buy_qty) || 0,
@@ -175,13 +181,15 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
       let line = 1;
       for (const it of items) {
         const stockQty = Number(it.stock_qty) || 0;
+        // Keep rows of the same visual item grouped by their shared line_no.
+        const lineNo = Number(it.line_no) || line++;
         await c.query(
           `INSERT INTO pr_items
            (pr_id, line_no, profile_code, description, colour, qty, unit, remarks,
             stock_qty, inventory_id, stock_location, stock_status, buy_qty,
             supplier_id, supplier_name, supplier_type, unit_price)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-          [pr.id, line++, it.profile_code, it.description.trim(), it.colour,
+          [pr.id, lineNo, it.profile_code, it.description.trim(), it.colour,
            Number(it.qty) || 0, it.unit || "pcs", it.remarks, stockQty,
            it.inventory_id || null, it.stock_location,
            stockQty > 0 ? "AWAITING_PURCHASER" : "NONE", Number(it.buy_qty) || 0,
