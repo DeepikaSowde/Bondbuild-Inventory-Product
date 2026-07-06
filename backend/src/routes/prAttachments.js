@@ -23,7 +23,25 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + "-" + Math.round(Math.random() * 1e9) + ext);
   },
 });
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
+
+// Block executable and script files — attachments should be documents/images only.
+const BLOCKED_EXT = new Set([
+  ".exe", ".com", ".scr", ".msi", ".msix", ".bat", ".cmd", ".dll", ".app", ".apk",
+  ".jar", ".gadget", ".pif", ".cpl", ".sys", ".bin", ".run", ".out",
+  ".sh", ".bash", ".zsh", ".ps1", ".psm1", ".psd1", ".vbs", ".vbe", ".vb",
+  ".js", ".mjs", ".cjs", ".jse", ".wsf", ".wsh", ".hta", ".reg", ".lnk",
+  ".py", ".pyc", ".pl", ".rb", ".php", ".php5", ".phtml", ".cgi", ".asp", ".aspx", ".jsp", ".htaccess",
+]);
+const fileFilter = (_req, file, cb) => {
+  const ext = path.extname(file.originalname || "").toLowerCase();
+  if (BLOCKED_EXT.has(ext)) {
+    const e = new Error(`"${ext}" files are not allowed — executable and script files are blocked.`);
+    e.code = "BLOCKED_FILE_TYPE";
+    return cb(e);
+  }
+  cb(null, true);
+};
+const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter });
 
 const ok = (res, data, extra = {}) => res.json({ success: true, data, ...extra });
 const fail = (res, code, error) => res.status(code).json({ success: false, error });
@@ -93,6 +111,7 @@ router.use((err, _req, res, _next) => {
   if (err instanceof multer.MulterError) {
     return fail(res, 400, err.code === "LIMIT_FILE_SIZE" ? "File too large (max 10 MB each)" : err.message);
   }
+  if (err && err.code === "BLOCKED_FILE_TYPE") return fail(res, 400, err.message);
   fail(res, 500, err.message || "Upload failed");
 });
 

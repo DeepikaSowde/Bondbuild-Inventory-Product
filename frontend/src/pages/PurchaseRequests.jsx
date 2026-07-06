@@ -18,6 +18,18 @@ const fmtDateReq = (iso) => {
   return `${d}/${m}/${y}`;
 };
 
+// Attachment upload guard (mirrors the backend): block executables/scripts and
+// files over 10 MB. Returns an error string for the first bad file, else null.
+const MAX_UPLOAD_MB = 10;
+const BLOCKED_UPLOAD_EXT = /\.(exe|com|scr|msi|msix|bat|cmd|dll|app|apk|jar|gadget|pif|cpl|sys|bin|run|out|sh|bash|zsh|ps1|psm1|psd1|vbs|vbe|vb|js|mjs|cjs|jse|wsf|wsh|hta|reg|lnk|py|pyc|pl|rb|php|php5|phtml|cgi|asp|aspx|jsp|htaccess)$/i;
+const checkUploadFiles = (files) => {
+  for (const f of Array.from(files || [])) {
+    if (BLOCKED_UPLOAD_EXT.test(f.name)) return `"${f.name}" is blocked — executable and script files are not allowed.`;
+    if (f.size > MAX_UPLOAD_MB * 1024 * 1024) return `"${f.name}" is too large (max ${MAX_UPLOAD_MB} MB).`;
+  }
+  return null;
+};
+
 // Human label for an inventory row — also what a picked suggestion writes into Description.
 const stockLabelOf = (s) =>
   [s.profile_name, s.size].filter(Boolean).join(" ") || s.item_name || s.item_code || "";
@@ -572,6 +584,8 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
           <input ref={fileInputRef} type="file" multiple className="hidden"
             onChange={(e) => {
               const picked = Array.from(e.target.files || []);
+              const err = checkUploadFiles(picked);
+              if (err) { notify(err, "error"); e.target.value = ""; return; }
               if (picked.length) setHeldFiles((prev) => [...prev, ...picked]);
               e.target.value = "";
             }} />
@@ -805,6 +819,8 @@ function PRAttachments({ pr, notify, onChanged }) {
   const onPick = async (e) => {
     const picked = e.target.files;
     if (!picked || !picked.length) return;
+    const err = checkUploadFiles(picked);
+    if (err) { notify(err, "error"); e.target.value = ""; return; }
     setBusy(true);
     try { await api.uploadAttachments(pr.pr_no, picked); notify(`${picked.length} file(s) attached`); await refresh(); }
     catch (err) { notify(apiError(err), "error"); }
