@@ -269,6 +269,8 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     if (!form.items.some((it) => it.description.trim())) return notify("Description is required — add at least one item with a description", "error");
     if (form.items.some((it) => Number(it.qty) < 0)) return notify("Quantity cannot be negative", "error");
     if (!form.items.some((it) => Number(it.qty) > 0)) return notify("Quantity is required — at least one item must have a quantity greater than 0", "error");
+    const buyNeedsSupplier = form.items.find((it) => it.description.trim() && Number(it.buy_qty) > 0 && !it.supplier_id);
+    if (buyNeedsSupplier) return notify(`Select a supplier for "${buyNeedsSupplier.description.trim() || buyNeedsSupplier.profile_code || "the buy item"}" — items with a buy quantity need a supplier`, "error");
     setBusy(true);
     try {
       try { await api.poProject(form.job_no.trim()); }
@@ -431,11 +433,12 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
                 <div><label className={lbl}>Unit</label>
                   <select className={inp} value={it.unit} onChange={(e) => setItem(i, "unit", e.target.value)}>{["pcs", "m", "set", "lot", "kg"].map((u) => <option key={u}>{u}</option>)}</select>
                 </div>
-                <div><label className={lbl}>Supplier <span className="text-[#D97706]">(suggested)</span></label>
-                  <select className={inp} value={it.supplier_id} onChange={(e) => { const s = suppliers.find((s) => String(s.id) === e.target.value); setItem(i, "supplier_id", e.target.value); setItem(i, "supplier_name", s?.name || ""); if (s) setItem(i, "supplier_type", s.type); }}>
-                    <option value="">— Select supplier (optional) —</option>
+                <div><label className={lbl}>Supplier {Number(it.buy_qty) > 0 ? <span className="text-[#DC2626]">*required</span> : <span className="text-[#D97706]">(suggested)</span>}</label>
+                  <select className={`${inp} ${Number(it.buy_qty) > 0 && !it.supplier_id ? "!border-[#DC2626]" : ""}`} value={it.supplier_id} onChange={(e) => { const s = suppliers.find((s) => String(s.id) === e.target.value); setItem(i, "supplier_id", e.target.value); setItem(i, "supplier_name", s?.name || ""); if (s) setItem(i, "supplier_type", s.type); }}>
+                    <option value="">{Number(it.buy_qty) > 0 ? "— Select supplier —" : "— Select supplier (optional) —"}</option>
                     {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
+                  {Number(it.buy_qty) > 0 && !it.supplier_id && <span className="mt-0.5 block text-[10px] font-semibold text-[#DC2626]">Buy qty needs a supplier</span>}
                 </div>
                 <div><label className={lbl}>Type</label>
                   <select className={inp} value={it.supplier_type} onChange={(e) => setItem(i, "supplier_type", e.target.value)}>{["Local", "China", "Europe", "Other"].map((t) => <option key={t}>{t}</option>)}</select>
