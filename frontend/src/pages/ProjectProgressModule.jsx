@@ -5822,8 +5822,8 @@ export default function ProjectProgressModule() {
                     style={{
                       display: "flex",
                       alignItems: "flex-end",
-                      gap: 14,
-                      height: PLOT_H + 34,
+                      gap: 4,
+                      height: PLOT_H + 30,
                       borderBottom: `1px solid ${C.border}`,
                     }}
                   >
@@ -5845,10 +5845,10 @@ export default function ProjectProgressModule() {
                         >
                           <div
                             style={{
-                              fontSize: 11,
+                              fontSize: 9,
                               fontWeight: 700,
                               color: col,
-                              marginBottom: 4,
+                              marginBottom: 3,
                               whiteSpace: "nowrap",
                             }}
                           >
@@ -5857,22 +5857,22 @@ export default function ProjectProgressModule() {
                           <div
                             style={{
                               width: "100%",
-                              maxWidth: 56,
+                              maxWidth: 26,
                               height: barH,
                               background: col,
-                              borderRadius: "4px 4px 0 0",
+                              borderRadius: "3px 3px 0 0",
                               transition: "height .3s ease",
                             }}
                           />
                           <div
                             style={{
-                              fontSize: 11,
+                              fontSize: 10,
                               fontWeight: 600,
                               color: C.textMuted,
-                              marginTop: 6,
+                              marginTop: 5,
                             }}
                           >
-                            {d.year}
+                            '{String(d.year).slice(2)}
                           </div>
                         </div>
                       );
@@ -6106,9 +6106,8 @@ export default function ProjectProgressModule() {
                     style={{
                       padding: "18px 22px",
                       display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit,minmax(260px,1fr))",
-                      gap: 24,
+                      gridTemplateColumns: "repeat(4, 1fr)",
+                      gap: 18,
                     }}
                   >
                     <CompareBar
