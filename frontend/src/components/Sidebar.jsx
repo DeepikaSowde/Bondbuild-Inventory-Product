@@ -201,14 +201,19 @@ export default function Sidebar({
           )}
         </button>
 
-        {/* Inbox */}
-        <NavItem
-          id="inbox"
-          icon="📬"
-          label="Inbox"
-          badge={inboxCount}
-          badgeColor="bg-indigo-500"
-        />
+        {/* Inbox — opens the same Procurement Mailbox as Alerts */}
+        <button
+          onClick={() => setShowAlerts?.(true)}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-indigo-300 hover:bg-white/5 transition-all duration-150"
+        >
+          <span className="text-base flex-shrink-0">📬</span>
+          <span className="flex-1 text-left truncate">Inbox</span>
+          {inboxCount > 0 && (
+            <span className="bg-indigo-500 text-white text-xs font-bold rounded-full px-2 py-0.5 flex-shrink-0">
+              {inboxCount}
+            </span>
+          )}
+        </button>
 
         <Divider />
 
