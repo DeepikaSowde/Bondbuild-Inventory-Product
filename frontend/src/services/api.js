@@ -19,7 +19,11 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem("bb_token");
-      window.location.href = "/login";
+      sessionStorage.removeItem("bb_token");
+      // Guard against a reload loop: only redirect if we're not already there
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(err);
   },

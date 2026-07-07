@@ -14,7 +14,10 @@ export function AuthProvider({ children }) {
       api
         .get("/auth/me")
         .then((res) => setUser(res.data.user))
-        .catch(() => localStorage.removeItem("bb_token"))
+        .catch(() => {
+          localStorage.removeItem("bb_token");
+          sessionStorage.removeItem("bb_token");
+        })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
