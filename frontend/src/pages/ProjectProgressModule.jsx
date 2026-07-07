@@ -5824,7 +5824,7 @@ export default function ProjectProgressModule() {
                     style={{
                       display: "flex",
                       alignItems: "flex-end",
-                      justifyContent: "center",
+                      justifyContent: "flex-start",
                       gap: 3,
                       height: PLOT_H + 30,
                       borderBottom: `1px solid ${C.border}`,
