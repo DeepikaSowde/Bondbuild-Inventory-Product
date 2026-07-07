@@ -13,6 +13,8 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
   const [view, setView] = useState(null);
   const [receiveTarget, setReceiveTarget] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Sort: default by PO date, latest first.
+  const [sort, setSort] = useState({ key: "po_date", dir: "desc" });
 
   const isAdmin = user.role === "Admin";
   const canManage = !!perms.generate_po || isAdmin;
@@ -29,6 +31,43 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
   const jobs = useMemo(() => ["All", ...new Set(pos.map((p) => p.job_no).filter(Boolean))], [pos]);
   const totalVal = pos.reduce((a, p) => a + Number(p.amount || 0), 0);
   const refresh = () => { load(); refreshInbox?.(); };
+
+  // ── Sorting ──────────────────────────────────────────────────────────────
+  // Group rank so clicking "Status" keeps same-status rows together.
+  const STATUS_RANK = { OPEN: 0, CLOSED: 1, CANCELLED: 2 };
+  const sortedPos = useMemo(() => {
+    const { key, dir } = sort;
+    const mul = dir === "asc" ? 1 : -1;
+    const byDateDesc = (a, b) => new Date(b.po_date || 0) - new Date(a.po_date || 0);
+    return [...pos].sort((a, b) => {
+      if (key === "amount") return (Number(a.amount || 0) - Number(b.amount || 0)) * mul;
+      if (key === "status") {
+        const ra = STATUS_RANK[a.status] ?? 99, rb = STATUS_RANK[b.status] ?? 99;
+        if (ra !== rb) return (ra - rb) * mul;
+        return byDateDesc(a, b); // within a status group, latest first
+      }
+      // default: po_date
+      return (new Date(a.po_date || 0) - new Date(b.po_date || 0)) * mul;
+    });
+  }, [pos, sort]);
+
+  // Clicking a header selects that key; clicking again flips direction.
+  const toggleSort = (key) =>
+    setSort((s) => (s.key === key
+      ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+      : { key, dir: key === "status" ? "asc" : "desc" }));
+
+  const SortHead = ({ label, keyName }) => {
+    const active = sort.key === keyName;
+    return (
+      <button type="button" onClick={() => toggleSort(keyName)}
+        className={`inline-flex items-center gap-1 uppercase tracking-wide select-none hover:text-[#6366F1] ${active ? "text-[#6366F1]" : ""}`}
+        title={`Sort by ${label.toLowerCase()}`}>
+        {label}
+        <span className="text-[9px]">{active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+      </button>
+    );
+  };
 
   return (
     <div>
@@ -47,10 +86,12 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
 
       <Table columns={[
         { label: "PO No" }, { label: "PR" }, { label: "Project" }, { label: "Supplier" },
-        { label: "Date" }, ...(canSeeAmount ? [{ label: "Amount", align: "right" }] : []), { label: "Status" }, { label: "Delivery stage" }, { label: "" },
+        { label: <SortHead label="Date" keyName="po_date" /> },
+        ...(canSeeAmount ? [{ label: <SortHead label="Amount" keyName="amount" />, align: "right" }] : []),
+        { label: <SortHead label="Status" keyName="status" /> }, { label: "Delivery stage" }, { label: "" },
       ]}>
         {pos.length === 0 && <EmptyRow colSpan={9}>No purchase orders match.</EmptyRow>}
-        {pos.map((p) => (
+        {sortedPos.map((p) => (
           <tr key={p.po_no}>
             <Td mono bold className="!text-[#6366F1]">{p.po_no}</Td>
             <Td mono>{p.pr_no || "—"}</Td>
