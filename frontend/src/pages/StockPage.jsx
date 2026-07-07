@@ -16,7 +16,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 // Default permissions for each role
 const DEFAULT_PERMISSIONS = {
@@ -97,6 +97,7 @@ export default function StockPage() {
   const [inventory, setInventory] = useState([]);
   const [permissions, setPermissions] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
   // ── Fetch inventory data and permissions on mount ──
@@ -419,27 +420,169 @@ export default function StockPage() {
     return isNaN(num) ? "0.00" : num.toFixed(2);
   };
 
-  const exportToExcel = () => {
-    const rows = filteredInventory.map((item) => {
-      const row = {
-        Location: item.location_code,
-        "Profile Code": item.item_code,
-        Profile: item.profile_name,
-        Size: item.size,
-        Length: item.length,
-        Quantity: item.quantity_in_stock,
-        Status: item.stock_status,
-        Remarks: item.remarks ?? "",
-      };
-      if (permissions.view_unit_price) row["Unit Price (SGD)"] = formatPrice(item.unit_price);
-      if (permissions.view_total_value) row["Total Value (SGD)"] = formatPrice(item.total_value);
-      return row;
-    });
+  const exportToExcel = async () => {
+    setExporting(true);
+    try {
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "Bond Build SG";
+      wb.created = new Date();
 
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Inventory");
-    XLSX.writeFile(wb, `inventory_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      // ── Column layout (price / value columns depend on permissions) ──
+      const cols = [
+        { header: "S.No",         width: 6,  align: "center" },
+        { header: "Location",     width: 14, align: "center" },
+        { header: "Profile Code", width: 16, align: "left" },
+        { header: "Profile",      width: 32, align: "left" },
+        { header: "Size",         width: 12, align: "center" },
+        { header: "Length",       width: 12, align: "center" },
+        { header: "Quantity",     width: 12, align: "right", numFmt: "#,##0" },
+        { header: "Status",       width: 16, align: "center" },
+      ];
+      const STATUS_COL = cols.length; // 1-based index of the Status column
+      if (permissions.view_unit_price)
+        cols.push({ header: "Unit Price (SGD)",  width: 17, align: "right", numFmt: '"$"#,##0.00' });
+      if (permissions.view_total_value)
+        cols.push({ header: "Total Value (SGD)", width: 18, align: "right", numFmt: '"$"#,##0.00' });
+      cols.push({ header: "Remarks", width: 30, align: "left" });
+      const totalCols = cols.length;
+
+      const ws = wb.addWorksheet("Factory Stock", {
+        views: [{ state: "frozen", xSplit: 1, ySplit: 3 }],
+        pageSetup: { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1 },
+      });
+
+      // ── Style helpers (mirrors the Project report export) ──
+      const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
+      const navyFill  = fill("FF1E3A5F");
+      const totalFill = fill("FF0D2540");
+      const rowFills  = [fill("FFFFFFFF"), fill("FFF0F5FF")];
+      const font = (size, bold, argb = "FF1A1A2E") => ({ name: "Calibri", size, bold, color: { argb } });
+      const thinBorder = (c = "FFD0D8E8") => ({
+        top: { style: "thin", color: { argb: c } }, left: { style: "thin", color: { argb: c } },
+        bottom: { style: "thin", color: { argb: c } }, right: { style: "thin", color: { argb: c } },
+      });
+      const navyBorder = thinBorder("FF2A4A6F");
+      const boldTop = { ...navyBorder, top: { style: "medium", color: { argb: "FF2A4A6F" } } };
+
+      // ── Row 1: Title ──
+      const _t = new Date();
+      const today = `${String(_t.getDate()).padStart(2, "0")}/${String(_t.getMonth() + 1).padStart(2, "0")}/${_t.getFullYear()}`;
+      const titleRow = ws.addRow([`Bond Build SG  |  Factory Stock Report  |  Exported: ${today}`]);
+      titleRow.height = 34;
+      ws.mergeCells(1, 1, 1, totalCols);
+      const t1 = ws.getCell(1, 1);
+      t1.font = font(14, true, "FFFFFFFF");
+      t1.fill = navyFill;
+      t1.alignment = { vertical: "middle", horizontal: "center" };
+      for (let c = 2; c <= totalCols; c++) ws.getCell(1, c).fill = navyFill;
+
+      // ── Row 2: thin divider ──
+      ws.addRow([]);
+      ws.getRow(2).height = 5;
+      for (let c = 1; c <= totalCols; c++) ws.getCell(2, c).fill = navyFill;
+
+      // ── Row 3: column headers ──
+      ws.addRow(cols.map((c) => c.header));
+      ws.getRow(3).height = 26;
+      cols.forEach((col, i) => {
+        const cell = ws.getCell(3, i + 1);
+        cell.font = font(10, true, "FFFFFFFF");
+        cell.fill = navyFill;
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+        cell.border = navyBorder;
+        ws.getColumn(i + 1).width = col.width;
+      });
+
+      // Status pill colors (match the on-screen badges)
+      const statusStyle = {
+        OK:           { bg: "FFECFDF5", fg: "FF059669" },
+        LOW_STOCK:    { bg: "FFFEF3C7", fg: "FFD97706" },
+        OUT_OF_STOCK: { bg: "FFFEF2F2", fg: "FFDC2626" },
+      };
+
+      // ── Data rows ──
+      let totalQty = 0, totalValue = 0;
+      filteredInventory.forEach((item, idx) => {
+        const qty = Number(item.quantity_in_stock) || 0;
+        const value = Number(item.total_value) || 0;
+        totalQty += qty;
+        totalValue += value;
+
+        const vals = [
+          idx + 1,
+          item.location_code ?? "",
+          item.item_code ?? "",
+          item.profile_name ?? "",
+          item.size ?? "",
+          item.length ?? "",
+          qty,
+          item.stock_status ?? "",
+        ];
+        if (permissions.view_unit_price) vals.push(Number(item.unit_price) || 0);
+        if (permissions.view_total_value) vals.push(value);
+        vals.push(item.remarks ?? "");
+
+        const row = ws.addRow(vals);
+        row.height = 20;
+        const bgFill = rowFills[idx % 2];
+        cols.forEach((col, i) => {
+          const cell = row.getCell(i + 1);
+          cell.fill = bgFill;
+          cell.font = font(10, false);
+          cell.border = thinBorder();
+          cell.alignment = { vertical: "middle", horizontal: col.align };
+          if (col.numFmt) cell.numFmt = col.numFmt;
+        });
+
+        // Colored status cell
+        const sc = statusStyle[item.stock_status] || null;
+        if (sc) {
+          const sCell = row.getCell(STATUS_COL);
+          sCell.font = font(10, true, sc.fg);
+          sCell.fill = fill(sc.bg);
+        }
+      });
+
+      // ── Totals row ──
+      const n = filteredInventory.length;
+      const totRow = ws.addRow(cols.map((col, i) => {
+        if (i === 2) return `TOTALS (${n} item${n !== 1 ? "s" : ""})`;
+        if (col.header === "Quantity") return totalQty;
+        if (col.header === "Total Value (SGD)") return totalValue;
+        return "";
+      }));
+      totRow.height = 22;
+      cols.forEach((col, i) => {
+        const cell = totRow.getCell(i + 1);
+        cell.font = font(10, true, "FFFFFFFF");
+        cell.fill = totalFill;
+        cell.border = boldTop;
+        cell.alignment = { vertical: "middle", horizontal: col.align };
+        if (col.header === "Quantity") cell.numFmt = "#,##0";
+        if (col.header === "Total Value (SGD)") cell.numFmt = '"$"#,##0.00';
+      });
+      totRow.getCell(3).alignment = { vertical: "middle", horizontal: "left" };
+
+      // ── Auto-filter on the header row ──
+      ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: totalCols } };
+
+      // ── Download ──
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `BondBuildSG_FactoryStock_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Export failed. Please try again.");
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -475,19 +618,20 @@ export default function StockPage() {
           {permissions.export_excel && (
             <button
               onClick={exportToExcel}
+              disabled={exporting}
               style={{
-                background: "#10B981",
+                background: exporting ? "#6EE7B7" : "#10B981",
                 color: "#fff",
                 border: "none",
                 borderRadius: 8,
                 padding: "10px 16px",
                 fontSize: 13,
                 fontWeight: 700,
-                cursor: "pointer",
+                cursor: exporting ? "default" : "pointer",
                 whiteSpace: "nowrap",
               }}
             >
-              📥 Export Excel
+              {exporting ? "⏳ Exporting…" : "📥 Export Excel"}
             </button>
           )}
 
