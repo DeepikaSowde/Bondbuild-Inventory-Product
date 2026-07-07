@@ -228,6 +228,7 @@ function AppContent() {
         onClose={() => setShowAlerts(false)}
         items={notifications}
         onChanged={loadInbox}
+        user={user}
       />
 
       {/* Main content area - has left margin to account for sidebar */}
