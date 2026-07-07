@@ -331,6 +331,29 @@ export default function StockPage() {
     }
   };
 
+  // ── FIX #2: search now actually filters the inventory ──
+  // Computed before the loading guard below so the usePaged hook always runs
+  // (hooks must not sit after a conditional return — see React error #310).
+  const q = searchTerm.trim().toLowerCase();
+  const filteredInventory = !q
+    ? inventory
+    : inventory.filter(
+        (item) =>
+          String(item.item_code || "")
+            .toLowerCase()
+            .includes(q) ||
+          String(item.profile_name || "")
+            .toLowerCase()
+            .includes(q) ||
+          String(item.location_code || "")
+            .toLowerCase()
+            .includes(q),
+      );
+
+  // Paginate the (filtered) inventory, 20 per page; reset to page 1 on new search.
+  const { page, setPage, slice: pageInventory, total, pageSize, pageCount } =
+    usePaged(filteredInventory, q);
+
   if (loading || !permissions) {
     return (
       <div style={{ padding: "32px", textAlign: "center" }}>
@@ -376,27 +399,6 @@ export default function StockPage() {
       .trim();
     return cleaned || "—";
   };
-
-  // ── FIX #2: search now actually filters the inventory ──
-  const q = searchTerm.trim().toLowerCase();
-  const filteredInventory = !q
-    ? inventory
-    : inventory.filter(
-        (item) =>
-          String(item.item_code || "")
-            .toLowerCase()
-            .includes(q) ||
-          String(item.profile_name || "")
-            .toLowerCase()
-            .includes(q) ||
-          String(item.location_code || "")
-            .toLowerCase()
-            .includes(q),
-      );
-
-  // Paginate the (filtered) inventory, 20 per page; reset to page 1 on new search.
-  const { page, setPage, slice: pageInventory, total, pageSize, pageCount } =
-    usePaged(filteredInventory, q);
 
   // ── Safe calculation functions (stats stay based on FULL inventory) ──
   const getTotalQty = () => {
