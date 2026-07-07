@@ -99,12 +99,18 @@ router.delete("/suppliers/:id", protect, async (req, res) => {
   } catch (e) { fail(res, 500, e.message); }
 });
 
-// ── Notifications / inbox (per-role) ──
+// ── Notifications / inbox ──
+// Returns: whole-role broadcasts for my role (target_user_id IS NULL) PLUS any
+// alerts addressed specifically to me (target_user_id = my id — used by the SLA
+// sweep to reach the exact drafter/purchaser who owns an item).
 router.get("/notifications", protect, async (req, res) => {
   try {
     const { rows } = await db.query(
-      "SELECT * FROM po_notifications WHERE role = $1 ORDER BY id DESC LIMIT 50",
-      [req.user.role]
+      `SELECT * FROM po_notifications
+        WHERE target_user_id = $1
+           OR (target_user_id IS NULL AND role = $2)
+        ORDER BY id DESC LIMIT 50`,
+      [req.user.id, req.user.role]
     );
     ok(res, rows, { count: rows.length, unread: rows.filter((r) => !r.is_read).length });
   } catch (e) { fail(res, 500, e.message); }

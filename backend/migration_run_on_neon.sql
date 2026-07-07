@@ -57,6 +57,21 @@ CREATE TABLE IF NOT EXISTS po_notifications (
   is_read    BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+-- SLA alerts can target a SPECIFIC user (the drafter/purchaser who owns an item)
+-- instead of a whole role. NULL target_user_id = whole-role broadcast.
+ALTER TABLE po_notifications
+  ADD COLUMN IF NOT EXISTS target_user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+
+-- A3b. SLA alert ledger — one row per (rule, entity); last_fired_at lets the
+-- scheduled sweep repeat an alert only after the rule's N-day interval elapses.
+CREATE TABLE IF NOT EXISTS alert_ledger (
+  rule          TEXT        NOT NULL,
+  entity_type   TEXT        NOT NULL,          -- 'PR' | 'PO'
+  entity_id     INTEGER     NOT NULL,
+  last_fired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  fire_count    INTEGER     NOT NULL DEFAULT 0,
+  PRIMARY KEY (rule, entity_type, entity_id)
+);
 
 -- A4. PR/PO role permissions
 CREATE TABLE IF NOT EXISTS pr_po_permissions (

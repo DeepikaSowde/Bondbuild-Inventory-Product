@@ -86,6 +86,7 @@ app.use("/api", require("./routes/poReference"));
 app.use("/api", require("./routes/poDashboard"));
 app.use("/api/auth", require("./routes/Passwordroutes"));
 app.use("/api/home", require("./routes/Homesummary"));
+app.use("/api/alerts", require("./routes/alerts"));
 // ============================================================
 // One-time Schema Migration Endpoint (delete after use)
 // ============================================================
@@ -110,6 +111,29 @@ db.query(`
     ADD COLUMN IF NOT EXISTS see_operation_finance BOOLEAN NOT NULL DEFAULT true,
     ADD COLUMN IF NOT EXISTS see_accounting        BOOLEAN NOT NULL DEFAULT true
 `).catch((err) => console.error("Module-access column migration:", err.message));
+
+// ============================================================
+// Startup: schema for the SLA-alert engine (see utils/alertSla.js)
+//  • po_notifications.target_user_id — lets an alert target the SPECIFIC owner
+//    (drafter/purchaser) instead of a whole role.
+//  • alert_ledger — records the last fire time per (rule, entity) so repeats
+//    honour each rule's N-day cadence rather than re-sending every sweep.
+// ============================================================
+db.query(`
+  ALTER TABLE po_notifications
+    ADD COLUMN IF NOT EXISTS target_user_id UUID REFERENCES users(id) ON DELETE CASCADE
+`).catch((err) => console.error("Notification target_user_id migration:", err.message));
+
+db.query(`
+  CREATE TABLE IF NOT EXISTS alert_ledger (
+    rule          TEXT        NOT NULL,
+    entity_type   TEXT        NOT NULL,          -- 'PR' | 'PO'
+    entity_id     INTEGER     NOT NULL,
+    last_fired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    fire_count    INTEGER     NOT NULL DEFAULT 0,
+    PRIMARY KEY (rule, entity_type, entity_id)
+  )
+`).catch((err) => console.error("alert_ledger migration:", err.message));
 
 // ============================================================
 // Health Check Endpoint
@@ -166,6 +190,29 @@ app.use((err, req, res, next) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// ============================================================
+// Scheduler: SLA-breach sweep (twice daily by default)
+//   Runs in-process via node-cron. The alert_ledger enforces each rule's
+//   N-day repeat cadence, so the tick only needs to be frequent enough to
+//   catch breaches promptly — 08:00 & 20:00 keeps alerts at humane times.
+//   Override the schedule with ALERT_SWEEP_CRON, the zone with ALERT_TZ, or
+//   disable entirely with ALERTS_ENABLED=false (e.g. to drive it from an
+//   external cron hitting POST /api/alerts/run-sweep instead).
+// ============================================================
+if (process.env.ALERTS_ENABLED !== "false") {
+  const cron = require("node-cron");
+  const { runSlaSweep } = require("./utils/alertSla");
+  const schedule = process.env.ALERT_SWEEP_CRON || "0 8,20 * * *";
+  const timezone = process.env.ALERT_TZ || "Asia/Singapore";
+  if (cron.validate(schedule)) {
+    cron.schedule(schedule, () => { runSlaSweep().catch((e) => console.error("[alertSla] sweep error:", e.message)); },
+      { timezone });
+    console.log(`⏰ SLA alert sweep scheduled: "${schedule}" (${timezone})`);
+  } else {
+    console.error(`[alertSla] invalid ALERT_SWEEP_CRON "${schedule}" — sweep NOT scheduled`);
+  }
+}
 
 // ============================================================
 // Start Server

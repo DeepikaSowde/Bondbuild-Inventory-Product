@@ -12,7 +12,9 @@ import { useState, useEffect } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import Sidebar from "./components/Sidebar";
 import { AdminRoute } from "./components/AdminRoute";
+import AlertsInbox from "./components/AlertsInbox";
 import api from "./services/api";
+import { api as inboxApi } from "./lib/api";
 
 // Pages
 import LoginPage from "./pages/auth/LoginPage";
@@ -177,6 +179,22 @@ function AppContent() {
   const { user } = useAuth();
   const { pathname } = useLocation();
 
+  // ── Alerts / notifications inbox (mail-style) ──
+  // Feeds the Sidebar "Alerts" badge and the slide-in inbox. Same feed the
+  // backend SLA sweep writes to; polled so new reminders surface without reload.
+  const [notifications, setNotifications] = useState([]);
+  const [showAlerts, setShowAlerts] = useState(false);
+  const loadInbox = () => {
+    inboxApi.notifications().then((rows) => setNotifications(Array.isArray(rows) ? rows : [])).catch(() => {});
+  };
+  useEffect(() => {
+    if (!user) { setNotifications([]); return; }
+    loadInbox();
+    const t = setInterval(loadInbox, 60000); // refresh every minute
+    return () => clearInterval(t);
+  }, [user]);
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
+
   // Pages without sidebar
   const isAuthPage = pathname === "/login" || pathname === "/setup";
   const isHomePage = pathname === "/";
@@ -194,15 +212,23 @@ function AppContent() {
       {showSidebar && (
         <Sidebar
           currentUser={user}
-          alertCount={0}
-          inboxCount={0}
-          setShowAlerts={() => {}}
+          alertCount={unreadCount}
+          inboxCount={unreadCount}
+          setShowAlerts={setShowAlerts}
           tab={activeTab}
           setTab={() => {}}
           showHome={false}
           setShowHome={() => {}}
         />
       )}
+
+      {/* Mail-style alerts inbox (slide-in) */}
+      <AlertsInbox
+        open={showAlerts}
+        onClose={() => setShowAlerts(false)}
+        items={notifications}
+        onChanged={loadInbox}
+      />
 
       {/* Main content area - has left margin to account for sidebar */}
       <main
