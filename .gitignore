@@ -11,3 +11,15 @@ backend/uploads/
 *.log
 .DS_Store
 .vscode/
+
+# ── One-off local DB/ops scripts ──────────────────────────────────────────────
+# These loose scripts at backend/ and repo root contain HARDCODED production DB
+# credentials and plaintext passwords. They are local tools only — never commit
+# them. Real app code lives under backend/src/ and is unaffected by these rules.
+/backend/*.js
+/run_schema.js
+# Full database dumps (business data + password hashes) — do not version.
+/backend/full_dump.sql
+/backend/full_schema.sql
+# Excel lock/temp files
+~$*.xlsx
