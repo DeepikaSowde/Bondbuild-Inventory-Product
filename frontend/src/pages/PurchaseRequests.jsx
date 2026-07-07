@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiError, downloadAttachment } from "../lib/api";
 import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money, fmtDate } from "../components/ui";
-import { Table, Td } from "../components/Table";
+import { Table, Td, usePaged, Pagination } from "../components/Table";
 import { exportPrPdf } from "../lib/prPdf";
 
 const emptyItem = () => ({
@@ -140,6 +140,9 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
   const counts = useMemo(() => { const c = {}; prs.forEach((p) => (c[p.status] = (c[p.status] || 0) + 1)); return c; }, [prs]);
   const refresh = () => { load(); refreshInbox?.(); };
 
+  // Paginate the list, 20 per page; reset to page 1 when the status filter changes.
+  const { page, setPage, slice: pagePrs, total, pageSize, pageCount } = usePaged(prs, filter);
+
   const openCreate = async () => {
     setEditPR(null);
     try { setNextNo((await api.prNext()).prNo); } catch {}
@@ -166,7 +169,7 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
         { label: "Required" }, { label: "Items", align: "center" }, { label: "Status" }, { label: "" },
       ]}>
         {prs.length === 0 && <EmptyRow colSpan={8}>No purchase requests yet.</EmptyRow>}
-        {prs.map((p) => (
+        {pagePrs.map((p) => (
           <tr key={p.pr_no}>
             <Td mono bold className="!text-[#6366F1]">{p.pr_no}</Td>
             <Td mono>{p.job_no}</Td>
@@ -185,6 +188,7 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
           </tr>
         ))}
       </Table>
+      <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} />
 
       {showCreate && (
         <PRForm user={user} suppliers={suppliers} nextNo={nextNo} editPR={editPR} notify={notify}

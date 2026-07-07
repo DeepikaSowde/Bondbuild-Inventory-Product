@@ -17,6 +17,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
 import ExcelJS from "exceljs";
+import { usePaged, Pagination } from "../components/Table";
 
 // Default permissions for each role
 const DEFAULT_PERMISSIONS = {
@@ -392,6 +393,10 @@ export default function StockPage() {
             .toLowerCase()
             .includes(q),
       );
+
+  // Paginate the (filtered) inventory, 20 per page; reset to page 1 on new search.
+  const { page, setPage, slice: pageInventory, total, pageSize, pageCount } =
+    usePaged(filteredInventory, q);
 
   // ── Safe calculation functions (stats stay based on FULL inventory) ──
   const getTotalQty = () => {
@@ -794,7 +799,7 @@ export default function StockPage() {
           <tbody>
             {Array.isArray(filteredInventory) &&
             filteredInventory.length > 0 ? (
-              filteredInventory.map((item, i) => (
+              pageInventory.map((item, i) => (
                 <tr
                   key={item.id}
                   style={{
@@ -949,6 +954,7 @@ export default function StockPage() {
           </tbody>
         </table>
       </div>
+      <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} />
 
       {/* Permission Restrictions Notice */}
       {(!permissions.view_unit_price || !permissions.view_total_value) && (

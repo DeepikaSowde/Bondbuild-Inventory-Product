@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiError } from "../lib/api";
 import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money, fmtDate } from "../components/ui";
-import { Table, Td } from "../components/Table";
+import { Table, Td, usePaged, Pagination } from "../components/Table";
 import { exportPoPdf } from "../lib/poPdf";
 
 export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox }) {
@@ -51,6 +51,10 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
     });
   }, [pos, sort]);
 
+  // Paginate the sorted list, 20 per page; reset to page 1 when filters/sort change.
+  const { page, setPage, slice: pagePos, total, pageSize, pageCount } =
+    usePaged(sortedPos, `${status}|${job}|${q}|${sort.key}|${sort.dir}`);
+
   // Clicking a header selects that key; clicking again flips direction.
   const toggleSort = (key) =>
     setSort((s) => (s.key === key
@@ -91,7 +95,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
         { label: <SortHead label="Status" keyName="status" /> }, { label: "Delivery stage" }, { label: "" },
       ]}>
         {pos.length === 0 && <EmptyRow colSpan={9}>No purchase orders match.</EmptyRow>}
-        {sortedPos.map((p) => (
+        {pagePos.map((p) => (
           <tr key={p.po_no}>
             <Td mono bold className="!text-[#6366F1]">{p.po_no}</Td>
             <Td mono>{p.pr_no || "—"}</Td>
@@ -116,6 +120,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
           </tr>
         ))}
       </Table>
+      <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} />
 
       {view && (
         <POView po={view} canManage={canManage} canReceive={canReceive} canTrack={canTrack} canCancel={canCancel}
