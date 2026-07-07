@@ -5818,12 +5818,14 @@ export default function ProjectProgressModule() {
                   >
                     {label}
                   </div>
-                  {/* grouped vertical columns, one per year */}
+                  {/* grouped vertical columns, one per year — packed tightly
+                      (fixed-width columns, centered) so the years read as a group */}
                   <div
                     style={{
                       display: "flex",
                       alignItems: "flex-end",
-                      gap: 4,
+                      justifyContent: "center",
+                      gap: 3,
                       height: PLOT_H + 30,
                       borderBottom: `1px solid ${C.border}`,
                     }}
@@ -5835,8 +5837,7 @@ export default function ProjectProgressModule() {
                         <div
                           key={d.year}
                           style={{
-                            flex: 1,
-                            minWidth: 0,
+                            width: 34,
                             display: "flex",
                             flexDirection: "column",
                             alignItems: "center",
@@ -5858,7 +5859,7 @@ export default function ProjectProgressModule() {
                           <div
                             style={{
                               width: "100%",
-                              maxWidth: 26,
+                              maxWidth: 30,
                               height: barH,
                               background: col,
                               borderRadius: "3px 3px 0 0",
