@@ -816,6 +816,7 @@ function UsersModule({
                 </label>
                 <input
                   value={form.username}
+                  maxLength={30}
                   onChange={(e) =>
                     setForm((f) => ({
                       ...f,

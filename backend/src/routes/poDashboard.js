@@ -224,7 +224,7 @@ router.get("/dashboard-po/:poNo", protect, async (req, res) => {
 router.get("/dashboard-supplier/:name", protect, async (req, res) => {
   try {
     const pos = await db.query(
-      `SELECT po_no, pr_no, job_no, po_type, status, COALESCE(amount,0)::numeric AS amount, created_at
+      `SELECT po_no, pr_no, job_no, po_type, status, COALESCE(amount,0)::numeric AS amount, po_date
        FROM purchase_orders WHERE supplier_name = $1 ORDER BY created_at DESC`,
       [req.params.name],
     );

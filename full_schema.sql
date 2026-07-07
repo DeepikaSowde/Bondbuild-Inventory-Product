@@ -2,7 +2,6 @@
 -- PostgreSQL database dump
 --
 
-\restrict s0W5JYcAWrHDV0ZjbnhU3KW81MV9wzhZvogArYsemAbGxhHIbhiC47Lcxb0kchE
 
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 16.14
@@ -48,7 +47,7 @@ END;
 $$;
 
 
-ALTER FUNCTION public.log_stock_movement() OWNER TO postgres;
+ALTER FUNCTION public.log_stock_movement() OWNER TO doadmin;
 
 --
 -- Name: update_inventory_stock_status(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -71,7 +70,7 @@ END;
 $$;
 
 
-ALTER FUNCTION public.update_inventory_stock_status() OWNER TO postgres;
+ALTER FUNCTION public.update_inventory_stock_status() OWNER TO doadmin;
 
 --
 -- Name: update_inventory_total_value(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -87,7 +86,7 @@ END;
 $$;
 
 
-ALTER FUNCTION public.update_inventory_total_value() OWNER TO postgres;
+ALTER FUNCTION public.update_inventory_total_value() OWNER TO doadmin;
 
 --
 -- Name: update_projects_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -103,7 +102,7 @@ END;
 $$;
 
 
-ALTER FUNCTION public.update_projects_timestamp() OWNER TO postgres;
+ALTER FUNCTION public.update_projects_timestamp() OWNER TO doadmin;
 
 SET default_tablespace = '';
 
@@ -139,7 +138,7 @@ CREATE TABLE public.inventory (
 );
 
 
-ALTER TABLE public.inventory OWNER TO postgres;
+ALTER TABLE public.inventory OWNER TO doadmin;
 
 --
 -- Name: inventory_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -154,7 +153,7 @@ CREATE SEQUENCE public.inventory_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.inventory_id_seq OWNER TO postgres;
+ALTER SEQUENCE public.inventory_id_seq OWNER TO doadmin;
 
 --
 -- Name: inventory_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -180,7 +179,7 @@ CREATE TABLE public.inventory_profiles (
 );
 
 
-ALTER TABLE public.inventory_profiles OWNER TO postgres;
+ALTER TABLE public.inventory_profiles OWNER TO doadmin;
 
 --
 -- Name: inventory_profiles_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -195,7 +194,7 @@ CREATE SEQUENCE public.inventory_profiles_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.inventory_profiles_id_seq OWNER TO postgres;
+ALTER SEQUENCE public.inventory_profiles_id_seq OWNER TO doadmin;
 
 --
 -- Name: inventory_profiles_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -235,7 +234,7 @@ CREATE VIEW public.inventory_summary AS
   WHERE (is_active = true);
 
 
-ALTER VIEW public.inventory_summary OWNER TO postgres;
+ALTER VIEW public.inventory_summary OWNER TO doadmin;
 
 --
 -- Name: low_stock_items; Type: VIEW; Schema: public; Owner: postgres
@@ -258,7 +257,7 @@ CREATE VIEW public.low_stock_items AS
   ORDER BY quantity_in_stock;
 
 
-ALTER VIEW public.low_stock_items OWNER TO postgres;
+ALTER VIEW public.low_stock_items OWNER TO doadmin;
 
 --
 -- Name: out_of_stock_items; Type: VIEW; Schema: public; Owner: postgres
@@ -278,7 +277,7 @@ CREATE VIEW public.out_of_stock_items AS
   ORDER BY updated_at DESC;
 
 
-ALTER VIEW public.out_of_stock_items OWNER TO postgres;
+ALTER VIEW public.out_of_stock_items OWNER TO doadmin;
 
 --
 -- Name: projects; Type: TABLE; Schema: public; Owner: postgres
@@ -316,7 +315,7 @@ CREATE TABLE public.projects (
 );
 
 
-ALTER TABLE public.projects OWNER TO postgres;
+ALTER TABLE public.projects OWNER TO doadmin;
 
 --
 -- Name: projects_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -331,7 +330,7 @@ CREATE SEQUENCE public.projects_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.projects_id_seq OWNER TO postgres;
+ALTER SEQUENCE public.projects_id_seq OWNER TO doadmin;
 
 --
 -- Name: projects_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -362,7 +361,7 @@ CREATE TABLE public.stock_alerts (
 );
 
 
-ALTER TABLE public.stock_alerts OWNER TO postgres;
+ALTER TABLE public.stock_alerts OWNER TO doadmin;
 
 --
 -- Name: stock_alerts_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -377,7 +376,7 @@ CREATE SEQUENCE public.stock_alerts_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.stock_alerts_id_seq OWNER TO postgres;
+ALTER SEQUENCE public.stock_alerts_id_seq OWNER TO doadmin;
 
 --
 -- Name: stock_alerts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -409,7 +408,7 @@ CREATE TABLE public.stock_movements (
 );
 
 
-ALTER TABLE public.stock_movements OWNER TO postgres;
+ALTER TABLE public.stock_movements OWNER TO doadmin;
 
 --
 -- Name: stock_movements_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -424,7 +423,7 @@ CREATE SEQUENCE public.stock_movements_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.stock_movements_id_seq OWNER TO postgres;
+ALTER SEQUENCE public.stock_movements_id_seq OWNER TO doadmin;
 
 --
 -- Name: stock_movements_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -453,7 +452,7 @@ CREATE TABLE public.stock_permissions (
 );
 
 
-ALTER TABLE public.stock_permissions OWNER TO postgres;
+ALTER TABLE public.stock_permissions OWNER TO doadmin;
 
 --
 -- Name: stock_permissions_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -468,7 +467,7 @@ CREATE SEQUENCE public.stock_permissions_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.stock_permissions_id_seq OWNER TO postgres;
+ALTER SEQUENCE public.stock_permissions_id_seq OWNER TO doadmin;
 
 --
 -- Name: stock_permissions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -493,7 +492,7 @@ CREATE TABLE public.storage_locations (
 );
 
 
-ALTER TABLE public.storage_locations OWNER TO postgres;
+ALTER TABLE public.storage_locations OWNER TO doadmin;
 
 --
 -- Name: storage_locations_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -508,7 +507,7 @@ CREATE SEQUENCE public.storage_locations_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.storage_locations_id_seq OWNER TO postgres;
+ALTER SEQUENCE public.storage_locations_id_seq OWNER TO doadmin;
 
 --
 -- Name: storage_locations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -536,7 +535,7 @@ CREATE TABLE public.users (
 );
 
 
-ALTER TABLE public.users OWNER TO postgres;
+ALTER TABLE public.users OWNER TO doadmin;
 
 --
 -- Name: inventory id; Type: DEFAULT; Schema: public; Owner: postgres
@@ -910,5 +909,4 @@ ALTER TABLE ONLY public.stock_movements
 -- PostgreSQL database dump complete
 --
 
-\unrestrict s0W5JYcAWrHDV0ZjbnhU3KW81MV9wzhZvogArYsemAbGxhHIbhiC47Lcxb0kchE
 

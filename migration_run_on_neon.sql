@@ -294,10 +294,13 @@ BEGIN
   UPDATE inventory SET quantity_in_stock = quantity_in_stock - v_item.stock_qty WHERE id = v_inv.id;
   UPDATE pr_items SET stock_status = 'STOCK_REDUCED' WHERE id = p_item_id;
 
-  INSERT INTO stock_movements (inventory_id, movement_type, quantity, reference_no, notes, created_by)
-  VALUES (v_inv.id, 'OUT', v_item.stock_qty,
-          (SELECT pr_no FROM purchase_requests WHERE id = v_item.pr_id),
-          'Issued to project by ' || p_actor, p_actor)
+  INSERT INTO stock_movements (inventory_id, item_code, movement_type, quantity_moved,
+                               reference_type, reference_number, notes, moved_by,
+                               stock_before, stock_after)
+  VALUES (v_inv.id, v_inv.item_code, 'OUT', v_item.stock_qty,
+          'PR', (SELECT pr_no FROM purchase_requests WHERE id = v_item.pr_id),
+          'Issued to project by ' || p_actor, p_actor,
+          v_inv.quantity_in_stock, v_inv.quantity_in_stock - v_item.stock_qty)
   RETURNING id INTO v_move_id;
 
   RETURN v_move_id;
