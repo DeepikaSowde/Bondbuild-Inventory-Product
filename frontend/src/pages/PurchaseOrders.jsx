@@ -4,6 +4,7 @@ import { api, apiError } from "../lib/api";
 import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money, fmtDate } from "../components/ui";
 import { Table, Td, usePaged, Pagination } from "../components/Table";
 import { exportPoPdf } from "../lib/poPdf";
+import AuditTrail from "../components/AuditTrail";
 
 export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox }) {
   const [pos, setPOs] = useState([]);
@@ -173,6 +174,7 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
     },
   });
   const setT = (k, v) => setD((s) => ({ ...s, tracking: { ...s.tracking, [k]: v } }));
+  const [tab, setTab] = useState("details");
 
   const act = async (fn, msg) => {
     setBusy(true);
@@ -187,6 +189,20 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
 
   return (
     <Modal wide title={`Purchase order ${po.po_no}`} onClose={onClose}>
+      {/* Details / History tabs — history is read-only (DR-AUD-004) */}
+      <div className="mb-4 flex gap-1 border-b border-[#E5E7EB]">
+        {[["details", "Details"], ["history", "History"]].map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)}
+            className={`-mb-px border-b-2 px-3.5 py-2 text-[13px] font-semibold transition ${
+              tab === id ? "border-[#6366F1] text-[#4F46E5]" : "border-transparent text-[#9CA3AF] hover:text-[#6B7280]"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "history" && <AuditTrail kind="po" no={po.po_no} />}
+
+      {tab === "details" && (<>
       <div className="mb-4 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-x-[18px] gap-y-3">
         {meta.map(([k, v], i) => (
           <div key={i}>
@@ -265,6 +281,7 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
           <Btn variant="success" disabled={busy} onClick={onOpenReceive}>✅ Receive goods (close)</Btn>
         )}
       </div>
+      </>)}
     </Modal>
   );
 }

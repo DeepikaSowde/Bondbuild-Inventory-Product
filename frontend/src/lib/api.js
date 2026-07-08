@@ -18,6 +18,10 @@ export const api = {
   notifications: () => data(axiosClient.get("/notifications")),
   markRead: (id) => raw(axiosClient.post(`/notifications/${id}/read`)),
 
+  // audit trail / history (prices are redacted server-side per role)
+  prHistory: (prNo) => data(axiosClient.get(`/purchase-requests/${enc(prNo)}/history`)),
+  poHistory: (poNo) => data(axiosClient.get(`/purchase-orders/${enc(poNo)}/history`)),
+
   // current user's effective PR/PO permissions (for showing/hiding UI)
   myPermissions: () => axiosClient.get("/pr-po-permissions/me/effective").then((r) => r.data.permissions),
 

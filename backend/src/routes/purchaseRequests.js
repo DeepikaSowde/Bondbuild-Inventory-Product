@@ -7,8 +7,9 @@ const express = require("express");
 const db = require("../config/db");
 const { protect, roles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
-const { canDo } = require("../utils/canDo");
+const { canDo, isAllowed } = require("../utils/canDo");
 const { Email } = require("../utils/notifyEmail");
+const { buildPrEditDiff, redactDetails } = require("../utils/auditTrail");
 
 const router = express.Router();
 router.use(protect);
@@ -141,9 +142,11 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
            it.supplier_id || null, it.supplier_name || null, it.supplier_type || "Local", Number(it.unit_price) || 0]
         );
       }
+      // Audit the AUTHENTICATED user, not the free-text "Requested By" field —
+      // the latter is client-supplied and would make the trail spoofable.
       await c.query(
         "INSERT INTO pr_approvals (pr_id, action, to_status, actor, actor_role) VALUES ($1,'SUBMIT','PENDING',$2,$3)",
-        [prId, f.requested_by, req.user.role]
+        [prId, req.user.name, req.user.role]
       );
       await notify(c, ["Manager"], `New PR submitted: ${prNo}`,
         `${f.requested_by} submitted a PR for ${f.project_name || f.job_no}. Please review.`, "info", prNo);
@@ -170,6 +173,8 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
     if (!items.length) return fail(res, 400, "At least one item is required");
     const descErr = checkDescLength(items);
     if (descErr) return fail(res, 400, descErr);
+    // Snapshot the before→after diff while `pr` still holds the pre-edit state.
+    const editDetails = buildPrEditDiff(pr, { ...f, items });
     await withTransaction(async (c) => {
       await c.query(
         `UPDATE purchase_requests SET job_no=$2, project_name=$3, location=$4,
@@ -196,6 +201,13 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
            it.supplier_id || null, it.supplier_name || null, it.supplier_type || "Local", Number(it.unit_price) || 0]
         );
       }
+      // Audit the edit itself (what changed), separate from any resubmission.
+      if (editDetails) {
+        await c.query(
+          "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, details) VALUES ($1,'EDIT',$2,$2,$3,$4,$5)",
+          [pr.id, pr.status, req.user.name, req.user.role, JSON.stringify(editDetails)]
+        );
+      }
       if (f.resubmit) {
         await c.query(
           "UPDATE purchase_requests SET status='PENDING', rejection_type=NULL, rejection_reason=NULL WHERE id=$1",
@@ -213,6 +225,24 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
   } catch (e) { fail(res, 500, e.message); }
 });
 
+// ── Audit trail / history (DR-AUD-004) ──
+// Any user who can open the PR may view its history. Prices inside the change
+// details are stripped SERVER-SIDE for roles without see_pr_price.
+router.get("/:prNo/history", async (req, res) => {
+  try {
+    const pr = await getPR(req.params.prNo);
+    if (!pr) return fail(res, 404, "PR not found");
+    const canSeePrice = await isAllowed(req.user.role, "see_pr_price");
+    const { rows } = await db.query(
+      `SELECT id, action, from_status, to_status, actor, actor_role, note, details, created_at
+         FROM pr_approvals WHERE pr_id = $1 ORDER BY created_at ASC, id ASC`,
+      [pr.id]
+    );
+    ok(res, rows.map((r) => ({ ...r, details: redactDetails(r.details, canSeePrice) })),
+      { count: rows.length, can_see_price: canSeePrice });
+  } catch (e) { fail(res, 500, e.message); }
+});
+
 // ── Approve (Manager) ──
 router.post("/:prNo/approve", canDo("approve_pr"), async (req, res) => {
   try {
@@ -224,9 +254,10 @@ router.post("/:prNo/approve", canDo("approve_pr"), async (req, res) => {
         "UPDATE purchase_requests SET status='APPROVED', approved_date=CURRENT_DATE, approved_by=$2 WHERE id=$1",
         [pr.id, req.body?.approved_by || req.user.name]
       );
+      // DR-AUD-003: record the approver's optional comments alongside who/when.
       await c.query(
-        "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role) VALUES ($1,'APPROVE','PENDING','APPROVED',$2,$3)",
-        [pr.id, req.user.name, req.user.role]
+        "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'APPROVE','PENDING','APPROVED',$2,$3,$4)",
+        [pr.id, req.user.name, req.user.role, (req.body?.comments || req.body?.note || "").trim() || null]
       );
       await notify(c, ["Drafter"], `PR approved: ${pr.pr_no}`,
         `Your PR for ${pr.project_name || pr.job_no} was approved.`, "success", pr.pr_no);

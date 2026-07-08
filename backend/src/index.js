@@ -124,6 +124,13 @@ db.query(`
     ADD COLUMN IF NOT EXISTS target_user_id UUID REFERENCES users(id) ON DELETE CASCADE
 `).catch((err) => console.error("Notification target_user_id migration:", err.message));
 
+// Audit trail: structured before→after detail for edits (see utils/auditTrail.js).
+// Price fields inside `details` are redacted server-side per see_pr_price/see_po_price.
+db.query(`ALTER TABLE pr_approvals ADD COLUMN IF NOT EXISTS details JSONB`)
+  .catch((err) => console.error("pr_approvals.details migration:", err.message));
+db.query(`ALTER TABLE po_approvals ADD COLUMN IF NOT EXISTS details JSONB`)
+  .catch((err) => console.error("po_approvals.details migration:", err.message));
+
 db.query(`
   CREATE TABLE IF NOT EXISTS alert_ledger (
     rule          TEXT        NOT NULL,

@@ -212,6 +212,10 @@ CREATE TABLE IF NOT EXISTS pr_approvals (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- A11b. Audit trail: structured before→after detail for edits.
+-- Price fields inside `details` are redacted server-side per see_pr_price/see_po_price.
+ALTER TABLE pr_approvals ADD COLUMN IF NOT EXISTS details JSONB;
+
 -- A12. Purchase Orders  (includes ALL delivery stages — BUY + STOCK)
 CREATE TABLE IF NOT EXISTS purchase_orders (
   id               SERIAL PRIMARY KEY,
@@ -272,6 +276,7 @@ CREATE TABLE IF NOT EXISTS po_approvals (
   note        TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE po_approvals ADD COLUMN IF NOT EXISTS details JSONB;
 
 -- A15. PO Delivery Tracking (lead times, freight details)
 CREATE TABLE IF NOT EXISTS po_delivery_tracking (

@@ -6,9 +6,10 @@ const express = require("express");
 const db = require("../config/db");
 const { protect, roles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
-const { canDo } = require("../utils/canDo");
+const { canDo, isAllowed } = require("../utils/canDo");
 const { Email } = require("../utils/notifyEmail");
-const STAGE_LABEL = { WITH_VENDOR: "With Vendor", SHIPPED: "In Transit", ARRIVED_HUB: "Arrived at Hub", RECEIVED_FACTORY: "Received" };
+const { redactDetails } = require("../utils/auditTrail");
+const STAGE_LABEL ={ WITH_VENDOR: "With Vendor", SHIPPED: "In Transit", ARRIVED_HUB: "Arrived at Hub", RECEIVED_FACTORY: "Received" };
 
 const router = express.Router();
 router.use(protect);
@@ -151,7 +152,25 @@ router.put("/:poNo", canDo("generate_po"), async (req, res) => {
 const BUY_STAGE_ORDER   = ["WITH_VENDOR", "SHIPPED", "ARRIVED_HUB", "RECEIVED_FACTORY"];
 const STOCK_STAGE_ORDER = ["PENDING_ISSUE", "READY_COLLECT", "COLLECTED"];
 
-router.put("/:poNo/delivery-stage", canDo("set_delivery"), async (req, res) => {
+// ── Audit trail / history (DR-AUD-004) ──
+// Any user who can open the PO may view its history. Prices inside the change
+// details are stripped SERVER-SIDE for roles without see_po_price.
+router.get("/:poNo/history", async (req, res) => {
+  try {
+    const po = await getPO(req.params.poNo);
+    if (!po) return fail(res, 404, "PO not found");
+    const canSeePrice = await isAllowed(req.user.role, "see_po_price");
+    const { rows } = await db.query(
+      `SELECT id, action, from_status, to_status, actor, actor_role, note, details, created_at
+         FROM po_approvals WHERE po_id = $1 ORDER BY created_at ASC, id ASC`,
+      [po.id]
+    );
+    ok(res, rows.map((r) => ({ ...r, details: redactDetails(r.details, canSeePrice) })),
+      { count: rows.length, can_see_price: canSeePrice });
+  } catch (e) { fail(res, 500, e.message); }
+});
+
+router.put("/:poNo/delivery-stage", canDo("set_delivery"),async (req, res) => {
   try {
     const po = await getPO(req.params.poNo);
     if (!po) return fail(res, 404, "PO not found");
