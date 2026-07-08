@@ -103,16 +103,52 @@ router.delete("/suppliers/:id", protect, async (req, res) => {
 // Returns: whole-role broadcasts for my role (target_user_id IS NULL) PLUS any
 // alerts addressed specifically to me (target_user_id = my id — used by the SLA
 // sweep to reach the exact drafter/purchaser who owns an item).
+//
+// The feed carries two categories and the UI shows them in two places — 'alert'
+// in the 🔔 Alerts panel, 'message' in the 📬 Inbox. Both come back in one call
+// (one poll, two badges), but the cap is applied PER CATEGORY: a plain `LIMIT 50`
+// over the merged feed would let a burst of lifecycle messages push every overdue
+// alert off the end, silently emptying the Alerts panel. The window function
+// numbers each category separately so each keeps its own newest 50.
+//
+// `?category=alert|message` narrows to one, for callers that only want the one.
+const CATEGORIES = ["alert", "message"];
+
 router.get("/notifications", protect, async (req, res) => {
+  const only = CATEGORIES.includes(req.query.category) ? req.query.category : null;
   try {
     const { rows } = await db.query(
-      `SELECT * FROM po_notifications
-        WHERE target_user_id = $1
-           OR (target_user_id IS NULL AND role = $2)
-        ORDER BY id DESC LIMIT 50`,
+      `SELECT id, role, target_user_id, title, body, type, ref_pr, ref_po,
+              is_read, created_at, category
+         FROM (
+           SELECT n.*, ROW_NUMBER() OVER (PARTITION BY n.category ORDER BY n.id DESC) AS rn
+             FROM po_notifications n
+            WHERE (n.target_user_id = $1 OR (n.target_user_id IS NULL AND n.role = $2))
+              AND ($3::text IS NULL OR n.category = $3)
+         ) t
+        WHERE t.rn <= 50
+        ORDER BY id DESC`,
+      [req.user.id, req.user.role, only]
+    );
+    // Badge counts must NOT be derived from `rows` — that's capped at 50 per
+    // category, so a user with 169 unread messages would be shown "42". Count the
+    // unread across the whole feed, uncapped, the way a mail client does.
+    const { rows: tally } = await db.query(
+      `SELECT category, COUNT(*)::int AS unread
+         FROM po_notifications
+        WHERE (target_user_id = $1 OR (target_user_id IS NULL AND role = $2))
+          AND NOT is_read
+        GROUP BY category`,
       [req.user.id, req.user.role]
     );
-    ok(res, rows, { count: rows.length, unread: rows.filter((r) => !r.is_read).length });
+    const unreadByCategory = { alert: 0, message: 0 };
+    for (const t of tally) if (t.category in unreadByCategory) unreadByCategory[t.category] = t.unread;
+
+    ok(res, rows, {
+      count: rows.length,
+      unread: unreadByCategory.alert + unreadByCategory.message,
+      unreadByCategory,
+    });
   } catch (e) { fail(res, 500, e.message); }
 });
 

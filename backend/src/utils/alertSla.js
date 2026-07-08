@@ -27,8 +27,9 @@ const { userById, userByName, insertNotification: insertRow } = require("./notif
 
 const ADVISORY_LOCK_KEY = 918273645; // arbitrary, unique to this job
 
-// The sweep runs outside any transaction — write straight to the pool.
-const insertNotification = (opts) => insertRow(null, opts);
+// The sweep runs outside any transaction — write straight to the pool. Every row
+// it writes is an overdue nag, so it lands in the 🔔 Alerts panel, never the 📬 Inbox.
+const insertNotification = (opts) => insertRow(null, { ...opts, category: "alert" });
 
 // Upsert the ledger so the next fire only happens after the interval elapses.
 async function stampLedger(rule, entityType, entityId) {

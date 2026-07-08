@@ -10,11 +10,11 @@ import {
 } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { NotificationsProvider, useNotifications } from "./context/NotificationsContext";
 import Sidebar from "./components/Sidebar";
 import { AdminRoute } from "./components/AdminRoute";
 import AlertsInbox from "./components/AlertsInbox";
 import api from "./services/api";
-import { api as inboxApi } from "./lib/api";
 
 // Pages
 import LoginPage from "./pages/auth/LoginPage";
@@ -179,21 +179,11 @@ function AppContent() {
   const { user } = useAuth();
   const { pathname } = useLocation();
 
-  // ── Alerts / notifications inbox (mail-style) ──
-  // Feeds the Sidebar "Alerts" badge and the slide-in inbox. Same feed the
-  // backend SLA sweep writes to; polled so new reminders surface without reload.
-  const [notifications, setNotifications] = useState([]);
-  const [showAlerts, setShowAlerts] = useState(false);
-  const loadInbox = () => {
-    inboxApi.notifications().then((rows) => setNotifications(Array.isArray(rows) ? rows : [])).catch(() => {});
-  };
-  useEffect(() => {
-    if (!user) { setNotifications([]); return; }
-    loadInbox();
-    const t = setInterval(loadInbox, 60000); // refresh every minute
-    return () => clearInterval(t);
-  }, [user]);
-  const unreadCount = notifications.filter((n) => !n.is_read).length;
+  // ── Alerts / Inbox (mail-style slide-in) ──
+  // One feed, two panels: 🔔 Alerts (overdue PRs/POs) and 📬 Inbox (lifecycle
+  // messages). NotificationsContext owns the polling and the split; it is also
+  // read by the Sidebar and by the HomePage bell + profile dropdown.
+  const { panel, alerts, messages, closePanel, reload } = useNotifications();
 
   // Pages without sidebar
   const isAuthPage = pathname === "/login" || pathname === "/setup";
@@ -212,9 +202,6 @@ function AppContent() {
       {showSidebar && (
         <Sidebar
           currentUser={user}
-          alertCount={unreadCount}
-          inboxCount={unreadCount}
-          setShowAlerts={setShowAlerts}
           tab={activeTab}
           setTab={() => {}}
           showHome={false}
@@ -222,12 +209,13 @@ function AppContent() {
         />
       )}
 
-      {/* Mail-style alerts inbox (slide-in) */}
+      {/* Mail-style slide-in — renders whichever of the two panels is open */}
       <AlertsInbox
-        open={showAlerts}
-        onClose={() => setShowAlerts(false)}
-        items={notifications}
-        onChanged={loadInbox}
+        mode={panel || "message"}
+        open={panel !== null}
+        onClose={closePanel}
+        items={panel === "alert" ? alerts : messages}
+        onChanged={reload}
         user={user}
       />
 
@@ -248,9 +236,13 @@ function AppContent() {
 
 function App() {
   return (
+    // NotificationsProvider sits inside AuthProvider (it polls per logged-in user)
+    // and above the router, so every page — sidebar or not — can open the panels.
     <AuthProvider>
       <BrowserRouter>
-        <AppContent />
+        <NotificationsProvider>
+          <AppContent />
+        </NotificationsProvider>
       </BrowserRouter>
     </AuthProvider>
   );

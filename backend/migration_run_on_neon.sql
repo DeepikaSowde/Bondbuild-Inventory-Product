@@ -62,6 +62,27 @@ CREATE TABLE IF NOT EXISTS po_notifications (
 ALTER TABLE po_notifications
   ADD COLUMN IF NOT EXISTS target_user_id UUID REFERENCES users(id) ON DELETE CASCADE;
 
+-- The feed carries two kinds of row, and the UI splits them into two places:
+--   'alert'   → utils/alertSla.js   — something is OVERDUE and needs chasing (🔔 Alerts)
+--   'message' → utils/notifyEvent.js — something HAPPENED, FYI / next step (📬 Inbox)
+-- Default 'message' so a writer that forgets to stamp a category lands in the
+-- mailbox rather than crying wolf in the alerts panel.
+ALTER TABLE po_notifications
+  ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'message';
+-- Backfill rows written before the split. `type` is NOT a usable proxy: routes
+-- write "PR sent back" as 'warning' and "PR rejected" as 'error', and those are
+-- lifecycle messages, not overdue nags. What every SLA rule body DOES carry — and
+-- no lifecycle body ever does — is its repetition clause ("...repeats every N days
+-- until ..."), because the alert_ledger re-fires it. That is the discriminator.
+-- Verified against live data: it agrees with an independent title regex on all rows.
+UPDATE po_notifications
+   SET category = CASE WHEN COALESCE(body,'') ILIKE '%repeats every%' THEN 'alert' ELSE 'message' END
+ WHERE category IS DISTINCT FROM
+       (CASE WHEN COALESCE(body,'') ILIKE '%repeats every%' THEN 'alert' ELSE 'message' END);
+-- The inbox query filters by recipient, then partitions by category.
+CREATE INDEX IF NOT EXISTS idx_po_notifications_category
+  ON po_notifications (category, id DESC);
+
 -- A3b. SLA alert ledger — one row per (rule, entity); last_fired_at lets the
 -- scheduled sweep repeat an alert only after the rule's N-day interval elapses.
 CREATE TABLE IF NOT EXISTS alert_ledger (

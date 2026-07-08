@@ -16,6 +16,9 @@ export const api = {
   poProject: (jobNo) => data(axiosClient.get(`/po-projects/${enc(jobNo)}`)),
   addPoProject: (p) => raw(axiosClient.post("/po-projects", p)),
   notifications: () => data(axiosClient.get("/notifications")),
+  // Full envelope — the rows are capped at 50 per category, but `unreadByCategory`
+  // is the true uncapped count the badges need. See NotificationsContext.
+  notificationsFeed: () => raw(axiosClient.get("/notifications")),
   markRead: (id) => raw(axiosClient.post(`/notifications/${id}/read`)),
 
   // audit trail / history (prices are redacted server-side per role)

@@ -5,6 +5,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useNotifications } from "../context/NotificationsContext";
 import api from "../services/api";
 
 // ─── SVG Icon Library ────────────────────────────────────────────────────────
@@ -122,9 +123,25 @@ const glass = {
   borderRadius: 16,
 };
 
+// Unread pill on a nav icon. Absent entirely at zero — an empty badge reads as
+// "you have something" at a glance, which is exactly what it must not say.
+const NavBadge = ({ count, color }) => (
+  <span style={{
+    position: "absolute", top: -5, right: -5, minWidth: 17, height: 17, padding: "0 4px",
+    borderRadius: 9, background: color, border: `2px solid ${T.bg}`,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    fontSize: 9, fontWeight: 800, color: "#fff", lineHeight: 1,
+  }}>
+    {count > 99 ? "99+" : count}
+  </span>
+);
+
 export default function HomePage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  // The 🔔 Alerts and 📬 Inbox panels live in App (outside the router), so the
+  // bell and the profile dropdown just ask the shared context to open them.
+  const { alertCount, messageCount, openAlerts, openInbox } = useNotifications();
   const [showAccounting, setShowAccounting] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
@@ -377,10 +394,14 @@ export default function HomePage() {
   ];
 
   // ─── Dropdown items ───────────────────────────────────────────────────────
+  // Opening a panel first dismisses the dropdown — otherwise it stays parked
+  // under the slide-in and is still there when the panel closes.
+  const openPanel = (open) => () => { setDropdownOpen(false); open(); };
+
   const dropdownItems = [
     { icon: <Ico.user />, label: "Profile", sub: "View your account", action: () => setDropdownOpen(false) },
-    { icon: <Ico.inbox />, label: "Inbox", sub: "Messages & notifications", action: () => setDropdownOpen(false) },
-    { icon: <Ico.bell />, label: "Alerts", sub: "Low stock & overdue POs", action: () => setDropdownOpen(false) },
+    { icon: <Ico.inbox />, label: "Inbox", sub: "PR & PO activity", badge: messageCount, badgeColor: T.violet, action: openPanel(openInbox) },
+    { icon: <Ico.bell />, label: "Alerts", sub: "Overdue PRs & POs", badge: alertCount, badgeColor: T.red, action: openPanel(openAlerts) },
     { icon: <Ico.settings />, label: "Settings", sub: "System preferences", action: () => setDropdownOpen(false) },
     { icon: <Ico.key />, label: "Change Password", sub: "Update your password", action: () => { setDropdownOpen(false); navigate("/change-password"); } },
     { divider: true },
@@ -418,13 +439,24 @@ export default function HomePage() {
 
         {/* Right Controls */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Bell */}
-          <button style={{ width: 36, height: 36, borderRadius: 10, border: `1px solid ${T.border}`, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: T.amber, transition: "all 0.18s", position: "relative" }}
+          {/* Inbox — lifecycle messages (PR raised/approved, PO raised) */}
+          <button onClick={openInbox}
+            style={{ width: 36, height: 36, borderRadius: 10, border: `1px solid ${T.border}`, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: T.violet, transition: "all 0.18s", position: "relative" }}
+            onMouseEnter={e => { e.currentTarget.style.background = T.violetDim; e.currentTarget.style.borderColor = "rgba(139,92,246,0.25)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = T.border; }}
+            title={messageCount ? `Inbox — ${messageCount} unread` : "Inbox"}>
+            <Ico.inbox size={16} />
+            {messageCount > 0 && <NavBadge count={messageCount} color={T.violet} />}
+          </button>
+
+          {/* Bell — overdue PRs/POs that need chasing */}
+          <button onClick={openAlerts}
+            style={{ width: 36, height: 36, borderRadius: 10, border: `1px solid ${T.border}`, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: T.amber, transition: "all 0.18s", position: "relative" }}
             onMouseEnter={e => { e.currentTarget.style.background = T.amberDim; e.currentTarget.style.borderColor = "rgba(245,158,11,0.25)"; }}
             onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = T.border; }}
-            title="Alerts">
+            title={alertCount ? `Alerts — ${alertCount} unread` : "Alerts — nothing overdue"}>
             <Ico.bell size={16} />
-            <span style={{ position: "absolute", top: 6, right: 6, width: 6, height: 6, borderRadius: "50%", background: T.red, border: `2px solid ${T.bg}` }} />
+            {alertCount > 0 && <NavBadge count={alertCount} color={T.red} />}
           </button>
 
           {/* Settings */}
@@ -476,10 +508,15 @@ export default function HomePage() {
                         <div style={{ width: 30, height: 30, borderRadius: 8, background: item.danger ? "rgba(244,63,94,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${item.danger ? "rgba(244,63,94,0.2)" : T.border}`, display: "flex", alignItems: "center", justifyContent: "center", color: item.danger ? T.red : T.textSec, flexShrink: 0 }}>
                           {item.icon}
                         </div>
-                        <div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 13, fontWeight: 600 }}>{item.label}</div>
                           <div style={{ fontSize: 11, color: T.textDim, marginTop: 1 }}>{item.sub}</div>
                         </div>
+                        {item.badge > 0 && (
+                          <span style={{ minWidth: 18, height: 18, padding: "0 5px", borderRadius: 9, background: item.badgeColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: "#fff", flexShrink: 0 }}>
+                            {item.badge > 99 ? "99+" : item.badge}
+                          </span>
+                        )}
                       </button>
                     );
                   })}

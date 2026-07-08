@@ -39,10 +39,12 @@ async function getPO(poNo, client = db) {
   return { ...rows[0], items: items.rows, tracking: track.rows[0] || null, receive_photos: photos.rows, supplier };
 }
 
+// Lifecycle message → the 📬 Inbox, never the 🔔 Alerts panel (that one is only for
+// the SLA sweep's overdue nags). Stamped explicitly, not left to the column default.
 async function notify(client, rolesList, title, body, type, refPr, refPo) {
   for (const role of rolesList)
     await client.query(
-      "INSERT INTO po_notifications (role, title, body, type, ref_pr, ref_po) VALUES ($1,$2,$3,$4,$5,$6)",
+      "INSERT INTO po_notifications (role, title, body, type, ref_pr, ref_po, category) VALUES ($1,$2,$3,$4,$5,$6,'message')",
       [role, title, body, type, refPr, refPo]
     );
 }

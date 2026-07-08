@@ -59,11 +59,16 @@ async function userByName(name) {
 
 // ── delivery ─────────────────────────────────────────────────────────────────
 // One in-app row. `client` may be a transaction client or the pool.
-async function insertNotification(client, { role, targetUserId = null, title, body, type, refPr = null, refPo = null }) {
+//
+// `category` decides WHERE the row surfaces in the UI: 'message' rows land in
+// the 📬 Inbox (something happened), 'alert' rows in the 🔔 Alerts panel
+// (something is overdue). Lifecycle events are messages, so that is the default;
+// utils/alertSla.js overrides it to 'alert' for every row the sweep writes.
+async function insertNotification(client, { role, targetUserId = null, title, body, type, refPr = null, refPo = null, category = "message" }) {
   await (client || db).query(
-    `INSERT INTO po_notifications (role, target_user_id, title, body, type, ref_pr, ref_po)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [role, targetUserId, title, body, type, refPr, refPo]
+    `INSERT INTO po_notifications (role, target_user_id, title, body, type, ref_pr, ref_po, category)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [role, targetUserId, title, body, type, refPr, refPo, category]
   );
 }
 

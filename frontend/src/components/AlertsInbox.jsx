@@ -1,21 +1,55 @@
 // components/AlertsInbox.jsx
-// Mail-style inbox for procurement alerts (SLA reminders + workflow notices).
-// This is the IN-APP mailbox that stands in for email until the Microsoft Graph
-// mail channel is switched on (MAIL_ENABLED=true) — at which point the SAME
-// messages are also delivered by email. It reads the po_notifications feed the
-// backend SLA sweep writes to, and renders each item like an email: sender,
-// From/To/Subject/Date headers, PR/PO refs, body, and a read/unread state.
+// The slide-in panel behind BOTH notification surfaces. It renders one of two
+// modes, driven by po_notifications.category:
+//
+//   mode="alert"   🔔 Alerts  — overdue PRs/POs from the SLA sweep. Late, needs chasing.
+//   mode="message" 📬 Inbox   — PR raised/approved, PO raised. Happened, here's what's next.
+//
+// Both are the IN-APP stand-in for email until the Microsoft Graph mail channel is
+// switched on (MAIL_ENABLED=true) — at which point the SAME messages are also
+// delivered by email. So both render like an email: sender, From/To/Subject/Date
+// headers, PR/PO refs, body, and a read/unread state. Only the identity differs.
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 
-// The "sender" the in-app mailbox and the future email share.
+// The "sender" the in-app panels and the future email share.
 const SENDER = { name: "InventoryOpz Procurement", email: "procurement@inventoryopz" };
 
+// Per-mode identity: what the panel calls itself, and how it feels.
+const MODES = {
+  alert: {
+    icon: "🔔",
+    title: "Alerts",
+    header: "bg-red-600",
+    subtle: "text-red-200",
+    close: "text-red-100",
+    noun: "alert",
+    banner: "Email delivery is not yet enabled — these overdue reminders are shown here.",
+    emptyIcon: "🎉",
+    emptyText: "Nothing is overdue. Everything is on track.",
+    footer:
+      "Automated overdue reminder from the InventoryOpz procurement module. It repeats on a fixed interval until the item is actioned. When email delivery is enabled, this same reminder is also sent to your email inbox.",
+  },
+  message: {
+    icon: "📬",
+    title: "Procurement Mailbox",
+    header: "bg-indigo-600",
+    subtle: "text-indigo-200",
+    close: "text-indigo-100",
+    noun: "message",
+    banner: "Email delivery is not yet enabled — these messages are shown here in your in-app mailbox.",
+    emptyIcon: "📭",
+    emptyText: "Your mailbox is empty. You're all caught up.",
+    footer:
+      "Automated message from the InventoryOpz procurement module. When email delivery is enabled, this same message is also sent to your email inbox. Please log in and take action.",
+  },
+};
+
 const TYPE = {
-  error:   { av: "bg-red-500",     chip: "bg-red-50 text-red-700 ring-red-200",         icon: "⛔" },
-  warning: { av: "bg-amber-500",   chip: "bg-amber-50 text-amber-700 ring-amber-200",   icon: "⚠️" },
+  error:   { av: "bg-red-500",     chip: "bg-red-50 text-red-700 ring-red-200",             icon: "⛔" },
+  warning: { av: "bg-amber-500",   chip: "bg-amber-50 text-amber-700 ring-amber-200",       icon: "⚠️" },
   success: { av: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-700 ring-emerald-200", icon: "✅" },
-  info:    { av: "bg-indigo-500",  chip: "bg-indigo-50 text-indigo-700 ring-indigo-200", icon: "✉️" },
+  info:    { av: "bg-indigo-500",  chip: "bg-indigo-50 text-indigo-700 ring-indigo-200",    icon: "✉️" },
 };
 const kind = (t) => TYPE[t] || TYPE.info;
 
@@ -29,10 +63,11 @@ function timeAgo(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-export default function AlertsInbox({ open, onClose, items = [], onChanged, user }) {
+export default function AlertsInbox({ mode = "message", open, onClose, items = [], onChanged, user }) {
   const [selected, setSelected] = useState(null);
+  const M = MODES[mode] || MODES.message;
 
-  // "To" line — a personally-targeted alert reads as "you", a role broadcast as the role.
+  // "To" line — a personally-targeted item reads as "you", a role broadcast as the role.
   const toLabel = (n) => (n.target_user_id ? (user?.name || "you") : `${n.role} team`);
 
   // Close on Escape (detail → list → panel).
@@ -42,6 +77,11 @@ export default function AlertsInbox({ open, onClose, items = [], onChanged, user
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [open, selected, onClose]);
+
+  // Always reopen on the list, never on the last item read. Reset on `mode` so
+  // switching Alerts ↔ Inbox can't carry an item across into the other panel,
+  // and on `open` so closing mid-detail doesn't leave it there for next time.
+  useEffect(() => { setSelected(null); }, [mode, open]);
 
   const unread = useMemo(() => items.filter((n) => !n.is_read).length, [items]);
 
@@ -55,26 +95,27 @@ export default function AlertsInbox({ open, onClose, items = [], onChanged, user
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+    // z-[999] clears the HomePage's sticky nav (z 100) and its profile dropdown (z 200).
+    <div className="fixed inset-0 z-[999] flex justify-end bg-black/40" onClick={onClose}>
       <div
         className="h-full w-full max-w-md bg-white shadow-2xl flex flex-col animate-[slideIn_.2s_ease-out]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 bg-indigo-600 text-white">
+        <div className={`flex items-center justify-between px-5 py-4 text-white ${M.header}`}>
           <div>
-            <div className="text-base font-bold flex items-center gap-2">📬 Procurement Mailbox</div>
-            <div className="text-xs text-indigo-200 mt-0.5">
-              {items.length} message{items.length === 1 ? "" : "s"}
+            <div className="text-base font-bold flex items-center gap-2">{M.icon} {M.title}</div>
+            <div className={`text-xs mt-0.5 ${M.subtle}`}>
+              {items.length} {M.noun}{items.length === 1 ? "" : "s"}
               {unread > 0 && ` · ${unread} unread`}
             </div>
           </div>
-          <button onClick={onClose} className="text-indigo-100 hover:text-white text-2xl leading-none px-2" title="Close">×</button>
+          <button onClick={onClose} className={`hover:text-white text-2xl leading-none px-2 ${M.close}`} title="Close">×</button>
         </div>
 
         {/* Dormant-email banner */}
         <div className="px-5 py-2 bg-amber-50 border-b border-amber-100 text-[11px] text-amber-700">
-          ✉️ Email delivery is not yet enabled — these alerts are shown here in your in-app mailbox.
+          ✉️ {M.banner}
         </div>
 
         {/* List / detail */}
@@ -82,8 +123,8 @@ export default function AlertsInbox({ open, onClose, items = [], onChanged, user
           <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
             {items.length === 0 && (
               <div className="p-10 text-center text-gray-400 text-sm">
-                <div className="text-4xl mb-3">📭</div>
-                Your mailbox is empty. You're all caught up.
+                <div className="text-4xl mb-3">{M.emptyIcon}</div>
+                {M.emptyText}
               </div>
             )}
             {items.map((n) => {
@@ -118,7 +159,7 @@ export default function AlertsInbox({ open, onClose, items = [], onChanged, user
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
-            <button onClick={() => setSelected(null)} className="px-5 py-3 text-sm text-indigo-600 hover:underline">← Back to mailbox</button>
+            <button onClick={() => setSelected(null)} className="px-5 py-3 text-sm text-indigo-600 hover:underline">← Back to {M.title}</button>
             <div className="px-6 pb-6">
               {/* Subject */}
               <h2 className="text-xl font-bold text-gray-900 mb-4">{selected.title}</h2>
@@ -149,8 +190,7 @@ export default function AlertsInbox({ open, onClose, items = [], onChanged, user
                 <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{selected.body}</p>
               </div>
               <div className="mt-6 pt-4 border-t border-gray-100 text-xs text-gray-400">
-                Automated message from the InventoryOpz procurement module. When email delivery is enabled,
-                this same message is also sent to your email inbox. Please log in and take action.
+                {M.footer}
               </div>
             </div>
           </div>

@@ -2,6 +2,7 @@
 // Sidebar navigation - NO horizontal scroll
 
 import { useNavigate } from "react-router-dom";
+import { useNotifications } from "../context/NotificationsContext";
 
 const ROLE_COLORS = {
   Admin: "bg-indigo-500/20 border-indigo-500 text-indigo-400",
@@ -36,11 +37,11 @@ export default function Sidebar({
   setShowHome = () => {},
   showHome = false,
   currentUser = { name: "User", role: "Guest" },
-  alertCount = 0,
-  inboxCount = 0,
-  setShowAlerts = () => {},
 }) {
   const navigate = useNavigate();
+  // Counts and openers come from the shared feed, not from props — the HomePage
+  // bell and profile dropdown read the very same context.
+  const { alertCount, messageCount, openAlerts, openInbox } = useNotifications();
 
   // Safely get user info
   const userName = currentUser?.name || "User";
@@ -187,9 +188,9 @@ export default function Sidebar({
         {/* ── SECTION 3: NOTIFICATIONS ── */}
         <SectionLabel label="Notifications" />
 
-        {/* Alerts */}
+        {/* Alerts — overdue PRs/POs that need chasing */}
         <button
-          onClick={() => setShowAlerts?.(true)}
+          onClick={openAlerts}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-indigo-300 hover:bg-white/5 transition-all duration-150"
         >
           <span className="text-base flex-shrink-0">🔔</span>
@@ -201,16 +202,16 @@ export default function Sidebar({
           )}
         </button>
 
-        {/* Inbox — opens the same Procurement Mailbox as Alerts */}
+        {/* Inbox — lifecycle messages (PR raised/approved, PO raised) */}
         <button
-          onClick={() => setShowAlerts?.(true)}
+          onClick={openInbox}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-indigo-300 hover:bg-white/5 transition-all duration-150"
         >
           <span className="text-base flex-shrink-0">📬</span>
           <span className="flex-1 text-left truncate">Inbox</span>
-          {inboxCount > 0 && (
+          {messageCount > 0 && (
             <span className="bg-indigo-500 text-white text-xs font-bold rounded-full px-2 py-0.5 flex-shrink-0">
-              {inboxCount}
+              {messageCount}
             </span>
           )}
         </button>
