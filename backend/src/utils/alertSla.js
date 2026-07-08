@@ -21,40 +21,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const db = require("../config/db");
 const { emailsForRoles, sendSlaEmail } = require("./notifyEmail");
+// Lookup + in-app write are shared with the lifecycle-event notifier so both
+// channels target people and roles the same way. See utils/notifyEvent.js.
+const { userById, userByName, insertNotification: insertRow } = require("./notifyEvent");
 
 const ADVISORY_LOCK_KEY = 918273645; // arbitrary, unique to this job
 
-// ── small lookup helpers ─────────────────────────────────────────────────────
-async function userById(id) {
-  if (!id) return null;
-  try {
-    const { rows } = await db.query(
-      "SELECT id, name, role, email FROM users WHERE id = $1", [id]
-    );
-    return rows[0] || null;
-  } catch { return null; }
-}
-
-async function userByName(name) {
-  if (!name) return null;
-  try {
-    const { rows } = await db.query(
-      `SELECT id, name, role, email FROM users
-       WHERE lower(name) = lower($1) AND status = 'Active'
-       ORDER BY (email IS NOT NULL) DESC LIMIT 1`, [name]
-    );
-    return rows[0] || null;
-  } catch { return null; }
-}
-
-// Write one in-app notification row. target_user_id NULL = whole-role broadcast.
-async function insertNotification({ role, targetUserId = null, title, body, type, refPr, refPo }) {
-  await db.query(
-    `INSERT INTO po_notifications (role, target_user_id, title, body, type, ref_pr, ref_po)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [role, targetUserId, title, body, type, refPr || null, refPo || null]
-  );
-}
+// The sweep runs outside any transaction — write straight to the pool.
+const insertNotification = (opts) => insertRow(null, opts);
 
 // Upsert the ledger so the next fire only happens after the interval elapses.
 async function stampLedger(rule, entityType, entityId) {

@@ -15,7 +15,9 @@ const protect = async (req, res, next) => {
 
     // Get user from database
     const { rows } = await db.query(
-      `SELECT id, name, username, role, designation, status 
+      // `email` rides along so route handlers can address the acting user
+      // directly in lifecycle notifications (see utils/notifyEvent.js).
+      `SELECT id, name, username, role, designation, status, email
        FROM users WHERE id = $1`,
       [decoded.id],
     );

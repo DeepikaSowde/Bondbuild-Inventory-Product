@@ -8,6 +8,7 @@ const { protect, roles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
 const { canDo, isAllowed } = require("../utils/canDo");
 const { Email } = require("../utils/notifyEmail");
+const { notifyInApp, mailAudiences, events } = require("../utils/notifyEvent");
 const { redactDetails } = require("../utils/auditTrail");
 const STAGE_LABEL ={ WITH_VENDOR: "With Vendor", SHIPPED: "In Transit", ARRIVED_HUB: "Arrived at Hub", RECEIVED_FACTORY: "Received" };
 
@@ -81,6 +82,7 @@ router.post("/", canDo("generate_po"), async (req, res) => {
   const items = (f.items || []).filter((i) => i.description?.trim());
   if (!f.job_no || !f.supplier_id || !items.length)
     return fail(res, 400, "Job No, supplier and at least one item are required");
+  let audience;   // built inside the txn, mailed once it commits
   try {
     const poNo = await withTransaction(async (c) => {
       const sup = await c.query("SELECT name, type, address FROM po_suppliers WHERE id=$1", [f.supplier_id]);
@@ -103,8 +105,16 @@ router.post("/", canDo("generate_po"), async (req, res) => {
           "INSERT INTO po_items (po_id, line_no, profile_code, description, qty, unit, unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7)",
           [po.rows[0].id, line++, i.profile_code, i.description.trim(), Number(i.qty) || 0, i.unit || "pcs", Number(i.unit_price) || 0]
         );
+      // A manual PO usually has no parent PR — then there's no approving manager
+      // and no drafter to address, so poRaised() broadcasts to Managers instead.
+      const parent = f.pr_no
+        ? (await c.query("SELECT pr_no, job_no, project_name, created_by, approved_by FROM purchase_requests WHERE pr_no = $1", [f.pr_no])).rows[0]
+        : null;
+      audience = await events.poRaised({ actor: req.user, pr: parent || null, poNos: [poNo], poType: "BUY" });
+      await notifyInApp(c, audience, { refPr: f.pr_no || null, refPo: poNo });
       return poNo;
     });
+    mailAudiences(audience, { refPr: f.pr_no || null, refPo: poNo });
     res.status(201).json({ success: true, data: await getPO(poNo) });
   } catch (e) { fail(res, 500, e.message); }
 });

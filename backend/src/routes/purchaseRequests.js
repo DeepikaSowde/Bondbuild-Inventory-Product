@@ -9,6 +9,7 @@ const { protect, roles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
 const { canDo, isAllowed } = require("../utils/canDo");
 const { Email } = require("../utils/notifyEmail");
+const { notifyInApp, mailAudiences, events } = require("../utils/notifyEvent");
 const { buildPrEditDiff, redactDetails } = require("../utils/auditTrail");
 
 const router = express.Router();
@@ -109,6 +110,7 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
   if (!items.length) return fail(res, 400, "At least one item with a description is required");
   const descErr = checkDescLength(items);
   if (descErr) return fail(res, 400, descErr);
+  let audience;   // built inside the txn, mailed once it commits
   try {
     const prNo = await withTransaction(async (c) => {
       const num = await c.query("SELECT next_pr_no() AS pr_no");
@@ -148,13 +150,17 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
         "INSERT INTO pr_approvals (pr_id, action, to_status, actor, actor_role) VALUES ($1,'SUBMIT','PENDING',$2,$3)",
         [prId, req.user.name, req.user.role]
       );
-      await notify(c, ["Manager"], `New PR submitted: ${prNo}`,
-        `${f.requested_by} submitted a PR for ${f.project_name || f.job_no}. Please review.`, "info", prNo);
+      // Drafter gets an acknowledgement; every Manager gets the call to approve.
+      audience = events.prSubmitted({
+        actor: req.user, prNo,
+        projectLabel: f.project_name || f.job_no,
+        requestedBy: f.requested_by,
+      });
+      await notifyInApp(c, audience, { refPr: prNo });
       return prNo;
     });
-    const created = await getPR(prNo);
-    Email.prSubmitted(created);           // non-blocking notification
-    res.status(201).json({ success: true, data: created });
+    mailAudiences(audience, { refPr: prNo });   // after commit, non-blocking
+    res.status(201).json({ success: true, data: await getPR(prNo) });
   } catch (e) {
     fail(res, e.code === "23503" ? 400 : 500,
       e.code === "23503" ? "Job No does not exist in po_projects" : e.message);
@@ -249,6 +255,9 @@ router.post("/:prNo/approve", canDo("approve_pr"), async (req, res) => {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
     if (pr.status !== "PENDING") return fail(res, 409, `Only PENDING PRs can be approved (current: ${pr.status})`);
+    // Approving manager gets the ack, all Purchasers the call to raise the PO,
+    // and the drafter who raised it hears their PR got through.
+    const audience = await events.prApproved({ actor: req.user, pr });
     await withTransaction(async (c) => {
       await c.query(
         "UPDATE purchase_requests SET status='APPROVED', approved_date=CURRENT_DATE, approved_by=$2 WHERE id=$1",
@@ -259,14 +268,10 @@ router.post("/:prNo/approve", canDo("approve_pr"), async (req, res) => {
         "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'APPROVE','PENDING','APPROVED',$2,$3,$4)",
         [pr.id, req.user.name, req.user.role, (req.body?.comments || req.body?.note || "").trim() || null]
       );
-      await notify(c, ["Drafter"], `PR approved: ${pr.pr_no}`,
-        `Your PR for ${pr.project_name || pr.job_no} was approved.`, "success", pr.pr_no);
-      await notify(c, ["Purchaser"], `Assign suppliers: ${pr.pr_no}`,
-        `PR ${pr.pr_no} is approved. Assign suppliers to the buy items, then generate POs.`, "info", pr.pr_no);
+      await notifyInApp(c, audience, { refPr: pr.pr_no });
     });
-    const approvedPR = await getPR(pr.pr_no);
-    Email.prApproved(approvedPR);
-    ok(res, approvedPR);
+    mailAudiences(audience, { refPr: pr.pr_no });
+    ok(res, await getPR(pr.pr_no));
   } catch (e) { fail(res, 500, e.message); }
 });
 
@@ -327,6 +332,7 @@ router.put("/:prNo/items", canDo("assign_supplier"), async (req, res) => {
 // ── Purchaser sends stock info to the FIC (flips stock items to PENDING_FIC) ──
 // This is the step where the Purchaser tells the FIC which item + location to issue.
 router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
+  let audience, stockPoRef = null;   // built inside the txn, mailed once it commits
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
@@ -378,6 +384,7 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
       const existingStockPO = await c.query(
         "SELECT 1 FROM purchase_orders WHERE pr_id = $1 AND po_type = 'STOCK' LIMIT 1", [pr.id]
       );
+      const stockPoNos = [];
       if (!existingStockPO.rows.length) {
         const groups = {};
         for (const it of fresh.rows) {
@@ -405,13 +412,23 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
             "INSERT INTO po_approvals (po_id, action, to_status, actor, actor_role) VALUES ($1,'CREATE_STOCK','OPEN',$2,$3)",
             [po.rows[0].id, req.user.name, req.user.role]
           );
+          stockPoNos.push(poNo);
         }
       }
 
       await notify(c, ["Factory In-charge"], `Stock to issue: ${pr.pr_no}`,
         `Purchaser sent stock items for ${pr.project_name || pr.job_no}. Please issue from the listed locations.`,
         "info", pr.pr_no);
+
+      // The internal stock PO is a PO like any other — announce it. Only on the
+      // run that actually creates them, so a re-send doesn't re-notify.
+      if (stockPoNos.length) {
+        audience = await events.poRaised({ actor: req.user, pr, poNos: stockPoNos, poType: "STOCK" });
+        await notifyInApp(c, audience, { refPr: pr.pr_no, refPo: stockPoNos[0] });
+        stockPoRef = stockPoNos[0];
+      }
     });
+    mailAudiences(audience, { refPr: pr.pr_no, refPo: stockPoRef });
     const sentPR = await getPR(pr.pr_no);
     Email.stockToFic(sentPR);
     ok(res, sentPR);
@@ -461,6 +478,7 @@ router.post("/items/:itemId/reduce-stock", canDo("issue_stock"), async (req, res
 
 // ── Generate POs from the BUY portion (one PO per supplier) ──
 router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
+  let audience;   // built inside the txn, mailed once it commits
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
@@ -511,12 +529,14 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
         poNos.push(poNo);
       }
       await c.query("UPDATE purchase_requests SET status='PO_RAISED' WHERE id=$1", [pr.id]);
-      await notify(c, ["Drafter", "Manager"], `POs created for ${pr.pr_no}`,
-        `${poNos.length} PO(s) generated: ${poNos.join(", ")}`, "success", pr.pr_no, poNos[0]);
+      // Purchaser acks; FIC picks up the next step; the approving Manager and
+      // the drafter who raised the PR both get a tracking note.
+      audience = await events.poRaised({ actor: req.user, pr, poNos, poType: "BUY" });
+      await notifyInApp(c, audience, { refPr: pr.pr_no, refPo: poNos[0] });
       return poNos;
     });
+    mailAudiences(audience, { refPr: pr.pr_no, refPo: created[0] });
     const result = { created_pos: created, pr: await getPR(pr.pr_no) };
-    Email.posCreated(result.pr, created);
     ok(res, result);
   } catch (e) { fail(res, 500, e.message); }
 });

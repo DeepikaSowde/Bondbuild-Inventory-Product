@@ -37,23 +37,13 @@ function wrap(title, lines, prNo, poNo) {
 }
 
 // The stage-by-stage emails. Each takes a context object and fires async.
+//
+// NOTE: PR-submitted, PR-approved and POs-created are NOT here. Those three
+// events address named individuals (the drafter who raised it, the manager who
+// approved it, the purchaser who raised the PO) as well as whole roles, so they
+// live in utils/notifyEvent.js where the in-app and email audiences are built
+// once, from the same list. Adding role-only copies back here would double-send.
 const Email = {
-  prSubmitted: async (pr) => {
-    const to = await emailsForRoles(["Manager"]);
-    sendMailAsync(to, `New PR ${pr.pr_no} awaiting approval`,
-      wrap("A new purchase request needs your approval",
-        [`<b>${pr.requested_by}</b> submitted <b>${pr.pr_no}</b> for <b>${pr.project_name || pr.job_no}</b>.`,
-         "Please review and approve, send back, or reject."], pr.pr_no));
-  },
-  prApproved: async (pr) => {
-    sendMailAsync(await emailsForRoles(["Purchaser"]), `PR ${pr.pr_no} approved — assign suppliers`,
-      wrap("PR approved — ready for purchasing",
-        [`<b>${pr.pr_no}</b> (${pr.project_name || pr.job_no}) was approved.`,
-         "Assign suppliers and prices to the buy items, send stock to the Factory In-charge, then generate POs."], pr.pr_no));
-    sendMailAsync(await emailsForRoles(["Drafter"]), `Your PR ${pr.pr_no} was approved`,
-      wrap("Your purchase request was approved",
-        [`<b>${pr.pr_no}</b> for ${pr.project_name || pr.job_no} has been approved by the Manager.`], pr.pr_no));
-  },
   prRejected: async (pr, sentBack, reason) => {
     sendMailAsync(await emailsForRoles(["Drafter"]),
       sentBack ? `PR ${pr.pr_no} sent back for changes` : `PR ${pr.pr_no} rejected`,
@@ -73,12 +63,6 @@ const Email = {
       wrap("Stock has been issued",
         [`The Factory In-charge has issued the stock portion of <b>${pr.pr_no}</b>.`,
          "You can now generate the purchase orders."], pr.pr_no));
-  },
-  posCreated: async (pr, poNos) => {
-    sendMailAsync(await emailsForRoles(["Drafter", "Manager"]), `POs created for ${pr.pr_no}`,
-      wrap("Purchase orders generated",
-        [`${poNos.length} purchase order(s) were generated from <b>${pr.pr_no}</b>:`,
-         `<b>${poNos.join(", ")}</b>`], pr.pr_no, poNos[0]));
   },
   deliveryStage: async (po, stageLabel) => {
     sendMailAsync(await emailsForRoles(["Purchaser"]), `${po.po_no}: ${stageLabel}`,
