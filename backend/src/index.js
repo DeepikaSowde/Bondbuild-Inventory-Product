@@ -77,6 +77,7 @@ app.use("/api/projects", projectsRoutes);
 app.use("/api", require("./routes/poReference"));
 app.use("/api/purchase-requests", require("./routes/purchaseRequests"));
 app.use("/api/purchase-requests", require("./routes/prAttachments"));
+app.use("/api/purchase-requests", require("./routes/prItemAttachments"));
 app.use("/api/purchase-orders", require("./routes/purchaseOrders"));
 app.use("/api/purchase-orders", require("./routes/poReceivePhotos"));
 app.use("/api/pr-po-permissions", require("./routes/prPoPermissions"));

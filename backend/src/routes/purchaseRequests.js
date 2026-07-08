@@ -4,6 +4,8 @@
 // generate POs (one per supplier, buy qty only).
 // Uses your existing db (../config/db) + auth (protect, roles) + withTransaction helper.
 const express = require("express");
+const fs = require("fs");
+const crypto = require("crypto");
 const db = require("../config/db");
 const { protect, roles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
@@ -11,6 +13,7 @@ const { canDo, isAllowed } = require("../utils/canDo");
 const { Email } = require("../utils/notifyEmail");
 const { notifyInApp, mailAudiences, events } = require("../utils/notifyEvent");
 const { buildPrEditDiff, redactDetails } = require("../utils/auditTrail");
+const { checkItemOneDriveUrls, validateOneDriveUrl } = require("../utils/oneDriveUrl");
 
 const router = express.Router();
 router.use(protect);
@@ -30,6 +33,23 @@ const checkDescLength = (items) => {
   return over
     ? `Description exceeds the ${DESC_MAX}-character limit (${over.description.trim().length} chars)`
     : null;
+};
+
+// Per-item attachments hang off item_uid, so every item needs one. New PRs get theirs
+// from the browser; legacy payloads and API callers that omit it get one here. Rows
+// sharing a line_no are one logical item and must share a uid — hence the per-line map.
+// A caller with no line_no at all gets a uid per row (key on the index), rather than
+// every row collapsing onto one shared key.
+const UID_MAX = 64;
+const usableUid = (u) => typeof u === "string" && u.length > 0 && u.length <= UID_MAX;
+const withItemUids = (items) => {
+  const byLine = new Map();
+  return items.map((it, idx) => {
+    if (usableUid(it.item_uid)) return it;
+    const key = it.line_no != null ? `l${it.line_no}` : `i${idx}`;
+    if (!byLine.has(key)) byLine.set(key, crypto.randomUUID());
+    return { ...it, item_uid: byLine.get(key) };
+  });
 };
 
 async function getPR(prNo, client = db) {
@@ -52,7 +72,16 @@ async function getPR(prNo, client = db) {
     );
     attachments = att.rows;
   } catch { /* attachments table optional */ }
-  return { ...rows[0], items: items.rows, attachments };
+  // per-item files, keyed by item_uid so the client can hang them off each visual item
+  let itemAttachments = [];
+  try {
+    const iatt = await client.query(
+      `SELECT id, pr_id, item_uid, original_name, mime_type, size_bytes, uploaded_by, created_at
+       FROM pr_item_attachments WHERE pr_id = $1 ORDER BY item_uid, id`, [rows[0].id]
+    );
+    itemAttachments = iatt.rows;
+  } catch { /* table arrives with migrations/2026-07-09_pr_item_attachments.sql */ }
+  return { ...rows[0], items: items.rows, attachments, item_attachments: itemAttachments };
 }
 
 // Everything raised here is a lifecycle message → the 📬 Inbox, never the 🔔 Alerts
@@ -111,10 +140,12 @@ router.get("/:prNo", async (req, res) => {
 router.post("/", canDo("raise_pr"), async (req, res) => {
   const f = req.body || {};
   if (!f.job_no || !f.requested_by) return fail(res, 400, "Job No and Requested By are required");
-  const items = (f.items || []).filter((it) => it.description?.trim());
+  const items = withItemUids((f.items || []).filter((it) => it.description?.trim()));
   if (!items.length) return fail(res, 400, "At least one item with a description is required");
   const descErr = checkDescLength(items);
   if (descErr) return fail(res, 400, descErr);
+  const urlErr = checkItemOneDriveUrls(items);
+  if (urlErr) return fail(res, 400, urlErr);
   let audience;   // built inside the txn, mailed once it commits
   try {
     const prNo = await withTransaction(async (c) => {
@@ -140,13 +171,14 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
           `INSERT INTO pr_items
            (pr_id, line_no, profile_code, description, colour, qty, unit, remarks,
             stock_qty, inventory_id, stock_location, stock_status, buy_qty,
-            supplier_id, supplier_name, supplier_type, unit_price)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+            supplier_id, supplier_name, supplier_type, unit_price, item_uid, onedrive_url)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
           [prId, lineNo, it.profile_code, it.description.trim(), it.colour,
            Number(it.qty) || 0, it.unit || "pcs", it.remarks, stockQty,
            it.inventory_id || null, it.stock_location,
            stockQty > 0 ? "AWAITING_PURCHASER" : "NONE", Number(it.buy_qty) || 0,
-           it.supplier_id || null, it.supplier_name || null, it.supplier_type || "Local", Number(it.unit_price) || 0]
+           it.supplier_id || null, it.supplier_name || null, it.supplier_type || "Local", Number(it.unit_price) || 0,
+           it.item_uid, validateOneDriveUrl(it.onedrive_url).value]
         );
       }
       // Audit the AUTHENTICATED user, not the free-text "Requested By" field —
@@ -180,12 +212,18 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
     if (!["PENDING", "SEND_BACK"].includes(pr.status))
       return fail(res, 409, `PR is ${pr.status} and can no longer be edited`);
     const f = req.body || {};
-    const items = (f.items || []).filter((it) => it.description?.trim());
+    const items = withItemUids((f.items || []).filter((it) => it.description?.trim()));
     if (!items.length) return fail(res, 400, "At least one item is required");
     const descErr = checkDescLength(items);
     if (descErr) return fail(res, 400, descErr);
+    const urlErr = checkItemOneDriveUrls(items);
+    if (urlErr) return fail(res, 400, urlErr);
     // Snapshot the before→after diff while `pr` still holds the pre-edit state.
     const editDetails = buildPrEditDiff(pr, { ...f, items });
+    // Files whose item was dropped from the PR during this edit. Collected inside the
+    // transaction, unlinked from disk only once it commits — a rolled-back edit must
+    // not take the attachments with it.
+    let strandedFiles = [];
     await withTransaction(async (c) => {
       await c.query(
         `UPDATE purchase_requests SET job_no=$2, project_name=$3, location=$4,
@@ -203,15 +241,29 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
           `INSERT INTO pr_items
            (pr_id, line_no, profile_code, description, colour, qty, unit, remarks,
             stock_qty, inventory_id, stock_location, stock_status, buy_qty,
-            supplier_id, supplier_name, supplier_type, unit_price)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+            supplier_id, supplier_name, supplier_type, unit_price, item_uid, onedrive_url)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
           [pr.id, lineNo, it.profile_code, it.description.trim(), it.colour,
            Number(it.qty) || 0, it.unit || "pcs", it.remarks, stockQty,
            it.inventory_id || null, it.stock_location,
            stockQty > 0 ? "AWAITING_PURCHASER" : "NONE", Number(it.buy_qty) || 0,
-           it.supplier_id || null, it.supplier_name || null, it.supplier_type || "Local", Number(it.unit_price) || 0]
+           it.supplier_id || null, it.supplier_name || null, it.supplier_type || "Local", Number(it.unit_price) || 0,
+           it.item_uid, validateOneDriveUrl(it.onedrive_url).value]
         );
       }
+
+      // Reconcile per-item attachments against the surviving items. pr_items was just
+      // rebuilt from scratch, but pr_item_attachments was not — it keys on item_uid,
+      // which is exactly why the files stayed put. Any item the user removed leaves
+      // rows behind, so drop those (and remember their paths to unlink after commit).
+      const keptUids = items.map((it) => it.item_uid);
+      const orphans = await c.query(
+        `DELETE FROM pr_item_attachments
+         WHERE pr_id = $1 AND NOT (item_uid = ANY($2::text[]))
+         RETURNING file_path`,
+        [pr.id, keptUids]
+      );
+      strandedFiles = orphans.rows.map((r) => r.file_path);
       // Audit the edit itself (what changed), separate from any resubmission.
       if (editDetails) {
         await c.query(
@@ -232,6 +284,8 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
           `${pr.requested_by} resubmitted PR ${pr.pr_no}. Please review.`, "info", pr.pr_no);
       }
     });
+    // Committed — the rows are gone for good, so the files can go too.
+    strandedFiles.forEach((p) => fs.unlink(p, () => {}));
     ok(res, await getPR(pr.pr_no));
   } catch (e) { fail(res, 500, e.message); }
 });

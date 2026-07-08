@@ -56,6 +56,19 @@ export const api = {
   deleteAttachment: (id) => data(axiosClient.delete(`/purchase-requests/attachments/${id}`)),
   attachmentDownloadPath: (id) => `/purchase-requests/attachments/${id}/download`,
 
+  // per-item attachments — keyed on item_uid, not line_no (line numbers get reused
+  // when an item is removed, which would re-home files onto the wrong purchase line)
+  listItemAttachments: (prNo) => data(axiosClient.get(`/purchase-requests/${enc(prNo)}/item-attachments`)),
+  uploadItemAttachments: (prNo, itemUid, fileList) => {
+    const fd = new FormData();
+    Array.from(fileList).forEach((f) => fd.append("files", f));
+    return data(axiosClient.post(`/purchase-requests/${enc(prNo)}/items/${enc(itemUid)}/attachments`, fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }));
+  },
+  deleteItemAttachment: (id) => data(axiosClient.delete(`/purchase-requests/item-attachments/${id}`)),
+  itemAttachmentDownloadPath: (id) => `/purchase-requests/item-attachments/${id}/download`,
+
   // PO receiving photos
   uploadReceivePhotos: (poNo, fileList) => {
     const fd = new FormData();
