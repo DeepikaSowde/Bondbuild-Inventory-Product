@@ -992,7 +992,24 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
   const th = "border-b border-[#E5E7EB] px-2.5 py-2 text-left text-[10px] font-bold uppercase text-[#9CA3AF]";
   const td = "border-b border-[#F3F4F6] px-2.5 py-2";
 
+  // Colour + Remark belong to the item, not to the stock/buy split — so a buy row
+  // that follows a stock row leaves them blank, the same way it blanks the code.
+  const attrCells = (it, blank) => (
+    <>
+      <td className={td}>{blank ? "—" : (it.colour || "—")}</td>
+      <td className={td}>
+        {!blank && it.remarks
+          ? <span className="block max-w-[180px] truncate" title={it.remarks}>{it.remarks}</span>
+          : "—"}
+      </td>
+    </>
+  );
+
+  const cols = ["Code", "Description", "Colour", "Remark", "Total", "Stock", "Stock status", "Buy", "Supplier",
+    ...(canSeePrice ? ["Unit price", "Amount"] : [])];
+
   const meta = [["Status", <Badge status={pr.status} />], ["Job", pr.job_no], ["Project", pr.project_name || "—"],
+    ["Location", pr.location || "—"],
     ["Requested by", pr.requested_by], ["Required", pr.date_required || "—"], ["Date issued", fmtDate(pr.date_issued) || "—"], ["Approved by", pr.approved_by || "—"]];
 
   return (
@@ -1030,7 +1047,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
 
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-[13px]">
-          <thead><tr>{["Code", "Description", "Total", "Stock", "Stock status", "Buy", "Supplier", ...(canSeePrice ? ["Unit price", "Amount"] : [])].map((h, i) => <th key={i} className={th}>{h}</th>)}</tr></thead>
+          <thead><tr>{cols.map((h, i) => <th key={i} className={th}>{h}</th>)}</tr></thead>
           <tbody>
             {items.map((it, i) => {
               const hasStock = Number(it.stock_qty) > 0;
@@ -1042,6 +1059,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                   <tr key={`${it.id}-s`} className="bg-[#F5F3FF]">
                     <td className={`${td} font-mono`}>{it.profile_code || "—"}</td>
                     <td className={td}>{it.description} <span className="text-[10px] text-[#6366F1]">· stock</span></td>
+                    {attrCells(it, false)}
                     <td className={td}>{it.stock_qty}</td>
                     <td className={td}>{it.stock_qty} <span className="text-[11px] text-[#9CA3AF]">@ {it.stock_location}</span></td>
                     <td className={td}>
@@ -1065,6 +1083,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                   <tr key={`${it.id}-b`}>
                     <td className={`${td} font-mono`}>{hasStock ? "—" : (it.profile_code || "—")}</td>
                     <td className={td}>{it.description} <span className="text-[10px] text-[#9CA3AF]">· buy</span></td>
+                    {attrCells(it, hasStock)}
                     <td className={td}>{it.buy_qty}</td>
                     <td className={td}>—</td>
                     <td className={td}>—</td>
@@ -1092,8 +1111,9 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                   <tr key={`${it.id}-n`}>
                     <td className={`${td} font-mono`}>{it.profile_code || "—"}</td>
                     <td className={td}>{it.description}</td>
+                    {attrCells(it, false)}
                     <td className={td}>{it.qty}</td>
-                    <td className={td} colSpan={canSeePrice ? 6 : 4}>—</td>
+                    <td className={td} colSpan={cols.length - 5}>—</td>
                   </tr>
                 );
               }
@@ -1102,8 +1122,8 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
           </tbody>
           {canSeePrice && (
             <tfoot>
-              <tr><td colSpan={8} className="px-2.5 py-2.5 text-right font-bold text-[#6B7280]">Buy total</td><td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{money(total)}</td></tr>
-              <tr><td colSpan={8} className="px-2.5 py-1 text-right text-[12px] text-[#6B7280]">Stock value</td><td className="px-2.5 py-1 text-[12px] font-semibold text-[#6366F1]">{money(stockTotal)}</td></tr>
+              <tr><td colSpan={cols.length - 1} className="px-2.5 py-2.5 text-right font-bold text-[#6B7280]">Buy total</td><td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{money(total)}</td></tr>
+              <tr><td colSpan={cols.length - 1} className="px-2.5 py-1 text-right text-[12px] text-[#6B7280]">Stock value</td><td className="px-2.5 py-1 text-[12px] font-semibold text-[#6366F1]">{money(stockTotal)}</td></tr>
             </tfoot>
           )}
         </table>
