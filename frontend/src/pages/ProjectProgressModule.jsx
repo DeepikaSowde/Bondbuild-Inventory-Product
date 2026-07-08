@@ -16,6 +16,7 @@ import { useState, useMemo, useEffect } from "react";
 import ExcelJS from "exceljs";
 import api from "../services/api";
 import ProjectFormModal from "./ProjectFormModal";
+import { canonicalMonthKey, normalizeMonthMap } from "../lib/monthKeys";
 import {
   ComposedChart,
   Bar,
@@ -1064,19 +1065,13 @@ const MONTHS_2025 = [
   "Nov'25",
   "Dec'25",
 ];
+// Full 12 months of FY2026. This list previously stopped at July'26, which
+// meant a payment in Aug'26 or later had no column to render in — it was
+// invisible everywhere the dashboard keys off a month list. Months with no
+// data contribute 0 and simply render as empty slots.
+// NOTE: "Jun'26" is abbreviated but "July'26"/"Sept'26" are not — the spellings
+// mirror the client's Excel headers. See lib/monthKeys.js.
 const MONTHS_2026 = [
-  "Jan'26",
-  "Feb'26",
-  "Mar'26",
-  "Apr'26",
-  "May'26",
-  "Jun'26",
-  "July'26",
-];
-const ALL_MONTHS = [...MONTHS_2025, ...MONTHS_2026];
-
-// Full 12-month list for FY2026 (data only goes to July'26; Aug-Dec are forecast slots)
-const MONTHS_2026_FULL = [
   "Jan'26",
   "Feb'26",
   "Mar'26",
@@ -1090,6 +1085,7 @@ const MONTHS_2026_FULL = [
   "Nov'26",
   "Dec'26",
 ];
+const ALL_MONTHS = [...MONTHS_2025, ...MONTHS_2026];
 // Map a month key -> {year, monthIndex 0-11} so we can compare against "today"
 const MONTH_ORDER = {
   Jan: 0,
@@ -1615,7 +1611,13 @@ export default function ProjectProgressModule() {
       const response = await api.get("/projects");
       if (response.data.success) {
         const transformed = response.data.data.map((item) => {
-          const achievedMonthly = item.achieved_monthly || {};
+          // Rows written before the month-key spellings were unified may hold
+          // "Jun'25" where the dashboard looks up "June'25". Canonicalise on
+          // read so old and new rows both render.
+          const targetMonthly = normalizeMonthMap(item.target_monthly);
+          const claimedMonthly = normalizeMonthMap(item.claimed_monthly);
+          const receivedMonthly = normalizeMonthMap(item.received_monthly);
+          const achievedMonthly = normalizeMonthMap(item.achieved_monthly);
           // If achieved data exists, site progress = cumulative achieved up to today.
           // Otherwise fall back to the stored site_progress value.
           const hasAchieved = Object.keys(achievedMonthly).length > 0;
@@ -1635,21 +1637,21 @@ export default function ProjectProgressModule() {
             balance: parseFloat(item.balance) || 0,
             downPayment: parseFloat(item.down_payment) || 0,
             riskLevel: item.risk_level || "low",
-            targetMonthly: item.target_monthly || {},
-            claimedMonthly: item.claimed_monthly || {},
-            receivedMonthly: item.received_monthly || {},
+            targetMonthly: targetMonthly,
+            claimedMonthly: claimedMonthly,
+            receivedMonthly: receivedMonthly,
             achievedMonthly: achievedMonthly,
             // raw fields for the edit form:
             project_name: item.project_name,
             contract_sum: item.contract_sum,
             down_payment: item.down_payment,
-            down_payment_month: item.down_payment_month,
+            down_payment_month: canonicalMonthKey(item.down_payment_month),
             site_progress: item.site_progress,
             claim_till_date: item.claim_till_date,
-            target_monthly: item.target_monthly,
-            claimed_monthly: item.claimed_monthly,
-            received_monthly: item.received_monthly,
-            achieved_monthly: item.achieved_monthly,
+            target_monthly: targetMonthly,
+            claimed_monthly: claimedMonthly,
+            received_monthly: receivedMonthly,
+            achieved_monthly: achievedMonthly,
           };
         });
         setRawProjects(transformed);
@@ -1861,7 +1863,7 @@ export default function ProjectProgressModule() {
     const now = new Date();
     const curYear = now.getFullYear();
     const curIdx = now.getMonth(); // 0-11
-    const months = monthlyYear === "2025" ? MONTHS_2025 : MONTHS_2026_FULL;
+    const months = monthlyYear === "2025" ? MONTHS_2025 : MONTHS_2026;
     return months.map((m) => {
       const meta = monthMeta(m);
       const isForecast =
@@ -4589,8 +4591,11 @@ export default function ProjectProgressModule() {
                                           No payments yet
                                         </span>
                                       );
-                                    const W = 10,
-                                      GAP = 4,
+                                    // Sized so all 24 months fit the column
+                                    // without forcing the table to scroll:
+                                    // 24 * 11 = 264px (was 19 * 14 = 266px).
+                                    const W = 8,
+                                      GAP = 3,
                                       H = 30,
                                       colW = W + GAP;
                                     return (

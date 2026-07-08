@@ -96,7 +96,46 @@ const MONTH_IDX = {
 function monthKeyMeta(key) {
   const m = String(key).match(/^([A-Za-z]+)'(\d{2})$/);
   if (!m) return null;
-  return { year: 2000 + parseInt(m[2], 10), idx: MONTH_IDX[m[1]] ?? 0 };
+  // An unrecognised label must NOT fall back to index 0 — that would silently
+  // rewrite an unknown month as January.
+  const idx = MONTH_IDX[m[1]];
+  if (idx === undefined) return null;
+  return { year: 2000 + parseInt(m[2], 10), idx };
+}
+
+// ── Canonical month keys ─────────────────────────────────────
+// The dashboard reads monthly maps by exact string key, and the canonical
+// spellings are irregular AND year-dependent (June'25 but Jun'26). A client
+// sending "Jun'25" would write a key nothing can read back. Canonicalise
+// here, at the persistence boundary, so the stored data is always readable.
+const CANONICAL_LABELS = {
+  2025: ["Jan", "Feb", "Mar", "Apr", "May", "June", "July", "Aug", "Sept", "Oct", "Nov", "Dec"],
+  2026: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "July", "Aug", "Sept", "Oct", "Nov", "Dec"],
+};
+const DEFAULT_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function canonicalMonthKey(key) {
+  const meta = monthKeyMeta(key);
+  if (!meta) return key;
+  const labels = CANONICAL_LABELS[meta.year] || DEFAULT_LABELS;
+  return `${labels[meta.idx]}'${String(meta.year).slice(2)}`;
+}
+
+// Re-key a monthly map to canonical spellings. On a collision the value already
+// under the canonical key wins — these maps hold percentages as well as
+// dollars, so summing two readings of one month would be wrong either way.
+function normalizeMonthMap(obj) {
+  const out = {};
+  const fromCanonical = new Set();
+  for (const [key, value] of Object.entries(obj || {})) {
+    const ck = canonicalMonthKey(key);
+    const wasCanonical = ck === key;
+    if (!(ck in out) || (wasCanonical && !fromCanonical.has(ck))) {
+      out[ck] = value;
+      if (wasCanonical) fromCanonical.add(ck);
+    }
+  }
+  return out;
 }
 // Site progress = sum of achieved % for all months up to and including TODAY's month.
 // Future months are ignored (they haven't happened yet).
@@ -457,10 +496,10 @@ router.post("/", async (req, res) => {
     const downAmt = n(b.down_payment);
     const claimTill = pct(b.claim_till_date);
 
-    const targetMonthly = b.target_monthly || {};
-    const claimedMonthly = b.claimed_monthly || {};
-    const receivedMonthly = b.received_monthly || {};
-    const achievedMonthly = b.achieved_monthly || {};
+    const targetMonthly = normalizeMonthMap(b.target_monthly);
+    const claimedMonthly = normalizeMonthMap(b.claimed_monthly);
+    const receivedMonthly = normalizeMonthMap(b.received_monthly);
+    const achievedMonthly = normalizeMonthMap(b.achieved_monthly);
 
     // Site progress is now AUTO: cumulative achieved % up to today's month.
     const site = computeSiteProgress(achievedMonthly);
@@ -499,7 +538,7 @@ router.post("/", async (req, res) => {
         contractSum,
         totalReceived,
         downAmt,
-        b.down_payment_month || null,
+        canonicalMonthKey(b.down_payment_month) || null,
         site,
         claimTill,
         totalTargetPct,
@@ -546,10 +585,10 @@ router.put("/:id", async (req, res) => {
     const downAmt = n(b.down_payment);
     const claimTill = pct(b.claim_till_date);
 
-    const targetMonthly = b.target_monthly || {};
-    const claimedMonthly = b.claimed_monthly || {};
-    const receivedMonthly = b.received_monthly || {};
-    const achievedMonthly = b.achieved_monthly || {};
+    const targetMonthly = normalizeMonthMap(b.target_monthly);
+    const claimedMonthly = normalizeMonthMap(b.claimed_monthly);
+    const receivedMonthly = normalizeMonthMap(b.received_monthly);
+    const achievedMonthly = normalizeMonthMap(b.achieved_monthly);
 
     // Site progress is now AUTO: cumulative achieved % up to today's month.
     const site = computeSiteProgress(achievedMonthly);
@@ -596,7 +635,7 @@ router.put("/:id", async (req, res) => {
         JSON.stringify(receivedMonthly),
         JSON.stringify(achievedMonthly),
         riskLevel,
-        b.down_payment_month || null,
+        canonicalMonthKey(b.down_payment_month) || null,
         req.params.id,
       ],
     );
