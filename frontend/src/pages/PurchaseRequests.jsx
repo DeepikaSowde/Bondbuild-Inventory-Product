@@ -45,6 +45,29 @@ const stockLabelOf = (s) =>
 const stockSumOf = (it) => (it.allocations || []).reduce((s, a) => s + (Number(a.stock_qty) || 0), 0);
 const buyQtyOf = (it) => Math.max(0, (Number(it.qty) || 0) - stockSumOf(it));
 
+// ── Per-item attachments + OneDrive link ──
+// Attachments key on item_uid, NOT line_no: flattenItems() numbers lines positionally,
+// so deleting item 2 renumbers item 3 into its place and its files would follow the
+// number rather than the material. The uid is minted once and carried through edits.
+const newItemUid = () =>
+  globalThis.crypto?.randomUUID?.() ?? `uid-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const ITEM_FILE_LIMITS = { maxPerItem: 2, maxBytes: 5 * 1024 * 1024, maxPrBytes: 20 * 1024 * 1024 };
+const ITEM_FILE_ACCEPT = ".pdf,.jpg,.jpeg,.png,.webp,.docx,.xlsx";
+
+// Mirrors backend/src/utils/oneDriveUrl.js — the server is the authority; this is
+// only so the user sees the problem before they hit Submit.
+const isOneDriveUrl = (raw) => {
+  const v = (raw || "").trim();
+  if (!v) return true;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "https:") return false;
+    const h = u.hostname.toLowerCase();
+    return h === "onedrive.live.com" || h === "1drv.ms" || h === "sharepoint.com" || h.endsWith(".sharepoint.com");
+  } catch { return false; }
+};
+
 // Visual items -> flat pr_items rows. line_no (1-based item index) groups them.
 function flattenItems(visualItems) {
   const out = [];
@@ -53,6 +76,10 @@ function flattenItems(visualItems) {
     const base = {
       line_no, profile_code: it.profile_code || "", description: it.description.trim(),
       colour: it.colour || "", unit: it.unit || "pcs", remarks: it.remarks || "",
+      // every flat row of one visual item carries the same uid, exactly as it carries
+      // the same line_no — the server reads it off any of them
+      item_uid: it.item_uid || newItemUid(),
+      onedrive_url: (it.onedrive_url || "").trim() || null,
     };
     const allocs = (it.allocations || []).filter((a) => a.inventory_id && Number(a.stock_qty) > 0);
     for (const a of allocs) {
@@ -113,6 +140,10 @@ function groupItemsForEdit(rawItems) {
       supplier_id: buyRow?.supplier_id || "", supplier_name: buyRow?.supplier_name || "",
       supplier_type: (buyRow || base).supplier_type || "Local", unit_price: buyRow?.unit_price || "",
       allocations,
+      // PRs raised before the item_uid migration have none; mint one so the item can
+      // take attachments from here on
+      item_uid: base.item_uid || newItemUid(),
+      onedrive_url: base.onedrive_url || "",
     };
   });
 }
@@ -219,7 +250,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   const blankItem = () => ({
     profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
     remarks: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
-    unit_price: "", allocations: [],
+    unit_price: "", allocations: [], item_uid: newItemUid(), onedrive_url: "",
   });
   const [form, setForm] = useState(() => editPR ? {
     job_no: editPR.job_no, project_name: editPR.project_name || "", location: editPR.location || "",
@@ -233,6 +264,11 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   });
   const [busy, setBusy] = useState(false);
   const [heldFiles, setHeldFiles] = useState([]);      // files picked on the create form, uploaded after save
+  // Per-item files awaiting upload, keyed by item_uid. Same trick as heldFiles: on a
+  // create the PR doesn't exist yet, so they ride along until the save returns a pr_no.
+  const [heldItemFiles, setHeldItemFiles] = useState({});
+  // Already-uploaded per-item files (edit mode) — getPR returns them on the PR.
+  const [itemAttachments, setItemAttachments] = useState(() => editPR?.item_attachments || []);
   const fileInputRef = useRef(null);
   const [stockOpen, setStockOpen] = useState(null);   // which item's stock table is expanded
   const [stockList, setStockList] = useState([]);      // factory stock rows
@@ -253,8 +289,71 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
       return { ...it, [key]: val };
     }),
   }));
-  const removeItem = (i) => setForm((f) => ({ ...f, items: f.items.filter((_, x) => x !== i) }));
+  const removeItem = (i) => {
+    // Drop any files still held for the item being removed. Files already uploaded stay
+    // put; the server reconciles them against the surviving item_uids when the PR saves.
+    const gone = form.items[i]?.item_uid;
+    if (gone) setHeldItemFiles((h) => Object.fromEntries(Object.entries(h).filter(([uid]) => uid !== gone)));
+    setForm((f) => ({ ...f, items: f.items.filter((_, x) => x !== i) }));
+  };
   const addItem = () => setForm((f) => ({ ...f, items: [...f.items, blankItem()] }));
+
+  // ── Per-item attachments ──
+  const savedFilesOf = (uid) => itemAttachments.filter((a) => a.item_uid === uid);
+  const heldFilesOf = (uid) => heldItemFiles[uid] || [];
+  const fileCountOf = (uid) => savedFilesOf(uid).length + heldFilesOf(uid).length;
+
+  const pickItemFiles = (uid, fileList) => {
+    const picked = Array.from(fileList || []);
+    if (!picked.length) return;
+    const room = ITEM_FILE_LIMITS.maxPerItem - fileCountOf(uid);
+    if (picked.length > room) {
+      return notify(
+        room <= 0
+          ? `This item already has ${ITEM_FILE_LIMITS.maxPerItem} files — remove one first`
+          : `Only ${room} more file(s) allowed on this item`,
+        "error"
+      );
+    }
+    const tooBig = picked.find((f) => f.size > ITEM_FILE_LIMITS.maxBytes);
+    if (tooBig) return notify(`"${tooBig.name}" is over the 5 MB limit`, "error");
+
+    // The 20 MB per-PR ceiling is enforced server-side too; check it here so the user
+    // finds out before uploading rather than after.
+    const already = itemAttachments.reduce((s, a) => s + Number(a.size_bytes || 0), 0)
+      + Object.values(heldItemFiles).flat().reduce((s, f) => s + f.size, 0);
+    const incoming = picked.reduce((s, f) => s + f.size, 0);
+    if (already + incoming > ITEM_FILE_LIMITS.maxPrBytes) {
+      return notify("This PR's attachments would exceed the 20 MB total limit", "error");
+    }
+    setHeldItemFiles((h) => ({ ...h, [uid]: [...(h[uid] || []), ...picked] }));
+  };
+
+  const dropHeldFile = (uid, idx) =>
+    setHeldItemFiles((h) => ({ ...h, [uid]: (h[uid] || []).filter((_, x) => x !== idx) }));
+
+  const dropSavedFile = async (att) => {
+    if (!window.confirm(`Remove "${att.original_name}"?`)) return;
+    try {
+      await api.deleteItemAttachment(att.id);
+      setItemAttachments((l) => l.filter((a) => a.id !== att.id));
+      notify("Attachment removed");
+    } catch (e) { notify(apiError(e), "error"); }
+  };
+
+  // Upload everything held, once the PR is known to exist. Reports per-item failures
+  // rather than pretending the save was clean.
+  const uploadHeldItemFiles = async (prNo) => {
+    const entries = Object.entries(heldItemFiles).filter(([, files]) => files.length);
+    if (!entries.length) return { uploaded: 0, failed: [] };
+    let uploaded = 0;
+    const failed = [];
+    for (const [uid, files] of entries) {
+      try { await api.uploadItemAttachments(prNo, uid, files); uploaded += files.length; }
+      catch (e) { failed.push(apiError(e)); }
+    }
+    return { uploaded, failed };
+  };
 
   // ── Stock allocations (one visual item -> many pallets) ──
   // Add a pallet as a new allocation, pre-filled with what it can cover.
@@ -407,18 +506,33 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
     if (over) return notify(`"${over.description.trim()}" pulls ${stockSumOf(over)} from stock but its total qty is only ${Number(over.qty) || 0} — lower a pallet quantity or raise the total`, "error");
     const buyNeedsSupplier = form.items.find((it) => it.description.trim() && buyQtyOf(it) > 0 && !it.supplier_id);
     if (buyNeedsSupplier) return notify(`Select a supplier for "${buyNeedsSupplier.description.trim() || buyNeedsSupplier.profile_code || "the buy item"}" — items with a buy quantity need a supplier`, "error");
+    const badLink = form.items.find((it) => it.description.trim() && !isOneDriveUrl(it.onedrive_url));
+    if (badLink) return notify(`"${badLink.description.trim()}" has a link that isn't an https OneDrive or SharePoint URL`, "error");
     setBusy(true);
     try {
       try { await api.poProject(form.job_no.trim()); }
       catch { await api.addPoProject({ job_no: form.job_no.trim(), project_name: form.project_name || form.job_no, location: form.location }); }
       const payload = { ...form, items: flattenItems(form.items.filter((it) => it.description.trim())) };
-      if (editPR) { await api.updatePR(editPR.pr_no, { ...payload, resubmit: editPR.status === "SEND_BACK" }); notify(`${editPR.pr_no} updated${editPR.status === "SEND_BACK" ? " and resubmitted" : ""}`); }
+      if (editPR) {
+        await api.updatePR(editPR.pr_no, { ...payload, resubmit: editPR.status === "SEND_BACK" });
+        const { failed } = await uploadHeldItemFiles(editPR.pr_no);
+        if (failed.length) notify(`${editPR.pr_no} updated, but ${failed.length} item file(s) failed: ${failed[0]}`, "warning");
+        else notify(`${editPR.pr_no} updated${editPR.status === "SEND_BACK" ? " and resubmitted" : ""}`);
+      }
       else {
         const pr = await api.createPR(payload);
         // upload any files held on the form, now that the PR exists
+        const itemResult = await uploadHeldItemFiles(pr.pr_no);
+        let prFilesOk = true;
         if (heldFiles.length) {
-          try { await api.uploadAttachments(pr.pr_no, heldFiles); notify(`${pr.pr_no} created with ${heldFiles.length} file(s)`); }
-          catch { notify(`${pr.pr_no} created, but files failed to upload — you can add them by opening the PR`, "warning"); }
+          try { await api.uploadAttachments(pr.pr_no, heldFiles); }
+          catch { prFilesOk = false; }
+        }
+        const totalFiles = heldFiles.length + itemResult.uploaded;
+        if (!prFilesOk || itemResult.failed.length) {
+          notify(`${pr.pr_no} created, but some files failed to upload — open the PR to add them`, "warning");
+        } else if (totalFiles) {
+          notify(`${pr.pr_no} created with ${totalFiles} file(s)`);
         } else {
           notify(`${pr.pr_no} created — pending approval`);
         }
@@ -437,10 +551,12 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
       !editPR &&
       (form.job_no || form.project_name || form.location || form.approved_by ||
         form.checked_by || form.pic || form.remarks ||
-        form.items.some((it) => it.profile_code || it.description || it.qty));
-    if (heldFiles.length > 0 || enteredNew) {
-      const msg = heldFiles.length > 0
-        ? `You have ${heldFiles.length} attached file(s) and unsaved details that haven't been submitted yet. Close and discard them?`
+        form.items.some((it) => it.profile_code || it.description || it.qty || it.onedrive_url));
+    const heldItemCount = Object.values(heldItemFiles).reduce((s, l) => s + l.length, 0);
+    const pending = heldFiles.length + heldItemCount;
+    if (pending > 0 || enteredNew) {
+      const msg = pending > 0
+        ? `You have ${pending} attached file(s) and unsaved details that haven't been submitted yet. Close and discard them?`
         : "You have unsaved details that haven't been submitted yet. Close and discard them?";
       if (!window.confirm(msg)) return;
     }
@@ -589,6 +705,62 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
               <div className="px-3 pb-1.5">
                 <label className={lbl}>Remarks ({(it.remarks || "").length}/200)</label>
                 <input className={inp} value={it.remarks || ""} maxLength={200} onChange={(e) => setItem(i, "remarks", e.target.value)} placeholder="e.g. URGENT, Preference (P&M)" />
+              </div>
+
+              {/* OneDrive link — one per item, host-validated server-side */}
+              <div className="px-3 pb-1.5">
+                <label className={lbl}>OneDrive link (optional)</label>
+                <input
+                  className={inp}
+                  value={it.onedrive_url || ""}
+                  onChange={(e) => setItem(i, "onedrive_url", e.target.value)}
+                  placeholder="https://contoso.sharepoint.com/… or https://1drv.ms/…"
+                />
+                {!isOneDriveUrl(it.onedrive_url) && (
+                  <span className="mt-0.5 block text-[10px] font-semibold text-[#DC2626]">
+                    Must be an https OneDrive or SharePoint link
+                  </span>
+                )}
+              </div>
+
+              {/* Per-item attachments — everyone can view and add; only the raiser or an Admin removes */}
+              <div className="px-3 pb-2">
+                <label className={lbl}>
+                  Attachments ({fileCountOf(it.item_uid)}/{ITEM_FILE_LIMITS.maxPerItem}) — PDF, image, Word or Excel · max 5 MB each
+                </label>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {savedFilesOf(it.item_uid).map((a) => (
+                    <span key={a.id} className="inline-flex items-center gap-1 rounded border border-[#E5E7EB] bg-white px-1.5 py-px text-[11px]">
+                      <button
+                        type="button"
+                        className="max-w-[160px] truncate text-[#4F46E5] hover:underline"
+                        title={`Download ${a.original_name}`}
+                        onClick={() => downloadAttachment(api.itemAttachmentDownloadPath(a.id), a.original_name)}
+                      >
+                        {a.original_name}
+                      </button>
+                      <button type="button" className="text-[#9CA3AF] hover:text-[#DC2626]" title="Remove" onClick={() => dropSavedFile(a)}>✕</button>
+                    </span>
+                  ))}
+                  {heldFilesOf(it.item_uid).map((f, x) => (
+                    <span key={`${f.name}-${x}`} className="inline-flex items-center gap-1 rounded border border-dashed border-[#C7D2FE] bg-[#EEF2FF] px-1.5 py-px text-[11px] text-[#4338CA]">
+                      <span className="max-w-[160px] truncate" title={`${f.name} — uploads when the PR is saved`}>{f.name}</span>
+                      <button type="button" className="text-[#9CA3AF] hover:text-[#DC2626]" title="Remove" onClick={() => dropHeldFile(it.item_uid, x)}>✕</button>
+                    </span>
+                  ))}
+                  {fileCountOf(it.item_uid) < ITEM_FILE_LIMITS.maxPerItem && (
+                    <label className="cursor-pointer rounded border border-[#E5E7EB] bg-white px-2 py-px text-[11px] font-semibold text-[#4F46E5] hover:bg-[#F5F3FF]">
+                      + Attach
+                      <input
+                        type="file"
+                        multiple
+                        accept={ITEM_FILE_ACCEPT}
+                        className="hidden"
+                        onChange={(e) => { pickItemFiles(it.item_uid, e.target.files); e.target.value = ""; }}
+                      />
+                    </label>
+                  )}
+                </div>
               </div>
 
               {/* Fulfil-from ledger — pull one material from several pallets; the remainder is a Buy */}
