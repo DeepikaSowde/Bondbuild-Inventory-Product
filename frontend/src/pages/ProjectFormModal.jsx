@@ -488,13 +488,9 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       setError(`"${form.down_payment_month}" is the down payment month — the $${Math.round(downPayment).toLocaleString()} down payment is already tracked separately. Remove the Received $ amount for ${form.down_payment_month} to avoid double-counting.`);
       return;
     }
-    const monthsClaimedWithoutTarget = Object.keys(claimed).filter(
-      (m) => num(claimed[m]) > 0 && !(num(target[m]) > 0)
-    );
-    if (monthsClaimedWithoutTarget.length > 0) {
-      setError(`Claimed % requires Target % to be set first for: ${monthsClaimedWithoutTarget.slice(0, 3).join(", ")}${monthsClaimedWithoutTarget.length > 3 ? "…" : ""}`);
-      return;
-    }
+    // NOTE: Claimed % does not require a Target % in the same month. Billing can
+    // slip past the planned months (e.g. work targeted for Sep is claimed in Oct),
+    // so Claimed is entered freely like Achieved %.
     // NOTE: Cumulative Claimed running ahead of cumulative Target / Achieved
     // (and of Site Progress) are now non-blocking warnings shown via
     // `claimWarnings` in the form body — they no longer prevent saving.
@@ -919,9 +915,7 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                     style={{
                       ...inp,
                       padding: "5px 8px",
-                      ...(!(num(target[m]) > 0)
-                        ? { opacity: 0.35, cursor: "not-allowed", background: "#0c0e16" }
-                        : cumulativeCheck[m]?.exceedsTarget || cumulativeCheck[m]?.exceedsAchieved
+                      ...(cumulativeCheck[m]?.exceedsTarget || cumulativeCheck[m]?.exceedsAchieved
                         ? { borderColor: C.amber } // soft warning, not a blocker
                         : {}),
                       ...(mErr.claimed ? { borderColor: C.red } : {}),
@@ -930,11 +924,8 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
                     min="0"
                     max="100"
                     placeholder="—"
-                    disabled={!(num(target[m]) > 0)}
                     title={
-                      !(num(target[m]) > 0)
-                        ? "Set Target % first"
-                        : cumulativeCheck[m]?.exceedsTarget
+                      cumulativeCheck[m]?.exceedsTarget
                         ? `Cumulative Claimed (${cumulativeCheck[m].cumClaimed.toFixed(1)}%) exceeds Cumulative Target (${cumulativeCheck[m].cumTarget.toFixed(1)}%) at this month`
                         : cumulativeCheck[m]?.exceedsAchieved
                         ? `Cumulative Claimed (${cumulativeCheck[m].cumClaimed.toFixed(1)}%) exceeds Cumulative Achieved (${cumulativeCheck[m].cumAchieved.toFixed(1)}%) at this month`
