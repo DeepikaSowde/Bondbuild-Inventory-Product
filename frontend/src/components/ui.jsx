@@ -80,7 +80,7 @@ export function Modal({ title, onClose, children, wide, noBackdropClose }) {
     <div
       className="fixed inset-0 z-[100] grid place-items-center p-6 bg-[#0F0E1A]/45"
     >
-      <div className={`flex max-h-[90vh] w-full flex-col rounded-2xl bg-white shadow-[0_20px_60px_rgba(0,0,0,0.25)] ${wide ? "max-w-[940px]" : "max-w-[540px]"}`}>
+      <div className={`flex max-h-[90vh] w-full flex-col rounded-2xl bg-white shadow-[0_20px_60px_rgba(0,0,0,0.25)] ${wide ? "max-w-[min(1160px,96vw)]" : "max-w-[540px]"}`}>
         <div className="flex items-center justify-between border-b border-[#E5E7EB] px-6 py-[18px]">
           <h2 className="m-0 text-lg font-extrabold text-[#1E1B4B]">{title}</h2>
           <button onClick={onClose} aria-label="Close" className="border-none bg-transparent text-lg text-[#9CA3AF] cursor-pointer">✕</button>

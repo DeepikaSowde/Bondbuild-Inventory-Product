@@ -593,9 +593,9 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
         </Field>
         <Field label="Project name"><Input value={form.project_name} maxLength={200} onChange={(e) => setForm({ ...form, project_name: e.target.value })} placeholder="12 Harlyn Road" /></Field>
         <Field label="Location / scope"><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
-        <Field label="Date required">
+        <Field label="Date required" className="sm:col-span-2">
           <div className="flex items-center gap-2">
-            <div className="min-w-0 flex-1"><Input value={form.date_required} onChange={(e) => setForm({ ...form, date_required: e.target.value })} placeholder="ASAP, 01/04/2026" /></div>
+            <div className="min-w-[5rem] flex-1"><Input value={form.date_required} onChange={(e) => setForm({ ...form, date_required: e.target.value })} placeholder="ASAP, 01/04/2026" /></div>
             <Input type="date" className="!w-[9.5rem] flex-none" title="Pick a date" onChange={(e) => setForm({ ...form, date_required: fmtDateReq(e.target.value) })} />
           </div>
         </Field>
@@ -1007,7 +1007,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
       <td className={td}>{blank ? "—" : (it.colour || "—")}</td>
       <td className={td}>
         {!blank && it.remarks
-          ? <span className="block max-w-[180px] truncate" title={it.remarks}>{it.remarks}</span>
+          ? <span className="block max-w-[220px] whitespace-normal break-words" title={it.remarks}>{it.remarks}</span>
           : "—"}
       </td>
     </>
@@ -1105,7 +1105,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                       ) : (it.supplier_name || "—")}
                     </td>
                     {canSeePrice && (
-                      <td className={`${td} w-[110px]`}>
+                      <td className={`${td} w-[140px] min-w-[140px]`}>
                         {assignMode ? <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} className={Number(it.unit_price) > 0 ? "" : "!border-[#DC2626]"} placeholder="0.00" /> : money(it.unit_price)}
                       </td>
                     )}
