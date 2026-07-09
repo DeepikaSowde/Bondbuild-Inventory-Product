@@ -1007,7 +1007,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
       <td className={td}>{blank ? "—" : (it.colour || "—")}</td>
       <td className={td}>
         {!blank && it.remarks
-          ? <span className="block max-w-[220px] whitespace-normal break-words" title={it.remarks}>{it.remarks}</span>
+          ? <span className="block max-w-[248px] whitespace-normal break-words" title={it.remarks}>{it.remarks}</span>
           : "—"}
       </td>
     </>
@@ -1105,7 +1105,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                       ) : (it.supplier_name || "—")}
                     </td>
                     {canSeePrice && (
-                      <td className={`${td} w-[140px] min-w-[140px]`}>
+                      <td className={`${td} w-[112px] min-w-[112px]`}>
                         {assignMode ? <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} className={Number(it.unit_price) > 0 ? "" : "!border-[#DC2626]"} placeholder="0.00" /> : money(it.unit_price)}
                       </td>
                     )}
