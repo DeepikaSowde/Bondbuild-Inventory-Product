@@ -87,3 +87,52 @@ export function sortMonthKeys(keys) {
     return ma.year !== mb.year ? ma.year - mb.year : ma.idx - mb.idx;
   });
 }
+
+/** Strip the year suffix for axis labels: "June'25" -> "June". */
+export function stripYear(key) {
+  return String(key).replace(/'\d{2}$/, "");
+}
+
+/** The 12 canonical month keys for a year, Jan..Dec. */
+export function monthsForYear(year) {
+  const labels = CANONICAL_LABELS[year] || DEFAULT_LABELS;
+  return labels.map((l) => `${l}'${String(year).slice(2)}`);
+}
+
+/** Every distinct year present as a key across the given month maps, ascending. */
+export function yearsInMonthMaps(maps) {
+  const years = new Set();
+  (maps || []).forEach((map) => {
+    Object.keys(map || {}).forEach((key) => {
+      const meta = monthMeta(key);
+      if (meta) years.add(meta.year);
+    });
+  });
+  return [...years].sort((a, b) => a - b);
+}
+
+/**
+ * Fill gaps so the year axis stays contiguous: [2025, 2027] -> [2025, 2026, 2027].
+ * Without this a chart would draw Dec'25 flush against Jan'27.
+ */
+export function yearRange(years) {
+  if (!years.length) return [];
+  const min = Math.min(...years);
+  const max = Math.max(...years);
+  return Array.from({ length: max - min + 1 }, (_, i) => min + i);
+}
+
+/**
+ * The month axis every month-keyed chart should iterate, derived from the data.
+ *
+ * Replaces the old hardcoded 2025+2026 lists: a payment in any other year had
+ * no column to render into and was silently invisible — the same class of bug
+ * as the mismatched spellings above, just keyed on the year instead of the
+ * month. Falls back to the current year so an empty dashboard still renders a
+ * sane 12-month axis.
+ */
+export function monthGridForMaps(maps) {
+  const present = yearRange(yearsInMonthMaps(maps));
+  const years = present.length ? present : [new Date().getFullYear()];
+  return { years, months: years.flatMap(monthsForYear) };
+}
