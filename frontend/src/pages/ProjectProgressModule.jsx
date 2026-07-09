@@ -17,6 +17,14 @@ import ExcelJS from "exceljs";
 import api from "../services/api";
 import ProjectFormModal from "./ProjectFormModal";
 import {
+  canonicalMonthKey,
+  monthGridForMaps,
+  monthMeta,
+  monthsForYear,
+  normalizeMonthMap,
+  stripYear,
+} from "../lib/monthKeys";
+import {
   ComposedChart,
   Bar,
   Line,
@@ -1050,75 +1058,18 @@ const FALLBACK_PROJECTS = [
 ];
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
-const MONTHS_2025 = [
-  "Jan'25",
-  "Feb'25",
-  "Mar'25",
-  "Apr'25",
-  "May'25",
-  "June'25",
-  "July'25",
-  "Aug'25",
-  "Sept'25",
-  "Oct'25",
-  "Nov'25",
-  "Dec'25",
-];
-const MONTHS_2026 = [
-  "Jan'26",
-  "Feb'26",
-  "Mar'26",
-  "Apr'26",
-  "May'26",
-  "Jun'26",
-  "July'26",
-];
-const ALL_MONTHS = [...MONTHS_2025, ...MONTHS_2026];
-
-// Full 12-month list for FY2026 (data only goes to July'26; Aug-Dec are forecast slots)
-const MONTHS_2026_FULL = [
-  "Jan'26",
-  "Feb'26",
-  "Mar'26",
-  "Apr'26",
-  "May'26",
-  "Jun'26",
-  "July'26",
-  "Aug'26",
-  "Sept'26",
-  "Oct'26",
-  "Nov'26",
-  "Dec'26",
-];
-// Map a month key -> {year, monthIndex 0-11} so we can compare against "today"
-const MONTH_ORDER = {
-  Jan: 0,
-  Feb: 1,
-  Mar: 2,
-  Apr: 3,
-  May: 4,
-  Jun: 5,
-  June: 5,
-  Jul: 6,
-  July: 6,
-  Aug: 7,
-  Sep: 8,
-  Sept: 8,
-  Oct: 9,
-  Nov: 10,
-  Dec: 11,
-};
-function monthMeta(key) {
-  // key like "July'26" -> name "July", yr 2026
-  const m = key.match(/^([A-Za-z]+)'(\d{2})$/);
-  if (!m) return { year: 2025, idx: 0 };
-  return { year: 2000 + parseInt(m[2], 10), idx: MONTH_ORDER[m[1]] ?? 0 };
-}
+// The month axis is DERIVED FROM THE DATA (see monthGridForMaps), not hardcoded.
+// It used to be a fixed 2025+2026 pair of lists, so a payment in any other year
+// — e.g. Jul'27 — had no column to render into and vanished from every chart,
+// the month filter and the Excel export, while still counting toward the totals.
 
 // Is a month key in the past or current (relative to today)?
+// An unparseable key is treated as not-yet-happened rather than silently
+// coerced to Jan of some default year.
 function isPastOrCurrentMonth(key) {
   const now = new Date();
   const meta = monthMeta(key);
+  if (!meta) return false;
   return (
     meta.year < now.getFullYear() ||
     (meta.year === now.getFullYear() && meta.idx <= now.getMonth())
@@ -1144,7 +1095,10 @@ function cumulativeAchieved(achievedMonthly) {
 function buildShortfallRows(targetMonthly, achievedMonthly) {
   const rows = [];
   let carry = 0; // shortfall carried from previous month
-  ALL_MONTHS.forEach((month) => {
+  // Walk the full month grid spanning this project's own data, so the carry
+  // rolls through months that have no target and no achieved value.
+  const { months } = monthGridForMaps([targetMonthly, achievedMonthly]);
+  months.forEach((month) => {
     const t = parseFloat(targetMonthly?.[month]);
     const a = parseFloat(achievedMonthly?.[month]);
     const hasTarget = !isNaN(t);
@@ -1192,6 +1146,14 @@ const C = {
   },
 };
 
+// One per FY card, cycled — the number of years comes from the data.
+const YEAR_CARD_COLORS = [
+  { hdr: "#1d4ed8", accent: "#60a5fa" },
+  { hdr: "#0f766e", accent: "#2dd4bf" },
+  { hdr: "#6d28d9", accent: "#c084fc" },
+  { hdr: "#a16207", accent: "#fbbf24" },
+];
+
 // ─── FORMULA ENGINE ──────────────────────────────────────────────────────────
 const computeBalance = (p) => p.contractSum - p.totalReceived;
 const computeClaimTillDate = (p) =>
@@ -1215,9 +1177,8 @@ function computeRisk(p) {
 
 function computeYearSummary(projects, year, monthsOverride) {
   // monthsOverride lets callers pass an explicit month list (used by the
-  // dynamic multi-year comparison); otherwise fall back to the fixed lists.
-  const months =
-    monthsOverride || (year === "2025" ? MONTHS_2025 : MONTHS_2026);
+  // dynamic multi-year comparison); otherwise use the year's canonical months.
+  const months = monthsOverride || monthsForYear(Number(year));
   const active = projects.filter((p) =>
     months.some(
       (m) => (p.receivedMonthly[m] || 0) > 0 || (p.targetMonthly[m] || 0) > 0,
@@ -1360,9 +1321,10 @@ const Sel = ({ value, onChange, options }) => (
     />
   </div>
 );
-const YearTabs = ({ value, onChange }) => (
-  <div style={{ display: "flex", gap: 4 }}>
-    {["2025", "2026"].map((y) => (
+// `years` comes from the data, so a 2027 project adds a FY2027 tab on its own.
+const YearTabs = ({ value, onChange, years }) => (
+  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+    {years.map((y) => (
       <button
         key={y}
         onClick={() => onChange(y)}
@@ -1465,43 +1427,6 @@ function CollectionGauge({ pct }) {
         Received Rate
       </div>
     </div>
-  );
-}
-
-// ─── ADDITION 7: Mini Sparkline (inline SVG bars) ───────────────────────────
-function Sparkline({ project }) {
-  const months = ALL_MONTHS;
-  const vals = months
-    .map((m) => project.receivedMonthly[m] || 0)
-    .filter((v) => v > 0);
-  if (!vals.length)
-    return <span style={{ color: C.textDim, fontSize: 11 }}>—</span>;
-  const allVals = months.map((m) => project.receivedMonthly[m] || 0);
-  const maxV = Math.max(...allVals, 1);
-  const w = 6,
-    gap = 2,
-    h = 20;
-  return (
-    <svg
-      width={months.length * (w + gap)}
-      height={h}
-      style={{ display: "block" }}
-    >
-      {allVals.map((v, i) => {
-        const barH = Math.max(2, (v / maxV) * h);
-        return (
-          <rect
-            key={i}
-            x={i * (w + gap)}
-            y={h - barH}
-            width={w}
-            height={barH}
-            rx={1}
-            fill={v > 0 ? C.teal : C.border}
-          />
-        );
-      })}
-    </svg>
   );
 }
 
@@ -1615,7 +1540,13 @@ export default function ProjectProgressModule() {
       const response = await api.get("/projects");
       if (response.data.success) {
         const transformed = response.data.data.map((item) => {
-          const achievedMonthly = item.achieved_monthly || {};
+          // Rows written before the month-key spellings were unified may hold
+          // "Jun'25" where the dashboard looks up "June'25". Canonicalise on
+          // read so old and new rows both render.
+          const targetMonthly = normalizeMonthMap(item.target_monthly);
+          const claimedMonthly = normalizeMonthMap(item.claimed_monthly);
+          const receivedMonthly = normalizeMonthMap(item.received_monthly);
+          const achievedMonthly = normalizeMonthMap(item.achieved_monthly);
           // If achieved data exists, site progress = cumulative achieved up to today.
           // Otherwise fall back to the stored site_progress value.
           const hasAchieved = Object.keys(achievedMonthly).length > 0;
@@ -1635,21 +1566,21 @@ export default function ProjectProgressModule() {
             balance: parseFloat(item.balance) || 0,
             downPayment: parseFloat(item.down_payment) || 0,
             riskLevel: item.risk_level || "low",
-            targetMonthly: item.target_monthly || {},
-            claimedMonthly: item.claimed_monthly || {},
-            receivedMonthly: item.received_monthly || {},
+            targetMonthly: targetMonthly,
+            claimedMonthly: claimedMonthly,
+            receivedMonthly: receivedMonthly,
             achievedMonthly: achievedMonthly,
             // raw fields for the edit form:
             project_name: item.project_name,
             contract_sum: item.contract_sum,
             down_payment: item.down_payment,
-            down_payment_month: item.down_payment_month,
+            down_payment_month: canonicalMonthKey(item.down_payment_month),
             site_progress: item.site_progress,
             claim_till_date: item.claim_till_date,
-            target_monthly: item.target_monthly,
-            claimed_monthly: item.claimed_monthly,
-            received_monthly: item.received_monthly,
-            achieved_monthly: item.achieved_monthly,
+            target_monthly: targetMonthly,
+            claimed_monthly: claimedMonthly,
+            received_monthly: receivedMonthly,
+            achieved_monthly: achievedMonthly,
           };
         });
         setRawProjects(transformed);
@@ -1674,15 +1605,39 @@ export default function ProjectProgressModule() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [projectFilter, setProjectFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
-  const [chartYear, setChartYear] = useState("2025");
-  const [velocityYear, setVelocityYear] = useState("2025");
+  // null = "follow the data" — resolved against YEAR_OPTS below.
+  const [chartYear, setChartYear] = useState(null);
+  const [velocityYear, setVelocityYear] = useState(null);
   const [top5View, setTop5View] = useState("pending"); // pending | collected
   const [showAllTop5, setShowAllTop5] = useState(false);
-  const [monthlyYear, setMonthlyYear] = useState("2025");
+  const [monthlyYear, setMonthlyYear] = useState(null);
   const [sortCol, setSortCol] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
   const [activeTab, setActiveTab] = useState("overview");
   const [exporting, setExporting] = useState(false);
+
+  // ── Month axis, derived from the data ──
+  // Every chart, the month filter and the Excel export iterate ALL_MONTHS.
+  // Deriving it means a payment in a year nobody hardcoded still gets a column.
+  const { years: YEARS, months: ALL_MONTHS } = useMemo(
+    () =>
+      monthGridForMaps(
+        RAW_PROJECTS.flatMap((p) => [
+          p.targetMonthly,
+          p.claimedMonthly,
+          p.receivedMonthly,
+          p.achievedMonthly,
+        ]),
+      ),
+    [RAW_PROJECTS],
+  );
+  const YEAR_OPTS = useMemo(() => YEARS.map(String), [YEARS]);
+  // A year selector may hold a year that no longer exists after a filter or a
+  // reload; fall back to the first year present rather than charting nothing.
+  const resolveYear = (y) => (YEAR_OPTS.includes(y) ? y : YEAR_OPTS[0]);
+  const chartYr = resolveYear(chartYear);
+  const velocityYr = resolveYear(velocityYear);
+  const monthlyYr = resolveYear(monthlyYear);
 
   // ── Filtered set ──
   const filtered = useMemo(
@@ -1740,7 +1695,7 @@ export default function ProjectProgressModule() {
 
   // ── ADDITION 3: Monthly stacked bar (Target $ / Received $ / Pending $) ──
   const stackedBarData = useMemo(() => {
-    const months = chartYear === "2025" ? MONTHS_2025 : MONTHS_2026;
+    const months = monthsForYear(Number(chartYr));
     return months.map((m) => {
       const targetAmt = filtered.reduce(
         (s, p) => s + p.contractSum * (p.targetMonthly[m] || 0),
@@ -1752,25 +1707,25 @@ export default function ProjectProgressModule() {
       );
       const pendingAmt = Math.max(0, targetAmt - receivedAmt);
       return {
-        month: m.replace("'25", "").replace("'26", ""),
+        month: stripYear(m),
         "Target $": Math.round(targetAmt),
         "Received $": Math.round(receivedAmt),
         "Pending $": Math.round(pendingAmt),
       };
     });
-  }, [filtered, chartYear]);
+  }, [filtered, chartYr]);
 
-  // ── Revenue Velocity: selected year's months (Jan..Dec for 2025, Jan..Jul for 2026) ──
+  // ── Revenue Velocity: the selected year's 12 months ──
   const velocityData = useMemo(() => {
-    const months = velocityYear === "2025" ? MONTHS_2025 : MONTHS_2026;
+    const months = monthsForYear(Number(velocityYr));
     return months.map((m) => ({
-      month: m.replace("'25", "").replace("'26", ""),
+      month: stripYear(m),
       fullMonth: m,
       "Received $": Math.round(
         filtered.reduce((s, p) => s + (p.receivedMonthly[m] || 0), 0),
       ),
     }));
-  }, [filtered, velocityYear]);
+  }, [filtered, velocityYr]);
 
   // Total received for the selected velocity year (drives the big number)
   const velocityYearTotal = useMemo(
@@ -1780,17 +1735,17 @@ export default function ProjectProgressModule() {
 
   // ── ADDITION 4: Cumulative received ──
   const cumulativeData = useMemo(() => {
-    const months = chartYear === "2025" ? MONTHS_2025 : MONTHS_2026;
+    const months = monthsForYear(Number(chartYr));
     let running = 0;
     return months.map((m) => {
       const amt = filtered.reduce((s, p) => s + (p.receivedMonthly[m] || 0), 0);
       running += amt;
       return {
-        month: m.replace("'25", "").replace("'26", ""),
+        month: stripYear(m),
         "Cumulative $": Math.round(running),
       };
     });
-  }, [filtered, chartYear]);
+  }, [filtered, chartYr]);
 
   // ── ADDITION 5: Scatter plot data ──
   const scatterData = useMemo(() => {
@@ -1841,9 +1796,9 @@ export default function ProjectProgressModule() {
       // Achievement = actual work progress vs planned work progress (not money).
       const achievementRate = targetWork > 0 ? achievedWork / targetWork : 0;
       return {
-        month: m.replace("'25", "").replace("'26", ""),
+        month: stripYear(m),
         fullMonth: m,
-        year: m.includes("'25") ? "2025" : "2026",
+        year: String(monthMeta(m)?.year ?? ""),
         "Target $": Math.round(targetAmt),
         "Claimed $": Math.round(claimedAmt),
         "Received $": Math.round(receivedAmt),
@@ -1852,7 +1807,7 @@ export default function ProjectProgressModule() {
         projectCount,
       };
     }).filter((d) => d["Target $"] > 0 || d["Received $"] > 0);
-  }, [filtered]);
+  }, [filtered, ALL_MONTHS]);
 
   // ── Year-aware monthly data with past/forecast split ──
   // Past/current months → Claimed $ + Received $ (actuals).
@@ -1861,11 +1816,12 @@ export default function ProjectProgressModule() {
     const now = new Date();
     const curYear = now.getFullYear();
     const curIdx = now.getMonth(); // 0-11
-    const months = monthlyYear === "2025" ? MONTHS_2025 : MONTHS_2026_FULL;
+    const months = monthsForYear(Number(monthlyYr));
     return months.map((m) => {
       const meta = monthMeta(m);
       const isForecast =
-        meta.year > curYear || (meta.year === curYear && meta.idx > curIdx);
+        !!meta &&
+        (meta.year > curYear || (meta.year === curYear && meta.idx > curIdx));
       let targetAmt = 0,
         claimedAmt = 0,
         receivedAmt = 0,
@@ -1887,7 +1843,7 @@ export default function ProjectProgressModule() {
       // Contract-weighted average target % for the month (work planned, not money).
       const targetPct = contractBase > 0 ? targetAmt / contractBase : 0;
       return {
-        month: m.replace("'25", "").replace("'26", ""),
+        month: stripYear(m),
         fullMonth: m,
         isForecast,
         // Chart fields (past: claimed+received bars · forecast: target bar):
@@ -1903,11 +1859,11 @@ export default function ProjectProgressModule() {
         projectCount,
       };
     });
-  }, [filtered, monthlyYear]);
+  }, [filtered, monthlyYr]);
 
   // ── Per-project monthly target details (for drill-down table) ──
   const perProjectTargetRows = useMemo(() => {
-    const months = chartYear === "2025" ? MONTHS_2025 : MONTHS_2026;
+    const months = monthsForYear(Number(chartYr));
     const rows = [];
     filtered.forEach((p) => {
       months.forEach((m) => {
@@ -1935,7 +1891,7 @@ export default function ProjectProgressModule() {
       });
     });
     return rows.sort((a, b) => b.gap - a.gap); // sort by biggest gap first
-  }, [filtered, chartYear]);
+  }, [filtered, chartYr]);
 
   // ── Monthly target summary for overview KPI ──
   const targetSummary = useMemo(() => {
@@ -2023,14 +1979,14 @@ export default function ProjectProgressModule() {
     return rows.sort((a, b) => b.pending - a.pending);
   }, [filtered, top5View]);
 
-  // ── Year summaries ──
-  const sum2025 = useMemo(
-    () => computeYearSummary(filtered, "2025"),
-    [filtered],
-  );
-  const sum2026 = useMemo(
-    () => computeYearSummary(filtered, "2026"),
-    [filtered],
+  // ── Year summaries: one card per year present in the data ──
+  const yearSummaries = useMemo(
+    () =>
+      YEARS.map((yr) => ({
+        year: String(yr),
+        summary: computeYearSummary(filtered, String(yr)),
+      })),
+    [filtered, YEARS],
   );
 
   // ── Dynamic multi-year comparison (auto-detects every year present in data) ──
@@ -2041,8 +1997,9 @@ export default function ProjectProgressModule() {
       ["receivedMonthly", "targetMonthly", "claimedMonthly", "achievedMonthly"].forEach(
         (f) => {
           Object.keys(p[f] || {}).forEach((k) => {
-            const yr = monthMeta(k).year;
-            (yearMonths[yr] = yearMonths[yr] || new Set()).add(k);
+            const meta = monthMeta(k);
+            if (!meta) return; // unparseable key — don't invent a year for it
+            (yearMonths[meta.year] = yearMonths[meta.year] || new Set()).add(k);
           });
         },
       );
@@ -3116,8 +3073,9 @@ export default function ProjectProgressModule() {
                       }}
                     >
                       <YearTabs
-                        value={velocityYear}
+                        value={velocityYr}
                         onChange={setVelocityYear}
+                        years={YEAR_OPTS}
                       />
                       <div
                         style={{
@@ -3134,7 +3092,7 @@ export default function ProjectProgressModule() {
                             fontWeight: 400,
                           }}
                         >
-                          {velocityYear}
+                          {velocityYr}
                         </span>
                       </div>
                     </div>
@@ -3576,7 +3534,7 @@ export default function ProjectProgressModule() {
                     Dollar amounts per month (stacked)
                   </div>
                 </div>
-                <YearTabs value={chartYear} onChange={setChartYear} />
+                <YearTabs value={chartYr} onChange={setChartYear} years={YEAR_OPTS} />
               </div>
               <div style={{ padding: "16px 20px" }}>
                 <div
@@ -3686,7 +3644,7 @@ export default function ProjectProgressModule() {
                       Running total over time
                     </div>
                   </div>
-                  <YearTabs value={chartYear} onChange={setChartYear} />
+                  <YearTabs value={chartYr} onChange={setChartYear} years={YEAR_OPTS} />
                 </div>
                 <div style={{ padding: "14px 18px" }}>
                   <ResponsiveContainer width="100%" height={220}>
@@ -3765,12 +3723,11 @@ export default function ProjectProgressModule() {
                       Avg target allocation vs normalized received
                     </div>
                   </div>
-                  <YearTabs value={chartYear} onChange={setChartYear} />
+                  <YearTabs value={chartYr} onChange={setChartYear} years={YEAR_OPTS} />
                 </div>
                 <div style={{ padding: "14px 18px" }}>
                   {(() => {
-                    const months =
-                      chartYear === "2025" ? MONTHS_2025 : MONTHS_2026;
+                    const months = monthsForYear(Number(chartYr));
                     const cd = months.map((m) => {
                       let st = 0,
                         ct = 0,
@@ -3783,7 +3740,7 @@ export default function ProjectProgressModule() {
                         sr += p.receivedMonthly[m] || 0;
                       });
                       return {
-                        month: m.replace("'25", "").replace("'26", ""),
+                        month: stripYear(m),
                         fullMonth: m,
                         "Target %":
                           ct > 0 ? parseFloat(((st / ct) * 100).toFixed(1)) : 0,
@@ -4589,10 +4546,21 @@ export default function ProjectProgressModule() {
                                           No payments yet
                                         </span>
                                       );
-                                    const W = 10,
-                                      GAP = 4,
-                                      H = 30,
-                                      colW = W + GAP;
+                                    // The month count now comes from the data,
+                                    // so size the bars to a fixed ~264px budget
+                                    // rather than assuming a 24-month axis —
+                                    // otherwise a third year would widen the
+                                    // column and force the table to scroll.
+                                    const H = 30;
+                                    const colW = Math.max(
+                                      3,
+                                      Math.floor(264 / ALL_MONTHS.length),
+                                    );
+                                    const GAP = colW >= 8 ? 3 : 1;
+                                    const W = Math.max(2, colW - GAP);
+                                    // With a long axis, label only each January
+                                    // so the rotated ticks don't overlap.
+                                    const labelEvery = ALL_MONTHS.length > 24;
                                     return (
                                       <div style={{ display: "inline-block" }}>
                                         <svg
@@ -4611,9 +4579,14 @@ export default function ProjectProgressModule() {
                                             );
                                             const col =
                                               v > 0 ? C.green : C.border;
-                                            const shortM = m
-                                              .replace("'25", "")
-                                              .replace("'26", "");
+                                            const isJan = m.startsWith("Jan'");
+                                            // Show the year on each January so a
+                                            // multi-year axis stays readable.
+                                            const shortM = isJan
+                                              ? m
+                                              : stripYear(m);
+                                            const showLabel =
+                                              !labelEvery || isJan;
                                             return (
                                               <g key={idx}>
                                                 {/* hover target + native tooltip */}
@@ -4637,20 +4610,22 @@ export default function ProjectProgressModule() {
                                                   pointerEvents="none"
                                                 />
                                                 {/* month label (rotated) */}
-                                                <text
-                                                  x={idx * colW + colW / 2}
-                                                  y={H + 8}
-                                                  textAnchor="end"
-                                                  fontSize={8}
-                                                  fill={
-                                                    v > 0
-                                                      ? C.textMuted
-                                                      : C.textDim
-                                                  }
-                                                  transform={`rotate(-60 ${idx * colW + colW / 2} ${H + 8})`}
-                                                >
-                                                  {shortM}
-                                                </text>
+                                                {showLabel && (
+                                                  <text
+                                                    x={idx * colW + colW / 2}
+                                                    y={H + 8}
+                                                    textAnchor="end"
+                                                    fontSize={8}
+                                                    fill={
+                                                      v > 0
+                                                        ? C.textMuted
+                                                        : C.textDim
+                                                    }
+                                                    transform={`rotate(-60 ${idx * colW + colW / 2} ${H + 8})`}
+                                                  >
+                                                    {shortM}
+                                                  </text>
+                                                )}
                                               </g>
                                             );
                                           })}
@@ -4823,7 +4798,7 @@ export default function ProjectProgressModule() {
                       <div
                         style={{ fontSize: 14, fontWeight: 700, color: C.text }}
                       >
-                        FY {monthlyYear} — Monthly Claimed / Received
+                        FY {monthlyYr} — Monthly Claimed / Received
                       </div>
                       <div
                         style={{
@@ -4835,7 +4810,11 @@ export default function ProjectProgressModule() {
                         Claimed $ &amp; Received $ (money) per month
                       </div>
                     </div>
-                    <YearTabs value={monthlyYear} onChange={setMonthlyYear} />
+                    <YearTabs
+                      value={monthlyYr}
+                      onChange={setMonthlyYear}
+                      years={YEAR_OPTS}
+                    />
                   </div>
                   <div style={{ padding: "14px 20px" }}>
                     {/* legend */}
@@ -5016,7 +4995,7 @@ export default function ProjectProgressModule() {
                 {/* ── Monthly summary table (follows year toggle) ── */}
                 <Card>
                   <CardHead
-                    title={`FY ${monthlyYear} — Monthly Summary`}
+                    title={`FY ${monthlyYr} — Monthly Summary`}
                     sub="Target % = planned work progress (contract-weighted) · Balance = Claimed − Received (outstanding to collect)"
                   />
                   <div style={{ overflowX: "auto" }}>
@@ -5373,7 +5352,7 @@ export default function ProjectProgressModule() {
                         Sorted by biggest uncollected gap first
                       </div>
                     </div>
-                    <YearTabs value={chartYear} onChange={setChartYear} />
+                    <YearTabs value={chartYr} onChange={setChartYear} years={YEAR_OPTS} />
                   </div>
                   <div style={{ overflowX: "auto" }}>
                     <table
@@ -5896,20 +5875,10 @@ export default function ProjectProgressModule() {
                     gap: 16,
                   }}
                 >
-                  {[
-                    {
-                      year: "2025",
-                      s: sum2025,
-                      hdr: "#1d4ed8",
-                      accent: "#60a5fa",
-                    },
-                    {
-                      year: "2026",
-                      s: sum2026,
-                      hdr: "#0f766e",
-                      accent: "#2dd4bf",
-                    },
-                  ].map(({ year, s, hdr, accent }) => {
+                  {yearSummaries.map(({ year, summary: s }, yi) => {
+                    const { hdr, accent } = YEAR_CARD_COLORS[
+                      yi % YEAR_CARD_COLORS.length
+                    ];
                     const collRate =
                       s.totalContract > 0
                         ? s.yearReceived / s.totalContract
@@ -6159,7 +6128,7 @@ export default function ProjectProgressModule() {
                     <div style={{ fontSize: 14, fontWeight: 700 }}>
                       Per-project year breakdown
                     </div>
-                    <YearTabs value={chartYear} onChange={setChartYear} />
+                    <YearTabs value={chartYr} onChange={setChartYear} years={YEAR_OPTS} />
                   </div>
                   <div style={{ overflowX: "auto" }}>
                     <table
@@ -6202,8 +6171,7 @@ export default function ProjectProgressModule() {
                       </thead>
                       <tbody>
                         {(() => {
-                          const months =
-                            chartYear === "2025" ? MONTHS_2025 : MONTHS_2026;
+                          const months = monthsForYear(Number(chartYr));
                           const rows = filtered
                             .filter((p) =>
                               months.some(
@@ -6224,7 +6192,7 @@ export default function ProjectProgressModule() {
                                     color: C.textDim,
                                   }}
                                 >
-                                  No activity for FY {chartYear}
+                                  No activity for FY {chartYr}
                                 </td>
                               </tr>
                             );

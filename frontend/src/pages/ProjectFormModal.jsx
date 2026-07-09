@@ -6,24 +6,25 @@
 import { useState, useMemo, useEffect } from "react";
 import api from "../services/api";
 import { X, Plus, Trash2, Save, Loader2 } from "lucide-react";
+import {
+  canonicalMonthKey,
+  makeMonthKey,
+  monthMeta,
+  normalizeMonthMap,
+  sortMonthKeys as sortMonths,
+} from "../lib/monthKeys";
 
-const MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-function makeMonthKey(year, monthIdx) {
-  return `${MONTH_LABELS[monthIdx]}'${String(year).slice(2)}`;
-}
 function currentMonthKey() {
   const n = new Date();
   return makeMonthKey(n.getFullYear(), n.getMonth());
 }
 function nextMonthKey(key) {
-  const m = String(key).match(/^([A-Za-z]+)'(\d{2})$/);
-  if (!m) return makeMonthKey(new Date().getFullYear(), new Date().getMonth() + 1);
-  const yr = 2000 + parseInt(m[2], 10);
-  // normalise label to 0-11 index via MONTH_IDX
-  const idx = MONTH_IDX[m[1]] ?? 0;
-  const nextIdx = (idx + 1) % 12;
-  return makeMonthKey(nextIdx === 0 ? yr + 1 : yr, nextIdx);
+  const meta = monthMeta(key) || (() => {
+    const n = new Date();
+    return { year: n.getFullYear(), idx: n.getMonth() };
+  })();
+  const nextIdx = (meta.idx + 1) % 12;
+  return makeMonthKey(nextIdx === 0 ? meta.year + 1 : meta.year, nextIdx);
 }
 // Dropdown options for Down Payment Month — Jan'25 → Dec'27
 const DROPDOWN_MONTHS = (() => {
@@ -40,37 +41,6 @@ const RISK_LEVELS = [
   { v: "low", l: "Low" },
 ];
 
-// Parse a month key like "July'26" -> { year, idx } for "up to today" comparison
-const MONTH_IDX = {
-  Jan: 0,
-  Feb: 1,
-  Mar: 2,
-  Apr: 3,
-  May: 4,
-  Jun: 5,
-  June: 5,
-  Jul: 6,
-  July: 6,
-  Aug: 7,
-  Sep: 8,
-  Sept: 8,
-  Oct: 9,
-  Nov: 10,
-  Dec: 11,
-};
-function monthMeta(key) {
-  const m = String(key).match(/^([A-Za-z]+)'(\d{2})$/);
-  if (!m) return null;
-  return { year: 2000 + parseInt(m[2], 10), idx: MONTH_IDX[m[1]] ?? 0 };
-}
-// Sort month keys chronologically (e.g. Jul'26 above Aug'26).
-function sortMonths(keys) {
-  return [...keys].sort((a, b) => {
-    const ma = monthMeta(a), mb = monthMeta(b);
-    if (!ma || !mb) return 0;
-    return ma.year !== mb.year ? ma.year - mb.year : ma.idx - mb.idx;
-  });
-}
 // Wide month-year range for the per-row picker so past months can be backfilled.
 const MONTH_PICKER_OPTIONS = (() => {
   const out = [];
@@ -204,8 +174,11 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
         status: project.status || "Upcoming Project",
         contract_sum: project.contract_sum ?? project.contractSum ?? "",
         down_payment: project.down_payment ?? project.downPayment ?? "",
-        down_payment_month:
+        // Canonicalise: a legacy "Sep'25" would match no <option> in
+        // DROPDOWN_MONTHS and the select would silently blank the value.
+        down_payment_month: canonicalMonthKey(
           project.down_payment_month ?? project.downPaymentMonth ?? "",
+        ),
         site_progress:
           (project.site_progress ?? project.siteProgress ?? 0) * 100 || "",
         claim_till_date:
@@ -213,9 +186,11 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
         risk_level: project.risk_level || project.riskLevel || "low",
       });
       // Stored as decimals (0-1) in DB; show as whole percents in the form.
+      // normalizeMonthMap re-spells legacy keys ("Jun'25" -> "June'25") so the
+      // month pickers resolve and the rows round-trip to the dashboard.
       const toPct = (obj) => {
         const out = {};
-        Object.entries(obj || {}).forEach(([m, v]) => {
+        Object.entries(normalizeMonthMap(obj)).forEach(([m, v]) => {
           const x = parseFloat(v);
           if (!isNaN(x)) out[m] = x <= 1 ? Math.round(x * 1000) / 10 : x;
         });
@@ -223,10 +198,10 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
       };
       const tgt = toPct(project.target_monthly || project.targetMonthly);
       const clm = toPct(project.claimed_monthly || project.claimedMonthly);
-      const rcv = project.received_monthly || project.receivedMonthly || {};
-      const rawAchieved = project.achieved_monthly || project.achievedMonthly || {};
+      const rcv = normalizeMonthMap(project.received_monthly || project.receivedMonthly);
+      const rawAchieved = project.achieved_monthly || project.achievedMonthly;
       const achievedPct = {};
-      Object.entries(rawAchieved).forEach(([m, v]) => {
+      Object.entries(normalizeMonthMap(rawAchieved)).forEach(([m, v]) => {
         const x = parseFloat(v);
         if (!isNaN(x)) achievedPct[m] = x <= 1 ? Math.round(x * 1000) / 10 : x;
       });
@@ -507,17 +482,18 @@ export default function ProjectFormModal({ project, onClose, onSaved }) {
     setSaving(true);
     setError(null);
 
-    // Convert % inputs (0-100 in the form) to decimals for the API
+    // Convert % inputs (0-100 in the form) to decimals for the API.
+    // Keys go out canonical so the dashboard's exact-key lookups resolve.
     const toDecimal = (obj) => {
       const out = {};
       Object.entries(obj).forEach(([m, v]) => {
-        if (num(v)) out[m] = num(v) / 100;
+        if (num(v)) out[canonicalMonthKey(m)] = num(v) / 100;
       });
       return out;
     };
     const receivedClean = {};
     Object.entries(received).forEach(([m, v]) => {
-      if (num(v)) receivedClean[m] = num(v);
+      if (num(v)) receivedClean[canonicalMonthKey(m)] = num(v);
     });
 
     const payload = {
