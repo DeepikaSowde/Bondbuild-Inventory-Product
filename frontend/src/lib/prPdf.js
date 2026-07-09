@@ -98,7 +98,7 @@ export async function exportPrPdf(pr) {
   }
 
   // ── Info box ──
-  const boxTop = 72, boxH = 58;
+  const boxTop = 72, boxH = 70;
   const rightX = W - M - 168;
   doc.setDrawColor(0); doc.setLineWidth(1);
   doc.rect(M, boxTop, W - 2 * M, boxH);
@@ -108,27 +108,29 @@ export async function exportPrPdf(pr) {
   doc.setFontSize(10);
   // Left column
   doc.setFont("helvetica", "bold");
-  doc.text("Project Name :", M + 8, boxTop + 20);
-  doc.text("Job No. :", M + 8, boxTop + 42);
+  doc.text("Project Name :", M + 8, boxTop + 26);
+  doc.text("Job No. :", M + 8, boxTop + 50);
   doc.setFont("helvetica", "normal");
-  doc.text(String(pr.project_name || ""), M + 92, boxTop + 20, { maxWidth: 130 });
-  doc.text(String(pr.job_no || ""), M + 92, boxTop + 42, { maxWidth: 130 });
+  doc.text(String(pr.project_name || ""), M + 92, boxTop + 26, { maxWidth: 130 });
+  doc.text(String(pr.job_no || ""), M + 92, boxTop + 50, { maxWidth: 130 });
   // Middle: work-scope (Location) in red bold
   if (pr.location) {
     doc.setFont("helvetica", "bold"); doc.setTextColor(200, 30, 30);
-    doc.text(String(pr.location).toUpperCase(), (M + 232 + rightX) / 2, boxTop + 22,
+    doc.text(String(pr.location).toUpperCase(), (M + 232 + rightX) / 2, boxTop + 40,
       { align: "center", maxWidth: rightX - (M + 232) - 8 });
     doc.setTextColor(0);
   }
   // Right column
   doc.setFont("helvetica", "bold");
   doc.text("PR No. :", rightX, boxTop + 16);
-  doc.text("Date Issued :", rightX, boxTop + 34);
-  doc.text("PIC :", rightX, boxTop + 52);
+  doc.text("Date Issued :", rightX, boxTop + 32);
+  doc.text("Date Required :", rightX, boxTop + 48);
+  doc.text("PIC :", rightX, boxTop + 64);
   doc.setFont("helvetica", "normal");
-  doc.text(prNumberOnly(pr.pr_no), rightX + 78, boxTop + 16);
-  doc.text(fmtDate(pr.date_issued), rightX + 78, boxTop + 34);
-  doc.text(String(pr.pic || ""), rightX + 78, boxTop + 52);
+  doc.text(prNumberOnly(pr.pr_no), rightX + 84, boxTop + 16);
+  doc.text(fmtDate(pr.date_issued), rightX + 84, boxTop + 32);
+  doc.text(fmtDate(pr.date_required), rightX + 84, boxTop + 48);
+  doc.text(String(pr.pic || ""), rightX + 84, boxTop + 64);
 
   // ── Items table ──
   // A material can be stored as several rows (one per source pallet + a buy row)
