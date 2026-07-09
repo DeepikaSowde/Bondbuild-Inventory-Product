@@ -150,7 +150,8 @@ function groupItemsForEdit(rawItems) {
 
 export default function PurchaseRequests({ user, perms = {}, notify, refreshInbox }) {
   const [prs, setPRs] = useState([]);
-  const [filter, setFilter] = useState("All");
+  // Purchasers land on Approved (their first actionable tab); everyone else on All.
+  const [filter, setFilter] = useState(user.role === "Purchaser" ? "APPROVED" : "All");
   const [showCreate, setShowCreate] = useState(false);
   const [editPR, setEditPR] = useState(null);
   const [viewPR, setViewPR] = useState(null);
@@ -159,6 +160,11 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
   const [busy, setBusy] = useState(false);
 
   const role = user.role, isAdmin = role === "Admin";
+  // Purchasers only work with approved PRs (to action) and PO-raised ones (to track),
+  // so their tab bar is scoped to those two stages. Other roles see every status.
+  const STATUS_TABS = role === "Purchaser"
+    ? ["APPROVED", "PO_RAISED"]
+    : ["All", "PENDING", "APPROVED", "SEND_BACK", "PO_RAISED", "REJECTED"];
   const canCreate = !!perms.raise_pr || isAdmin;
   const canApprove = !!perms.approve_pr || !!perms.reject_pr || isAdmin;
   const canPurchase = !!perms.assign_supplier || !!perms.generate_po || !!perms.send_to_fic || isAdmin;
@@ -184,7 +190,7 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
     <div>
       <div className="mb-[18px] flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
-          {["All", "PENDING", "APPROVED", "SEND_BACK", "PO_RAISED", "REJECTED"].map((s) => (
+          {STATUS_TABS.map((s) => (
             <button key={s} onClick={() => setFilter(s)}
               className={`rounded-full border px-3.5 py-[5px] text-[12.5px] font-semibold capitalize transition-colors
                 ${filter === s ? "border-[#1E1B4B] bg-[#1E1B4B] text-white" : "border-[#E5E7EB] bg-white text-[#6B7280] hover:border-[#6366F1]"}`}>
