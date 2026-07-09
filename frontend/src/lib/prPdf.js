@@ -24,8 +24,9 @@ const fmtDate = (v) => {
   if (isNaN(d.getTime())) return s;
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
 };
-// PR No printed as a bare number (PR106 -> 106) per the paper form.
-const prNumberOnly = (prNo) => String(prNo || "").replace(/^PR/i, "").trim();
+// PR No printed as a bare per-job number (JN426/PR-001 -> 001, legacy PR106 -> 106)
+// per the paper form; the Job No prints in its own field, so only the tail is shown.
+const prNumberOnly = (prNo) => String(prNo || "").split("/").pop().replace(/^PR-?/i, "").trim();
 
 const STATUS_COLOR = {
   APPROVED: [5, 150, 105], PENDING: [217, 119, 6], SEND_BACK: [217, 119, 6],
@@ -212,6 +213,8 @@ export async function exportPrPdf(pr) {
   doc.setFont("helvetica", "bold"); doc.text("Signature :", M + 372, sy + 44);
   doc.setLineWidth(0.6); doc.line(M + 428, sy + 46, W - M, sy + 46);
 
-  const fname = `${pr.job_no || "PR"}-${pr.pr_no || ""}.pdf`.replace(/\s+/g, "");
+  // pr_no already carries the job (e.g. JN426/PR-001). Swap the slash for a dash so
+  // it's a valid filename, and don't prepend job_no again or it'd be doubled.
+  const fname = `${(pr.pr_no || pr.job_no || "PR").replace(/[\\/]+/g, "-")}.pdf`.replace(/\s+/g, "");
   doc.save(fname);
 }

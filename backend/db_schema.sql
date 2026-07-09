@@ -57,6 +57,42 @@ CREATE TABLE IF NOT EXISTS po_notifications (
   is_read    BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+-- SLA alerts can target a SPECIFIC user (the drafter/purchaser who owns an item)
+-- instead of a whole role. NULL target_user_id = whole-role broadcast.
+ALTER TABLE po_notifications
+  ADD COLUMN IF NOT EXISTS target_user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+
+-- The feed carries two kinds of row, and the UI splits them into two places:
+--   'alert'   → utils/alertSla.js   — something is OVERDUE and needs chasing (🔔 Alerts)
+--   'message' → utils/notifyEvent.js — something HAPPENED, FYI / next step (📬 Inbox)
+-- Default 'message' so a writer that forgets to stamp a category lands in the
+-- mailbox rather than crying wolf in the alerts panel.
+ALTER TABLE po_notifications
+  ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'message';
+-- Backfill rows written before the split. `type` is NOT a usable proxy: routes
+-- write "PR sent back" as 'warning' and "PR rejected" as 'error', and those are
+-- lifecycle messages, not overdue nags. What every SLA rule body DOES carry — and
+-- no lifecycle body ever does — is its repetition clause ("...repeats every N days
+-- until ..."), because the alert_ledger re-fires it. That is the discriminator.
+-- Verified against live data: it agrees with an independent title regex on all rows.
+UPDATE po_notifications
+   SET category = CASE WHEN COALESCE(body,'') ILIKE '%repeats every%' THEN 'alert' ELSE 'message' END
+ WHERE category IS DISTINCT FROM
+       (CASE WHEN COALESCE(body,'') ILIKE '%repeats every%' THEN 'alert' ELSE 'message' END);
+-- The inbox query filters by recipient, then partitions by category.
+CREATE INDEX IF NOT EXISTS idx_po_notifications_category
+  ON po_notifications (category, id DESC);
+
+-- A3b. SLA alert ledger — one row per (rule, entity); last_fired_at lets the
+-- scheduled sweep repeat an alert only after the rule's N-day interval elapses.
+CREATE TABLE IF NOT EXISTS alert_ledger (
+  rule          TEXT        NOT NULL,
+  entity_type   TEXT        NOT NULL,          -- 'PR' | 'PO'
+  entity_id     INTEGER     NOT NULL,
+  last_fired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  fire_count    INTEGER     NOT NULL DEFAULT 0,
+  PRIMARY KEY (rule, entity_type, entity_id)
+);
 
 -- A4. PR/PO role permissions
 CREATE TABLE IF NOT EXISTS pr_po_permissions (
@@ -91,15 +127,24 @@ VALUES
   ('Admin',             TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE )
 ON CONFLICT (role) DO NOTHING;
 
--- A5. PR number sequence
-CREATE SEQUENCE IF NOT EXISTS pr_number_seq START 1;
+-- A5. (removed) The old global pr_number_seq is gone — PR numbers are now
+--     per-job, derived inside next_pr_no(p_job) below. See migrations/
+--     2026-07-09_per_job_pr_number.sql for the cut-over on existing databases.
 
--- A6. Helper function: next PR number
-CREATE OR REPLACE FUNCTION next_pr_no() RETURNS TEXT LANGUAGE plpgsql AS $$
-DECLARE v INTEGER;
+-- A6. Helper function: next PR number (per job).
+--     Returns e.g. JN426/PR-001, restarting the sequence for each job_no.
+--     A transaction-scoped advisory lock serialises assignment per job so two
+--     concurrent PRs on the same job can't collide; different jobs never wait on
+--     each other. Must be called inside a transaction (the create route is).
+CREATE OR REPLACE FUNCTION next_pr_no(p_job TEXT) RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE v_seq INTEGER;
 BEGIN
-  v := nextval('pr_number_seq');
-  RETURN 'PR' || LPAD(v::TEXT, 3, '0');
+  PERFORM pg_advisory_xact_lock(hashtext(p_job));
+  SELECT COALESCE(MAX(CAST(SUBSTRING(pr_no FROM '/PR-([0-9]+)$') AS INTEGER)), 0) + 1
+    INTO v_seq
+    FROM purchase_requests
+   WHERE job_no = p_job;
+  RETURN p_job || '/PR-' || LPAD(v_seq::TEXT, 3, '0');
 END; $$;
 
 -- A7. Helper function: next Buy PO number
@@ -197,6 +242,10 @@ CREATE TABLE IF NOT EXISTS pr_approvals (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- A11b. Audit trail: structured before→after detail for edits.
+-- Price fields inside `details` are redacted server-side per see_pr_price/see_po_price.
+ALTER TABLE pr_approvals ADD COLUMN IF NOT EXISTS details JSONB;
+
 -- A12. Purchase Orders  (includes ALL delivery stages — BUY + STOCK)
 CREATE TABLE IF NOT EXISTS purchase_orders (
   id               SERIAL PRIMARY KEY,
@@ -257,6 +306,7 @@ CREATE TABLE IF NOT EXISTS po_approvals (
   note        TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE po_approvals ADD COLUMN IF NOT EXISTS details JSONB;
 
 -- A15. PO Delivery Tracking (lead times, freight details)
 CREATE TABLE IF NOT EXISTS po_delivery_tracking (
@@ -291,7 +341,12 @@ BEGIN
     RAISE EXCEPTION 'Not enough stock — available: %, needed: %', v_inv.quantity_in_stock, v_item.stock_qty;
   END IF;
 
-  UPDATE inventory SET quantity_in_stock = quantity_in_stock - v_item.stock_qty WHERE id = v_inv.id;
+  -- Physically remove the goods AND consume the matching reservation
+  -- (these pieces were reserved when the Purchaser sent this item to the FIC).
+  UPDATE inventory
+     SET quantity_in_stock = quantity_in_stock - v_item.stock_qty,
+         reserved_qty      = GREATEST(0, reserved_qty - v_item.stock_qty)
+   WHERE id = v_inv.id;
   UPDATE pr_items SET stock_status = 'STOCK_REDUCED' WHERE id = p_item_id;
 
   INSERT INTO stock_movements (inventory_id, item_code, movement_type, quantity_moved,
@@ -335,6 +390,16 @@ ALTER TABLE purchase_orders
     'WITH_VENDOR','SHIPPED','ARRIVED_HUB','RECEIVED_FACTORY',
     'PENDING_ISSUE','READY_COLLECT','COLLECTED'
   ));
+
+-- B3. Soft-reservation counter on inventory.
+--     Pieces promised to a raised STOCK PO but not yet physically issued.
+--     "available to claim" = quantity_in_stock - reserved_qty.
+ALTER TABLE inventory
+  ADD COLUMN IF NOT EXISTS reserved_qty INTEGER NOT NULL DEFAULT 0;
+
+-- B4. Supplier fax number (shown on the Purchase Order PDF).
+ALTER TABLE po_suppliers
+  ADD COLUMN IF NOT EXISTS fax TEXT;
 
 
 -- ════════════════════════════════════════════════════════════

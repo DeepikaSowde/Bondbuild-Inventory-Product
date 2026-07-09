@@ -155,7 +155,6 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
   const [editPR, setEditPR] = useState(null);
   const [viewPR, setViewPR] = useState(null);
   const [rejecting, setRejecting] = useState(null);
-  const [nextNo, setNextNo] = useState("PR001");
   const [suppliers, setSuppliers] = useState([]);
   const [busy, setBusy] = useState(false);
 
@@ -175,9 +174,9 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
   // Paginate the list, 20 per page; reset to page 1 when the status filter changes.
   const { page, setPage, slice: pagePrs, total, pageSize, pageCount } = usePaged(prs, filter);
 
-  const openCreate = async () => {
+  // PR number is now assigned per-job on submit, so there is nothing to preview here.
+  const openCreate = () => {
     setEditPR(null);
-    try { setNextNo((await api.prNext()).prNo); } catch {}
     setShowCreate(true);
   };
 
@@ -223,7 +222,7 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
       <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} />
 
       {showCreate && (
-        <PRForm user={user} suppliers={suppliers} nextNo={nextNo} editPR={editPR} notify={notify}
+        <PRForm user={user} suppliers={suppliers} editPR={editPR} notify={notify}
           onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); refresh(); }} />
       )}
       {viewPR && (
@@ -246,7 +245,7 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
   );
 }
 
-function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
+function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
   const blankItem = () => ({
     profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
     remarks: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
@@ -567,7 +566,7 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
   const inp = "w-full box-border border border-[#E5E7EB] rounded-lg px-2.5 py-2 text-[12px] outline-none bg-white focus:border-[#6366F1]";
 
   return (
-    <Modal wide noBackdropClose title={editPR ? `Edit ${editPR.pr_no}` : `New purchase request · ${nextNo}`} onClose={guardedClose}>
+    <Modal wide noBackdropClose title={editPR ? `Edit ${editPR.pr_no}` : "New purchase request"} onClose={guardedClose}>
       {editPR?.rejection_reason && (
         <div className="mb-3.5 rounded-lg bg-[#FFF7E6] px-3.5 py-2.5 text-[13px] text-[#92400E]">Sent back: {editPR.rejection_reason}</div>
       )}
@@ -575,9 +574,12 @@ function PRForm({ user, suppliers, nextNo, editPR, notify, onClose, onSaved }) {
       {/* Header fields */}
       <div className="mb-4 grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-3">
         <Field label="Job No *">
-          <Input value={form.job_no} onChange={(e) => setForm({ ...form, job_no: e.target.value })} onBlur={lookupJob} placeholder="JN426"
-            className={!jobValid ? "!border-[#DC2626] focus:!border-[#DC2626]" : ""} />
-          {!jobValid && (
+          {/* Job No is fixed once the PR exists — pr_no (<job>/PR-001) is built from it. */}
+          <Input value={form.job_no} disabled={!!editPR}
+            onChange={(e) => setForm({ ...form, job_no: e.target.value })} onBlur={lookupJob} placeholder="JN426"
+            title={editPR ? "Job No can't be changed after the PR is created" : undefined}
+            className={!editPR && !jobValid ? "!border-[#DC2626] focus:!border-[#DC2626]" : ""} />
+          {!editPR && !jobValid && (
             <span className="mt-1 block text-[10px] font-semibold text-[#DC2626]">
               {form.job_no.trim() ? "Must contain a letter or number" : "Job No is required"}
             </span>

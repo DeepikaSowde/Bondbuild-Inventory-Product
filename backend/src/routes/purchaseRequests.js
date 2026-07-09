@@ -25,6 +25,10 @@ const fail = (res, code, error) => res.status(code).json({ success: false, error
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const asUuid = (v) => (typeof v === "string" && UUID_RE.test(v) ? v : null);
 
+// pr_no is now "<job>/PR-001". The PO-number builders already prepend the job, so
+// hand them only the "PR-001" tail to avoid printing the job twice.
+const prTail = (prNo) => String(prNo).split("/").pop();
+
 // Description length cap — must match the frontend textarea maxLength (500).
 // Returns an error message for the first over-limit item, or null if all OK.
 const DESC_MAX = 500;
@@ -120,14 +124,6 @@ router.get("/", async (req, res) => {
   } catch (e) { fail(res, 500, e.message); }
 });
 
-router.get("/next-number", async (_req, res) => {
-  try {
-    const { rows } = await db.query("SELECT last_value, is_called FROM pr_number_seq");
-    const next = rows[0].is_called ? Number(rows[0].last_value) + 1 : Number(rows[0].last_value);
-    ok(res, { prNo: "PR" + String(next).padStart(3, "0") });
-  } catch (e) { fail(res, 500, e.message); }
-});
-
 router.get("/:prNo", async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
@@ -149,7 +145,7 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
   let audience;   // built inside the txn, mailed once it commits
   try {
     const prNo = await withTransaction(async (c) => {
-      const num = await c.query("SELECT next_pr_no() AS pr_no");
+      const num = await c.query("SELECT next_pr_no($1) AS pr_no", [f.job_no]);
       const prNo = num.rows[0].pr_no;
       const ins = await c.query(
         `INSERT INTO purchase_requests
@@ -212,6 +208,9 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
     if (!["PENDING", "SEND_BACK"].includes(pr.status))
       return fail(res, 409, `PR is ${pr.status} and can no longer be edited`);
     const f = req.body || {};
+    // Job No is locked after creation: pr_no encodes the job (<job>/PR-001), so
+    // letting the job change would make the number lie. Ignore any incoming change.
+    f.job_no = pr.job_no;
     const items = withItemUids((f.items || []).filter((it) => it.description?.trim()));
     if (!items.length) return fail(res, 400, "At least one item is required");
     const descErr = checkDescLength(items);
@@ -451,7 +450,7 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
           (groups[key] ||= []).push(it);
         }
         for (const [location, lines] of Object.entries(groups)) {
-          const num = await c.query("SELECT next_stock_po_no($1,$2) AS po_no", [pr.job_no, pr.pr_no]);
+          const num = await c.query("SELECT next_stock_po_no($1,$2) AS po_no", [pr.job_no, prTail(pr.pr_no)]);
           const poNo = num.rows[0].po_no;
           const amount = lines.reduce((s, l) => s + Number(l.stock_qty) * Number(l.stock_unit_price), 0);
           const po = await c.query(
@@ -564,7 +563,7 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
       for (const g of Object.values(groups)) {
         const sup = await c.query("SELECT type FROM po_suppliers WHERE id=$1", [g.supplier_id]);
         const supType = sup.rows[0]?.type || "Local";
-        const num = await c.query("SELECT next_po_no($1,$2) AS po_no", [pr.job_no, pr.pr_no]);
+        const num = await c.query("SELECT next_po_no($1,$2) AS po_no", [pr.job_no, prTail(pr.pr_no)]);
         const poNo = num.rows[0].po_no;
         const amount = g.items.reduce((s, i) => s + Number(i.buy_qty) * Number(i.unit_price || 0), 0);
         const po = await c.query(

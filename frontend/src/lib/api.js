@@ -33,7 +33,6 @@ export const api = {
 
   // purchase requests
   prs: (status = "All") => data(axiosClient.get(`/purchase-requests?status=${status}`)),
-  prNext: () => data(axiosClient.get("/purchase-requests/next-number")),
   pr: (prNo) => data(axiosClient.get(`/purchase-requests/${enc(prNo)}`)),
   createPR: (f) => data(axiosClient.post("/purchase-requests", f)),
   updatePR: (prNo, f) => data(axiosClient.put(`/purchase-requests/${enc(prNo)}`, f)),
