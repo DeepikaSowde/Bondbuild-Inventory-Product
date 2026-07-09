@@ -85,7 +85,19 @@ async function getPR(prNo, client = db) {
     );
     itemAttachments = iatt.rows;
   } catch { /* table arrives with migrations/2026-07-09_pr_item_attachments.sql */ }
-  return { ...rows[0], items: items.rows, attachments, item_attachments: itemAttachments };
+  // Which PO types already exist for this PR — lets the UI show/hide the two
+  // purchaser actions independently (Generate Buy PO vs. Send stock to FIC), so
+  // raising one doesn't strand the other.
+  let buyPoCreated = false, stockPoCreated = false;
+  try {
+    const pos = await client.query(
+      "SELECT po_type FROM purchase_orders WHERE pr_id = $1", [rows[0].id]
+    );
+    buyPoCreated = pos.rows.some((r) => r.po_type === "BUY");
+    stockPoCreated = pos.rows.some((r) => r.po_type === "STOCK");
+  } catch { /* purchase_orders table always present; guard is belt-and-braces */ }
+  return { ...rows[0], items: items.rows, attachments, item_attachments: itemAttachments,
+           buy_po_created: buyPoCreated, stock_po_created: stockPoCreated };
 }
 
 // Everything raised here is a lifecycle message → the 📬 Inbox, never the 🔔 Alerts

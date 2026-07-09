@@ -980,7 +980,13 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
   const [items, setItems] = useState(pr.items.map((it) => ({ ...it })));
   const [tab, setTab] = useState("details");
   useEffect(() => { setItems(pr.items.map((it) => ({ ...it }))); }, [pr]);
-  const assignMode = (pAssign || pGenerate || pSendFic) && pr.status === "APPROVED";
+  // Stays open through PO_RAISED too: a PR with both buy + stock items needs BOTH
+  // "Generate Buy PO" and "Send stock to FIC", and generating the buy PO flips the
+  // status to PO_RAISED. Closing the section there would strand the stock portion.
+  const assignMode = (pAssign || pGenerate || pSendFic) && ["APPROVED", "PO_RAISED"].includes(pr.status);
+  // Buy-line supplier/price stay editable only until the Buy PO is generated —
+  // after that the section is still open purely so the stock half can be sent.
+  const canEditBuy = assignMode && !pr.buy_po_created;
   const ficMode = pIssue && ["APPROVED", "PO_RAISED"].includes(pr.status);
 
   const setIt = (i, key, val) => setItems((arr) => arr.map((it, x) => {
@@ -1097,7 +1103,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                     <td className={td}>—</td>
                     <td className={td}>{it.buy_qty}</td>
                     <td className={`${td} min-w-[160px]`}>
-                      {assignMode ? (
+                      {canEditBuy ? (
                         <Select value={it.supplier_id || ""} onChange={(e) => setIt(i, "supplier_id", e.target.value)}>
                           <option value="">— choose —</option>
                           {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -1106,7 +1112,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                     </td>
                     {canSeePrice && (
                       <td className={`${td} w-[112px] min-w-[112px]`}>
-                        {assignMode ? <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} className={Number(it.unit_price) > 0 ? "" : "!border-[#DC2626]"} placeholder="0.00" /> : money(it.unit_price)}
+                        {canEditBuy ? <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} className={Number(it.unit_price) > 0 ? "" : "!border-[#DC2626]"} placeholder="0.00" /> : money(it.unit_price)}
                       </td>
                     )}
                     {canSeePrice && <td className={td}>{money((Number(it.buy_qty) || 0) * (Number(it.unit_price) || 0))}</td>}
@@ -1210,21 +1216,40 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
           const allBuyHaveSupplier = buyItems.every((it) => it.supplier_id);
           const allBuyHavePrice = buyItems.every((it) => Number(it.unit_price) > 0);
           const saveAssign = async () => api.assignItems(pr.pr_no, buyItems.map((it) => ({ id: it.id, supplier_id: it.supplier_id || null, supplier_name: it.supplier_name, unit_price: Number(it.unit_price) || 0 })));
+          // Each half is "done" once its own PO exists. A PR with both halves needs
+          // BOTH actions — the buttons below only disappear once each is truly done.
+          const buyPending = hasBuy && !pr.buy_po_created;
+          const stockPending = hasStock && anyAwaiting && !pr.stock_po_created;
+          const showSendFic = pSendFic && stockPending;
+          const showGenerate = pGenerate && buyPending;
           return (
             <>
-              <Btn variant="soft" disabled={busy} onClick={() => act(saveAssign, "Saved")}>Save prices</Btn>
-              {pSendFic && hasStock && anyAwaiting && (
-                <Btn variant="warning" disabled={busy} onClick={() => act(async () => { await saveAssign(); await api.sendToFic(pr.pr_no); }, "Stock info sent to Factory In-charge — Stock PO created")}>Send stock to FIC</Btn>
+              {/* Remind the purchaser that a mixed PR isn't finished until both the
+                  Buy PO is generated AND the stock is sent to the Factory In-charge. */}
+              {buyPending && stockPending && (
+                <div className="mr-auto self-center text-[12px] font-medium text-[#B45309]">
+                  This PR has both buy and stock items — complete <b>both</b>: Generate Buy PO <i>and</i> Send stock to FIC.
+                </div>
               )}
-              {pGenerate && hasBuy && (
+              {canEditBuy && <Btn variant="soft" disabled={busy} onClick={() => act(saveAssign, "Saved")}>Save prices</Btn>}
+              {showSendFic && (
+                <Btn variant="warning" disabled={busy} onClick={() => {
+                  if (buyPending && !window.confirm("Stock will be sent to the Factory In-charge and the Stock PO created.\n\nYou still have buy items — remember to click \"Generate Buy PO\" as well.\n\nContinue?")) return;
+                  act(async () => { await saveAssign(); await api.sendToFic(pr.pr_no); }, "Stock info sent to Factory In-charge — Stock PO created");
+                }}>Send stock to FIC</Btn>
+              )}
+              {showGenerate && (
                 <Btn disabled={busy || !allBuyHaveSupplier || !allBuyHavePrice}
                   title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first" : !allBuyHavePrice ? "Enter a unit price (> 0) for every buy item first" : ""}
-                  onClick={() => act(async () => {
-                    if (!allBuyHavePrice) throw new Error("Enter a unit price for every buy item before generating the PO");
-                    await saveAssign();
-                    const r = await api.generatePOs(pr.pr_no);
-                    notify(`${r.created_pos.length} Buy PO(s) created: ${r.created_pos.join(", ")}`, "success");
-                  })}>Generate Buy PO</Btn>
+                  onClick={() => {
+                    if (stockPending && !window.confirm("The Buy PO will be created.\n\nYou still have stock items awaiting the Factory In-charge — remember to click \"Send stock to FIC\" as well, or the Stock PO won't be created.\n\nContinue?")) return;
+                    act(async () => {
+                      if (!allBuyHavePrice) throw new Error("Enter a unit price for every buy item before generating the PO");
+                      await saveAssign();
+                      const r = await api.generatePOs(pr.pr_no);
+                      notify(`${r.created_pos.length} Buy PO(s) created: ${r.created_pos.join(", ")}`, "success");
+                    });
+                  }}>Generate Buy PO</Btn>
               )}
             </>
           );
