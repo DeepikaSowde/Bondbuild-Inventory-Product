@@ -1133,6 +1133,52 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
 
       {pr.remarks && <div className="mt-3 text-[13px] text-[#6B7280]">Remarks: {pr.remarks}</div>}
 
+      {/* Per-item links & files — read-only mirror of what the drafter attached to each line.
+          Grouped by item_uid so a material split across a stock + buy row shows once. */}
+      {(() => {
+        const seen = new Set();
+        const perItem = [];
+        for (const it of items) {
+          const uid = it.item_uid;
+          if (!uid || seen.has(uid)) continue;
+          seen.add(uid);
+          const files = (pr.item_attachments || []).filter((a) => a.item_uid === uid);
+          const link = (it.onedrive_url || "").trim();
+          if (!link && !files.length) continue;
+          perItem.push({ it, link, files });
+        }
+        if (!perItem.length) return null;
+        return (
+          <div className="mt-4">
+            <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[#9CA3AF]">Item links &amp; files</div>
+            <div className="space-y-1.5">
+              {perItem.map(({ it, link, files }) => (
+                <div key={it.item_uid} className="rounded-lg border border-[#F3F4F6] px-3 py-2">
+                  <div className="mb-1 text-[12.5px] font-semibold text-[#374151]">{it.description || it.profile_code || "Item"}</div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {link && (
+                      <a href={link} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 rounded border border-[#E5E7EB] bg-white px-1.5 py-px text-[11px] text-[#4F46E5] hover:underline"
+                        title={link}>
+                        🔗 OneDrive link
+                      </a>
+                    )}
+                    {files.map((a) => (
+                      <button key={a.id} type="button"
+                        className="inline-flex max-w-[200px] items-center gap-1 truncate rounded border border-[#E5E7EB] bg-white px-1.5 py-px text-[11px] text-[#4F46E5] hover:underline"
+                        title={`Download ${a.original_name}`}
+                        onClick={() => downloadAttachment(api.itemAttachmentDownloadPath(a.id), a.original_name)}>
+                        {a.original_name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Whole-PR attachments — view, add, remove */}
       <div className="mt-4">
         <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[#9CA3AF]">Attachments</div>
