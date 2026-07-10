@@ -23,14 +23,15 @@
 const express = require("express");
 const multer = require("multer");
 const path = require("path");
-const fs = require("fs");
 const db = require("../config/db");
+const spaces = require("../config/spaces");
 const { protect } = require("../middleware/auth");
 
 const router = express.Router();
 
-const DEST = path.join(__dirname, "..", "..", "uploads", "pr-item-attachments");
-fs.mkdirSync(DEST, { recursive: true });
+// Files live on DigitalOcean Spaces (App Platform's local disk is ephemeral). The
+// Spaces object key is kept in the existing file_path column — no schema change.
+const PREFIX = "pr-item-attachments";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES_PER_ITEM = 2;
@@ -53,13 +54,9 @@ const ALLOWED_MIME = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, DEST),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, Date.now() + "-" + Math.round(Math.random() * 1e9) + ext);
-  },
-});
+// Buffer in memory, then stream to Spaces from the handler once all the limit
+// checks below have passed — nothing is uploaded for a request we are going to reject.
+const storage = multer.memoryStorage();
 
 // file.mimetype comes from the client and is spoofable, so require BOTH the declared
 // type and the extension to be on the list. This is a filter, not a virus scanner.
@@ -85,7 +82,6 @@ const upload = multer({
 const ok = (res, data, extra = {}) => res.json({ success: true, data, ...extra });
 const fail = (res, code, error) => res.status(code).json({ success: false, error });
 const decodeName = (n) => { try { return Buffer.from(n, "latin1").toString("utf8"); } catch { return n; } };
-const discard = (files) => (files || []).forEach((f) => fs.unlink(f.path, () => {}));
 const mb = (b) => (b / 1024 / 1024).toFixed(1);
 
 const loadPr = async (prNo) => {
@@ -100,12 +96,13 @@ router.post("/:prNo/items/:itemUid/attachments", protect, upload.array("files", 
   async (req, res) => {
     const files = req.files || [];
     if (!files.length) return fail(res, 400, "No files received");
+    if (!spaces.isConfigured()) return fail(res, 503, "File storage is not configured on the server yet");
     const { prNo, itemUid } = req.params;
+    const uploadedKeys = [];
     try {
       const pr = await loadPr(prNo);
-      if (!pr) { discard(files); return fail(res, 404, "PR not found"); }
+      if (!pr) return fail(res, 404, "PR not found");
       if (!EDITABLE_STATUSES.includes(pr.status)) {
-        discard(files);
         return fail(res, 409, `PR is ${pr.status} — its item attachments can no longer be changed`);
       }
 
@@ -114,7 +111,7 @@ router.post("/:prNo/items/:itemUid/attachments", protect, upload.array("files", 
       const item = await db.query(
         "SELECT 1 FROM pr_items WHERE pr_id = $1 AND item_uid = $2 LIMIT 1", [pr.id, itemUid]
       );
-      if (!item.rows[0]) { discard(files); return fail(res, 404, "Item not found on this PR"); }
+      if (!item.rows[0]) return fail(res, 404, "Item not found on this PR");
 
       const counts = await db.query(
         `SELECT
@@ -126,32 +123,34 @@ router.post("/:prNo/items/:itemUid/attachments", protect, upload.array("files", 
       const { item_files: itemFiles, pr_bytes: prBytes } = counts.rows[0];
 
       if (Number(itemFiles) + files.length > MAX_FILES_PER_ITEM) {
-        discard(files);
         return fail(res, 400,
           `This item already has ${itemFiles} of ${MAX_FILES_PER_ITEM} allowed files`);
       }
 
       const incoming = files.reduce((s, f) => s + f.size, 0);
       if (Number(prBytes) + incoming > MAX_PR_BYTES) {
-        discard(files);
         return fail(res, 400,
           `This PR would hold ${mb(Number(prBytes) + incoming)} MB of attachments — the limit is ${mb(MAX_PR_BYTES)} MB`);
       }
 
       const saved = [];
       for (const f of files) {
+        const key = await spaces.putBuffer({
+          prefix: PREFIX, buffer: f.buffer, contentType: f.mimetype, originalName: f.originalname,
+        });
+        uploadedKeys.push(key);
         const { rows } = await db.query(
           `INSERT INTO pr_item_attachments
              (pr_id, item_uid, original_name, stored_name, file_path, mime_type, size_bytes, uploaded_by)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
            RETURNING id, pr_id, item_uid, original_name, mime_type, size_bytes, uploaded_by, created_at`,
-          [pr.id, itemUid, decodeName(f.originalname), f.filename, f.path, f.mimetype, f.size, req.user.name]
+          [pr.id, itemUid, decodeName(f.originalname), key, key, f.mimetype, f.size, req.user.name]
         );
         saved.push(rows[0]);
       }
       res.status(201).json({ success: true, data: saved });
     } catch (e) {
-      discard(files);
+      await Promise.all(uploadedKeys.map((k) => spaces.deleteObject(k)));
       fail(res, 500, e.message);
     }
   }
@@ -177,9 +176,15 @@ router.get("/item-attachments/:id/download", protect, async (req, res) => {
     const { rows } = await db.query("SELECT * FROM pr_item_attachments WHERE id = $1", [req.params.id]);
     const a = rows[0];
     if (!a) return fail(res, 404, "Attachment not found");
-    if (!fs.existsSync(a.file_path)) return fail(res, 410, "File no longer on server");
-    res.download(a.file_path, a.original_name);
-  } catch (e) { fail(res, 500, e.message); }
+    const obj = await spaces.getObject(a.file_path);
+    res.setHeader("Content-Type", a.mime_type || obj.ContentType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(a.original_name)}`);
+    obj.Body.on("error", () => { if (!res.headersSent) fail(res, 500, "Failed to read file"); else res.end(); });
+    obj.Body.pipe(res);
+  } catch (e) {
+    if (spaces.isMissing(e)) return fail(res, 410, "File no longer on server");
+    fail(res, 500, e.message);
+  }
 });
 
 // ── Delete — PR creator or Admin only, and only while the PR is editable ──
@@ -204,7 +209,7 @@ router.delete("/item-attachments/:id", protect, async (req, res) => {
     }
 
     await db.query("DELETE FROM pr_item_attachments WHERE id = $1", [req.params.id]);
-    fs.unlink(a.file_path, () => {});
+    await spaces.deleteObject(a.file_path);
     ok(res, { deleted: true });
   } catch (e) { fail(res, 500, e.message); }
 });

@@ -12,6 +12,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1085.0",
     "@azure/msal-node": "^5.2.5",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",

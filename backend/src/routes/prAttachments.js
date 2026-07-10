@@ -1,28 +1,24 @@
 // src/routes/prAttachments.js
-// Whole-PR file attachments — stored on the backend in uploads/pr-attachments/.
+// Whole-PR file attachments — stored on DigitalOcean Spaces (see config/spaces.js).
 // One set of files per PR (any type, 10 MB each). Files are picked on the create
 // form and uploaded right after the PR saves; also viewable/manageable when the PR
 // is opened later. Uses your existing db + auth (protect).
+// App Platform's local disk is ephemeral, so the bytes go to Spaces; the object key
+// is kept in the existing file_path column (no schema change).
 // Mounted under /api/purchase-requests (see index.js note).
 const express = require("express");
 const multer = require("multer");
 const path = require("path");
-const fs = require("fs");
 const db = require("../config/db");
+const spaces = require("../config/spaces");
 const { protect } = require("../middleware/auth");
 
 const router = express.Router();
 
-const DEST = path.join(__dirname, "..", "..", "uploads", "pr-attachments");
-fs.mkdirSync(DEST, { recursive: true });
+const PREFIX = "pr-attachments";
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, DEST),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, Date.now() + "-" + Math.round(Math.random() * 1e9) + ext);
-  },
-});
+// Buffer in memory, then stream to Spaces from the handler (after the PR is found).
+const storage = multer.memoryStorage();
 
 // Block executable and script files — attachments should be documents/images only.
 const BLOCKED_EXT = new Set([
@@ -51,23 +47,29 @@ const decodeName = (n) => { try { return Buffer.from(n, "latin1").toString("utf8
 router.post("/:prNo/attachments", protect, upload.array("files", 20), async (req, res) => {
   const files = req.files || [];
   if (!files.length) return fail(res, 400, "No files received");
+  if (!spaces.isConfigured()) return fail(res, 503, "File storage is not configured on the server yet");
+  const uploadedKeys = [];
   try {
     const pr = await db.query("SELECT id FROM purchase_requests WHERE pr_no = $1", [req.params.prNo]);
-    if (!pr.rows[0]) { files.forEach((f) => fs.unlink(f.path, () => {})); return fail(res, 404, "PR not found"); }
+    if (!pr.rows[0]) return fail(res, 404, "PR not found");
     const prId = pr.rows[0].id;
     const saved = [];
     for (const f of files) {
       const orig = decodeName(f.originalname);
+      const key = await spaces.putBuffer({
+        prefix: PREFIX, buffer: f.buffer, contentType: f.mimetype, originalName: f.originalname,
+      });
+      uploadedKeys.push(key);
       const { rows } = await db.query(
         `INSERT INTO pr_attachments (pr_id, original_name, stored_name, file_path, mime_type, size_bytes, uploaded_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, pr_id, original_name, mime_type, size_bytes, uploaded_by, created_at`,
-        [prId, orig, f.filename, f.path, f.mimetype, f.size, req.user.name]
+        [prId, orig, key, key, f.mimetype, f.size, req.user.name]
       );
       saved.push(rows[0]);
     }
     res.status(201).json({ success: true, data: saved });
   } catch (e) {
-    files.forEach((f) => fs.unlink(f.path, () => {}));
+    await Promise.all(uploadedKeys.map((k) => spaces.deleteObject(k)));
     fail(res, 500, e.message);
   }
 });
@@ -85,15 +87,21 @@ router.get("/:prNo/attachments", protect, async (req, res) => {
   } catch (e) { fail(res, 500, e.message); }
 });
 
-// Download one file
+// Download one file — streamed from Spaces
 router.get("/attachments/:id/download", protect, async (req, res) => {
   try {
     const { rows } = await db.query("SELECT * FROM pr_attachments WHERE id = $1", [req.params.id]);
     const a = rows[0];
     if (!a) return fail(res, 404, "Attachment not found");
-    if (!fs.existsSync(a.file_path)) return fail(res, 410, "File no longer on server");
-    res.download(a.file_path, a.original_name);
-  } catch (e) { fail(res, 500, e.message); }
+    const obj = await spaces.getObject(a.file_path);
+    res.setHeader("Content-Type", a.mime_type || obj.ContentType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(a.original_name)}`);
+    obj.Body.on("error", () => { if (!res.headersSent) fail(res, 500, "Failed to read file"); else res.end(); });
+    obj.Body.pipe(res);
+  } catch (e) {
+    if (spaces.isMissing(e)) return fail(res, 410, "File no longer on server");
+    fail(res, 500, e.message);
+  }
 });
 
 // Delete one file
@@ -102,7 +110,7 @@ router.delete("/attachments/:id", protect, async (req, res) => {
     const { rows } = await db.query("DELETE FROM pr_attachments WHERE id = $1 RETURNING *", [req.params.id]);
     const a = rows[0];
     if (!a) return fail(res, 404, "Attachment not found");
-    fs.unlink(a.file_path, () => {});
+    await spaces.deleteObject(a.file_path);
     ok(res, { deleted: true });
   } catch (e) { fail(res, 500, e.message); }
 });
