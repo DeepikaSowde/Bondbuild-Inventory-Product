@@ -101,6 +101,11 @@ export default function StockPage() {
   const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
+  // ── Dropdown filters: Location / Profile Code / Profile ──
+  const [filterLocation, setFilterLocation] = useState("");
+  const [filterProfileCode, setFilterProfileCode] = useState("");
+  const [filterProfileName, setFilterProfileName] = useState("");
+
   // ── Fetch inventory data and permissions on mount ──
   useEffect(() => {
     fetchData();
@@ -335,24 +340,49 @@ export default function StockPage() {
   // Computed before the loading guard below so the usePaged hook always runs
   // (hooks must not sit after a conditional return — see React error #310).
   const q = searchTerm.trim().toLowerCase();
-  const filteredInventory = !q
-    ? inventory
-    : inventory.filter(
-        (item) =>
-          String(item.item_code || "")
-            .toLowerCase()
-            .includes(q) ||
-          String(item.profile_name || "")
-            .toLowerCase()
-            .includes(q) ||
-          String(item.location_code || "")
-            .toLowerCase()
-            .includes(q),
-      );
 
-  // Paginate the (filtered) inventory, 20 per page; reset to page 1 on new search.
+  // Build sorted, de-duplicated option lists for the dropdown filters.
+  const uniqueSorted = (key) =>
+    Array.from(
+      new Set(
+        (Array.isArray(inventory) ? inventory : [])
+          .map((item) => String(item[key] ?? "").trim())
+          .filter((v) => v !== ""),
+      ),
+    ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+
+  const locationOptions = uniqueSorted("location_code");
+  const profileCodeOptions = uniqueSorted("item_code");
+  const profileNameOptions = uniqueSorted("profile_name");
+
+  const filteredInventory = (Array.isArray(inventory) ? inventory : []).filter(
+    (item) => {
+      // Free-text search across code / name / location
+      if (
+        q &&
+        !(
+          String(item.item_code || "").toLowerCase().includes(q) ||
+          String(item.profile_name || "").toLowerCase().includes(q) ||
+          String(item.location_code || "").toLowerCase().includes(q)
+        )
+      )
+        return false;
+      // Dropdown filters (exact match, empty = "All")
+      if (filterLocation && String(item.location_code ?? "") !== filterLocation)
+        return false;
+      if (filterProfileCode && String(item.item_code ?? "") !== filterProfileCode)
+        return false;
+      if (filterProfileName && String(item.profile_name ?? "") !== filterProfileName)
+        return false;
+      return true;
+    },
+  );
+
+  // Paginate the (filtered) inventory, 20 per page; reset to page 1 when the
+  // active filter set changes.
+  const filterKey = `${q}|${filterLocation}|${filterProfileCode}|${filterProfileName}`;
   const { page, setPage, slice: pageInventory, total, pageSize, pageCount } =
-    usePaged(filteredInventory, q);
+    usePaged(filteredInventory, filterKey);
 
   if (loading || !permissions) {
     return (
@@ -703,23 +733,110 @@ export default function StockPage() {
         ))}
       </div>
 
-      {/* Search */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-        <input
-          type="text"
-          placeholder="Search by code, name, location..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          style={{
-            flex: 1,
-            padding: "10px 12px",
-            borderRadius: 8,
-            border: "1.5px solid #E5E7EB",
-            fontSize: 13,
-            outline: "none",
-          }}
-        />
-      </div>
+      {/* Search + Filters */}
+      {(() => {
+        const selStyle = {
+          padding: "10px 12px",
+          borderRadius: 8,
+          border: "1.5px solid #E5E7EB",
+          fontSize: 13,
+          outline: "none",
+          background: "#fff",
+          color: "#374151",
+          minWidth: 160,
+          flex: "1 1 160px",
+        };
+        const anyFilter =
+          filterLocation || filterProfileCode || filterProfileName;
+        return (
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              marginBottom: 16,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Search by code, name, location..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                flex: "2 1 240px",
+                padding: "10px 12px",
+                borderRadius: 8,
+                border: "1.5px solid #E5E7EB",
+                fontSize: 13,
+                outline: "none",
+              }}
+            />
+
+            <select
+              value={filterLocation}
+              onChange={(e) => setFilterLocation(e.target.value)}
+              style={selStyle}
+            >
+              <option value="">All Locations</option>
+              {locationOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={filterProfileCode}
+              onChange={(e) => setFilterProfileCode(e.target.value)}
+              style={selStyle}
+            >
+              <option value="">All Profile Codes</option>
+              {profileCodeOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={filterProfileName}
+              onChange={(e) => setFilterProfileName(e.target.value)}
+              style={selStyle}
+            >
+              <option value="">All Profiles</option>
+              {profileNameOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+
+            {anyFilter && (
+              <button
+                onClick={() => {
+                  setFilterLocation("");
+                  setFilterProfileCode("");
+                  setFilterProfileName("");
+                }}
+                style={{
+                  background: "#F3F4F6",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "10px 16px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "#374151",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                ✕ Clear Filters
+              </button>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Permission Info Banner */}
       <div
@@ -737,7 +854,7 @@ export default function StockPage() {
         <strong>{visibleColumns.length}</strong> | Can Edit Qty:{" "}
         <strong>{permissions.edit_quantity ? "✅ Yes" : "❌ No"}</strong> | Can
         Add Items: <strong>{permissions.add_item ? "✅ Yes" : "❌ No"}</strong>
-        {q && (
+        {(q || filterLocation || filterProfileCode || filterProfileName) && (
           <>
             {" "}
             | Showing: <strong>{filteredInventory.length}</strong> of{" "}
@@ -949,7 +1066,9 @@ export default function StockPage() {
                 >
                   {q
                     ? `No items match "${searchTerm}"`
-                    : "No items in inventory"}
+                    : filterLocation || filterProfileCode || filterProfileName
+                      ? "No items match the selected filters"
+                      : "No items in inventory"}
                 </td>
               </tr>
             )}
