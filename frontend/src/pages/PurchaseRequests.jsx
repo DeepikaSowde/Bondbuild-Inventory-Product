@@ -982,7 +982,6 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
   const pAssign = !!perms.assign_supplier || isAdmin;
   const pGenerate = !!perms.generate_po || isAdmin;
   const pSendFic = !!perms.send_to_fic || isAdmin;
-  const pIssue = !!perms.issue_stock || isAdmin;
   const [items, setItems] = useState(pr.items.map((it) => ({ ...it })));
   const [tab, setTab] = useState("details");
   useEffect(() => { setItems(pr.items.map((it) => ({ ...it }))); }, [pr]);
@@ -993,7 +992,6 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
   // Buy-line supplier/price stay editable only until the Buy PO is generated —
   // after that the section is still open purely so the stock half can be sent.
   const canEditBuy = assignMode && !pr.buy_po_created;
-  const ficMode = pIssue && ["APPROVED", "PO_RAISED"].includes(pr.status);
 
   const setIt = (i, key, val) => setItems((arr) => arr.map((it, x) => {
     if (x !== i) return it;
@@ -1088,12 +1086,9 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                     <td className={td}>{it.stock_qty}</td>
                     <td className={td}>{it.stock_qty} <span className="text-[11px] text-[#9CA3AF]">@ {it.stock_location}</span></td>
                     <td className={td}>
-                      <span className="inline-flex items-center gap-1.5">
-                        <Badge status={it.stock_status} />
-                        {ficMode && it.stock_status === "PENDING_FIC" && (
-                          <Btn variant="warning" small disabled={busy} onClick={() => act(() => api.reduceStock(it.id), `Stock reduced for ${it.profile_code}`)}>Reduce stock</Btn>
-                        )}
-                      </span>
+                      {/* FIC issues this line by receiving its STOCK PO on the
+                          Purchase Orders screen — no per-item action here. */}
+                      <Badge status={it.stock_status} />
                     </td>
                     <td className={td}>—</td>
                     <td className={td}><span className="text-[12px] text-[#6B7280]">From stock</span></td>

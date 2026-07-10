@@ -513,42 +513,11 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
   }
 });
 
-// ── FIC reduces stock for one PR item (PR→inventory action) ──
-// Calls the DB function fn_fic_reduce_stock() which (atomically) lowers
-// inventory.quantity_in_stock AND writes an 'OUT' row to stock_movements.
-router.post("/items/:itemId/reduce-stock", canDo("issue_stock"), async (req, res) => {
-  try {
-    const r = await db.query("SELECT fn_fic_reduce_stock($1,$2) AS movement_id", [
-      req.params.itemId, req.user.name,
-    ]);
-    // notify Purchaser that stock is issued + close the Stock PO if all its items are reduced
-    try {
-      const link = await db.query(
-        "SELECT pr.id AS pr_id, pr.pr_no FROM pr_items i JOIN purchase_requests pr ON pr.id = i.pr_id WHERE i.id = $1",
-        [req.params.itemId]
-      );
-      if (link.rows[0]) {
-        const prId = link.rows[0].pr_id;
-        // if no stock items remain un-reduced, close the STOCK PO(s) for this PR
-        const remaining = await db.query(
-          "SELECT COUNT(*)::int n FROM pr_items WHERE pr_id = $1 AND stock_qty > 0 AND stock_status <> 'STOCK_REDUCED'",
-          [prId]
-        );
-        if (remaining.rows[0].n === 0) {
-          await db.query(
-            "UPDATE purchase_orders SET status='CLOSED', goods_received_date=CURRENT_DATE WHERE pr_id=$1 AND po_type='STOCK' AND status='OPEN'",
-            [prId]
-          );
-        }
-        Email.stockIssued(await getPR(link.rows[0].pr_no));
-      }
-    } catch { /* non-blocking */ }
-    ok(res, { movement_id: r.rows[0].movement_id });
-  } catch (e) {
-    // surface the friendly message from the DB function (e.g. "Not enough stock…")
-    fail(res, 409, String(e.message).replace(/^.*ERROR:\s*/, ""));
-  }
-});
+// FIC issues from-stock lines by receiving the STOCK PO ("Receive goods" on the
+// Purchase Orders screen → POST /purchase-orders/:poNo/receive), which reduces
+// inventory, releases the reservation, sets the delivery stage, and closes the
+// PO in one atomic action. The old per-item PR "reduce-stock" shortcut was
+// removed so the two paths can't diverge (stage-less closes / un-reduced stock).
 
 // ── Generate POs from the BUY portion (one PO per supplier) ──
 router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {

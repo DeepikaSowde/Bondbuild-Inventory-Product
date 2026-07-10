@@ -227,6 +227,28 @@ router.post("/:poNo/receive", canDo("receive_po"), async (req, res) => {
     // status and the PO status can't disagree.
     const finalStage = po.po_type === "STOCK" ? "COLLECTED" : "RECEIVED_FACTORY";
     await withTransaction(async (c) => {
+      // For a STOCK PO, receiving IS the stock issue: pull each still-reserved PR
+      // line out of inventory (fn_fic_reduce_stock writes the OUT movement + drops
+      // quantity_in_stock and flips it to STOCK_REDUCED) and release the reservation
+      // placed at send-to-FIC. Lines already issued are skipped by the PENDING_FIC
+      // filter; if any line is short on stock the function raises and the whole
+      // receive rolls back, so the PO can't close without the stock actually moving.
+      if (po.po_type === "STOCK") {
+        const held = await c.query(
+          `SELECT id, inventory_id, stock_qty FROM pr_items
+             WHERE pr_id = $1 AND COALESCE(stock_location,'Stock') = COALESCE($2,'Stock')
+               AND stock_qty > 0 AND stock_status = 'PENDING_FIC' AND inventory_id IS NOT NULL
+             FOR UPDATE`,
+          [po.pr_id, po.source_location]
+        );
+        for (const it of held.rows) {
+          await c.query("SELECT fn_fic_reduce_stock($1,$2)", [it.id, req.user.name]);
+          await c.query(
+            "UPDATE inventory SET reserved_qty = GREATEST(0, reserved_qty - $1) WHERE id = $2",
+            [it.stock_qty, it.inventory_id]
+          );
+        }
+      }
       await c.query(
         "UPDATE purchase_orders SET status='CLOSED', goods_received_date=CURRENT_DATE, delivery_stage=$2 WHERE id=$1", [po.id, finalStage]
       );
@@ -235,12 +257,21 @@ router.post("/:poNo/receive", canDo("receive_po"), async (req, res) => {
         [po.id, req.user.name, req.user.role, req.body?.notes || ""]
       );
       await notify(c, ["Purchaser", "Manager"], `PO closed: ${po.po_no}`,
-        `Goods received from ${po.supplier_name}.`, "success", po.pr_no, po.po_no);
+        po.po_type === "STOCK"
+          ? `Stock issued from ${po.source_location || "stock"}.`
+          : `Goods received from ${po.supplier_name}.`,
+        "success", po.pr_no, po.po_no);
     });
     const closedPO = await getPO(po.po_no);
     Email.poClosed(closedPO);
     ok(res, closedPO);
-  } catch (e) { fail(res, 500, e.message); }
+  } catch (e) {
+    // Surface the friendly stock message from the DB function (e.g. "Not enough
+    // stock…") as a 409 rather than a raw 500.
+    const msg = String(e.message).replace(/^.*ERROR:\s*/, "");
+    const conflict = /not enough stock|already reduced/i.test(msg);
+    fail(res, conflict ? 409 : 500, msg);
+  }
 });
 
 // ── Cancel ──

@@ -40,7 +40,6 @@ export const api = {
   rejectPR: (prNo, type, reason) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/reject`, { type, reason })),
   assignItems: (prNo, items) => data(axiosClient.put(`/purchase-requests/${enc(prNo)}/items`, { items })),
   sendToFic: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/send-to-fic`)),
-  reduceStock: (itemId) => data(axiosClient.post(`/purchase-requests/items/${itemId}/reduce-stock`)),
   generatePOs: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/generate-pos`)),
 
   // attachments (whole-PR) — upload uses multipart/form-data
