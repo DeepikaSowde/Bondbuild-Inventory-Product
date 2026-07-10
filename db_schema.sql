@@ -227,6 +227,8 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   delivery_method  TEXT,
   delivery_address TEXT,
   amount           NUMERIC NOT NULL DEFAULT 0,
+  currency         VARCHAR(3) NOT NULL DEFAULT 'SGD'
+                   CHECK (currency IN ('SGD','EUR','USD','CNY','JPY','INR','MYR')),
   status           TEXT    NOT NULL DEFAULT 'OPEN'
                    CHECK (status IN ('OPEN','CLOSED','CANCELLED')),
   delivery_stage   TEXT

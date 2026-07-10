@@ -1,7 +1,7 @@
 // pages/PurchaseOrders.jsx — Tailwind version
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiError } from "../lib/api";
-import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money, fmtDate } from "../components/ui";
+import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, curMoney, fmtDate } from "../components/ui";
 import { Table, Td, usePaged, Pagination } from "../components/Table";
 import { exportPoPdf } from "../lib/poPdf";
 import AuditTrail from "../components/AuditTrail";
@@ -30,7 +30,18 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
   useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [q]);
 
   const jobs = useMemo(() => ["All", ...new Set(pos.map((p) => p.job_no).filter(Boolean))], [pos]);
-  const totalVal = pos.reduce((a, p) => a + Number(p.amount || 0), 0);
+  // POs can be in different currencies now, and you can't add across them — so the
+  // header shows one subtotal per currency (SGD first), e.g. "S$ 22,670.00 · € 4,200.00".
+  const totalParts = useMemo(() => {
+    const byCur = pos.reduce((m, p) => {
+      const c = p.currency || "SGD";
+      m[c] = (m[c] || 0) + Number(p.amount || 0);
+      return m;
+    }, {});
+    return Object.entries(byCur)
+      .sort(([a], [b]) => (a === "SGD" ? -1 : b === "SGD" ? 1 : a.localeCompare(b)))
+      .map(([c, v]) => curMoney(v, c));
+  }, [pos]);
   const refresh = () => { load(); refreshInbox?.(); };
 
   // ── Sorting ──────────────────────────────────────────────────────────────
@@ -85,7 +96,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
           {jobs.map((j) => <option key={j}>{j}</option>)}
         </Select>
         <span className="border-l-[3px] border-[#6366F1] pl-2.5 font-mono text-[12.5px] text-[#6B7280]">
-          {pos.length} POs{canSeeAmount ? ` · ${money(totalVal)}` : ""}
+          {pos.length} POs{canSeeAmount && totalParts.length ? ` · ${totalParts.join(" · ")}` : ""}
         </span>
       </div>
 
@@ -103,7 +114,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
             <Td>{p.project_name || "—"}</Td>
             <Td>{p.po_type === "STOCK" ? <span className="text-[#6366F1]">From stock <span className="text-[11px] text-[#9CA3AF]">@ {p.source_location}</span></span> : p.supplier_name}</Td>
             <Td>{fmtDate(p.po_date)}</Td>
-            {canSeeAmount && <Td align="right">{money(p.amount)}</Td>}
+            {canSeeAmount && <Td align="right">{curMoney(p.amount, p.currency)}</Td>}
             <Td>
               <span className="inline-flex flex-wrap items-center gap-1.5">
                 <Badge status={p.status} />
@@ -184,7 +195,8 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
   const isSC = d.delivery_method === "SC";
 
   const meta = [["Status", <Badge status={po.status} />], ["Supplier", po.supplier_name], ["Type", po.supplier_type],
-    ["Job", po.job_no || "—"], ["From PR", po.pr_no || "—"], ["Prepared by", po.prepared_by || "—"],
+    ["Job", po.job_no || "—"], ["From PR", po.pr_no || "—"], ["Currency", po.currency || "SGD"],
+    ["Prepared by", po.prepared_by || "—"],
     ["PO date", fmtDate(po.po_date)], ["Received", fmtDate(po.goods_received_date) || "—"]];
 
   return (
@@ -225,15 +237,15 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
               <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.description}</td>
               <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.qty}</td>
               <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.unit}</td>
-              {canSeePrice && <td className="border-b border-[#F3F4F6] px-2.5 py-2">{money(it.unit_price)}</td>}
-              {canSeeAmount && <td className="border-b border-[#F3F4F6] px-2.5 py-2">{money(it.line_total)}</td>}
+              {canSeePrice && <td className="border-b border-[#F3F4F6] px-2.5 py-2">{curMoney(it.unit_price, po.currency)}</td>}
+              {canSeeAmount && <td className="border-b border-[#F3F4F6] px-2.5 py-2">{curMoney(it.line_total, po.currency)}</td>}
             </tr>
           ))}
         </tbody>
         {canSeeAmount && (
           <tfoot>
             <tr><td colSpan={4 + (canSeePrice ? 1 : 0)} className="px-2.5 py-2.5 text-right font-bold text-[#6B7280]">Total</td>
-              <td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{money(po.amount)}</td></tr>
+              <td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{curMoney(po.amount, po.currency)}</td></tr>
           </tfoot>
         )}
       </table>

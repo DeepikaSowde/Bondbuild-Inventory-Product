@@ -35,6 +35,8 @@ const fmtDate = (v) => {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
 };
 const num2 = (n) => (Number(n) > 0 ? Number(n).toLocaleString("en-SG", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "");
+// Keep in sync with ui.CURRENCY_SYMBOLS — the PO's own currency labels the price columns.
+const CUR_SYM = { SGD: "S$", EUR: "€", USD: "US$", CNY: "CN¥", JPY: "JP¥", INR: "₹", MYR: "RM" };
 
 async function loadImage(path) {
   try {
@@ -143,8 +145,9 @@ export async function exportPoPdf(po, opts = {}) {
   // ── Items table ──
   const descs = items.map((it) => String(it.description || ""));
   const colours = items.map((it) => (it.colour ? String(it.colour).toUpperCase() : ""));
+  const sym = CUR_SYM[po.currency] || po.currency || "S$";
   const head = showPrice
-    ? [["Item", "Descriptions", "Qty", "Unit", "Rate (S$)", "Price (S$)"]]
+    ? [["Item", "Descriptions", "Qty", "Unit", `Rate (${sym})`, `Price (${sym})`]]
     : [["Item", "Descriptions", "Qty", "Unit"]];
   const body = items.map((it, i) => {
     const base = [i + 1, descs[i] + (colours[i] ? `\n${colours[i]}` : ""), it.qty ?? "", it.unit || ""];

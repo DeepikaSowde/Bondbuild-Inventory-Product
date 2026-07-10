@@ -1,22 +1,16 @@
 // pages/PurchaseRequests.jsx — Tailwind version
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiError, downloadAttachment } from "../lib/api";
-import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money, fmtDate } from "../components/ui";
+import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money, curMoney, fmtDate } from "../components/ui";
 import { Table, Td, usePaged, Pagination } from "../components/Table";
 import { exportPrPdf } from "../lib/prPdf";
 import AuditTrail from "../components/AuditTrail";
 
 // Currencies the Purchaser may assign to a buy line. SGD is the default so the
-// screen behaves exactly as before until someone changes it. Keep this list (and
-// the symbols) in sync with the pr_items.currency CHECK on the backend.
+// screen behaves exactly as before until someone changes it. Keep this list in
+// sync with the pr_items.currency CHECK on the backend. Symbols + formatting live
+// in ui.curMoney so the PO screen and PDF render them identically.
 const CURRENCIES = ["SGD", "EUR", "USD", "CNY", "JPY", "INR", "MYR"];
-const CUR_SYM = { SGD: "S$", EUR: "€", USD: "US$", CNY: "CN¥", JPY: "JP¥", INR: "₹", MYR: "RM" };
-// Currency-aware money — like ui.money() but prefixes the chosen currency's symbol
-// instead of a hard-coded "S$" (buy lines can now be priced in any currency).
-const curMoney = (n, cur = "SGD") =>
-  n == null || n === ""
-    ? "—"
-    : `${CUR_SYM[cur] || `${cur} `} ${Number(n).toLocaleString("en-SG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const emptyItem = () => ({
   profile_code: "", description: "", colour: "", qty: "", unit: "pcs",

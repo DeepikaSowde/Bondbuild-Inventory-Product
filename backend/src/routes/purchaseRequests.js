@@ -572,9 +572,16 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
 
     // Buy PO is independent of the stock side (stock has its own Stock PO created at send-to-FIC).
     const created = await withTransaction(async (c) => {
+      // One PO per supplier + currency: a PO carries a single amount, so buy lines
+      // priced in different currencies for the same supplier must split into
+      // separate POs. In practice a supplier is usually one currency, so this is a
+      // no-op for them — it only kicks in on genuinely mixed lines.
       const groups = {};
-      for (const it of buyItems)
-        (groups[it.supplier_id] ||= { supplier_id: it.supplier_id, supplier_name: it.supplier_name, items: [] }).items.push(it);
+      for (const it of buyItems) {
+        const cur = PR_CURRENCIES.has(it.currency) ? it.currency : "SGD";
+        const key = `${it.supplier_id}|${cur}`;
+        (groups[key] ||= { supplier_id: it.supplier_id, supplier_name: it.supplier_name, currency: cur, items: [] }).items.push(it);
+      }
       const poNos = [];
       for (const g of Object.values(groups)) {
         const sup = await c.query("SELECT type FROM po_suppliers WHERE id=$1", [g.supplier_id]);
@@ -585,10 +592,10 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
         const po = await c.query(
           `INSERT INTO purchase_orders
            (po_no, job_no, pr_id, pr_no, project_name, supplier_id, supplier_name,
-            supplier_type, requested_by, prepared_by, amount)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+            supplier_type, requested_by, prepared_by, amount, currency)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
           [poNo, pr.job_no, pr.id, pr.pr_no, pr.project_name, g.supplier_id,
-           g.supplier_name, supType, pr.requested_by, req.user.name, amount]
+           g.supplier_name, supType, pr.requested_by, req.user.name, amount, g.currency]
         );
         let line = 1;
         for (const it of g.items)

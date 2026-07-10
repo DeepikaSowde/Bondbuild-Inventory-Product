@@ -111,6 +111,16 @@ export function EmptyRow({ colSpan, children }) {
 export const money = (n) =>
   n == null || n === "" ? "—" : "S$ " + Number(n).toLocaleString("en-SG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Multi-currency display. Buy lines/POs carry their own currency (default SGD);
+// keep this map in sync with the pr_items/purchase_orders currency CHECK.
+export const CURRENCY_SYMBOLS = { SGD: "S$", EUR: "€", USD: "US$", CNY: "CN¥", JPY: "JP¥", INR: "₹", MYR: "RM" };
+export const currencySymbol = (cur) => CURRENCY_SYMBOLS[cur] || cur || "S$";
+// Like money() but prefixes the given currency's symbol instead of a fixed "S$".
+export const curMoney = (n, cur = "SGD") =>
+  n == null || n === ""
+    ? "—"
+    : `${currencySymbol(cur)} ${Number(n).toLocaleString("en-SG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 // Project-wide date display format: dd/mm/yyyy.
 // - "2026-04-01" or ISO timestamps -> parses the date part directly (no TZ shift).
 // - Anything that isn't a real date (e.g. "ASAP") passes through unchanged.
