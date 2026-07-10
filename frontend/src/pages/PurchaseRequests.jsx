@@ -6,6 +6,18 @@ import { Table, Td, usePaged, Pagination } from "../components/Table";
 import { exportPrPdf } from "../lib/prPdf";
 import AuditTrail from "../components/AuditTrail";
 
+// Currencies the Purchaser may assign to a buy line. SGD is the default so the
+// screen behaves exactly as before until someone changes it. Keep this list (and
+// the symbols) in sync with the pr_items.currency CHECK on the backend.
+const CURRENCIES = ["SGD", "EUR", "USD", "CNY", "JPY", "INR", "MYR"];
+const CUR_SYM = { SGD: "S$", EUR: "€", USD: "US$", CNY: "CN¥", JPY: "JP¥", INR: "₹", MYR: "RM" };
+// Currency-aware money — like ui.money() but prefixes the chosen currency's symbol
+// instead of a hard-coded "S$" (buy lines can now be priced in any currency).
+const curMoney = (n, cur = "SGD") =>
+  n == null || n === ""
+    ? "—"
+    : `${CUR_SYM[cur] || `${cur} `} ${Number(n).toLocaleString("en-SG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 const emptyItem = () => ({
   profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
   remarks: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
@@ -1003,6 +1015,11 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
   };
   const total = items.reduce((s, it) => s + (Number(it.buy_qty) || 0) * (Number(it.unit_price) || 0), 0);
   const stockTotal = items.reduce((s, it) => s + (Number(it.stock_qty) || 0) * (Number(it.stock_unit_price) || 0), 0);
+  // A summed Buy total only makes sense in one currency. Show the shared currency
+  // when every buy line agrees; otherwise fall back to SGD (mixed currencies can't
+  // be added, so the figure is indicative only).
+  const buyCurrencies = [...new Set(items.filter((it) => Number(it.buy_qty) > 0).map((it) => it.currency || "SGD"))];
+  const buyCurrency = buyCurrencies.length === 1 ? buyCurrencies[0] : "SGD";
   const th = "border-b border-[#E5E7EB] px-2.5 py-2 text-left text-[10px] font-bold uppercase text-[#9CA3AF]";
   const td = "border-b border-[#F3F4F6] px-2.5 py-2";
 
@@ -1111,11 +1128,18 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                       ) : (it.supplier_name || "—")}
                     </td>
                     {canSeePrice && (
-                      <td className={`${td} w-[112px] min-w-[112px]`}>
-                        {canEditBuy ? <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} className={Number(it.unit_price) > 0 ? "" : "!border-[#DC2626]"} placeholder="0.00" /> : money(it.unit_price)}
+                      <td className={`${td} w-[150px] min-w-[150px]`}>
+                        {canEditBuy ? (
+                          <div className="flex items-center gap-1.5">
+                            <Select value={it.currency || "SGD"} onChange={(e) => setIt(i, "currency", e.target.value)} className="!w-[64px] shrink-0 !px-1.5">
+                              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                            </Select>
+                            <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} className={`!w-auto min-w-0 flex-1 ${Number(it.unit_price) > 0 ? "" : "!border-[#DC2626]"}`} placeholder="0.00" />
+                          </div>
+                        ) : curMoney(it.unit_price, it.currency)}
                       </td>
                     )}
-                    {canSeePrice && <td className={td}>{money((Number(it.buy_qty) || 0) * (Number(it.unit_price) || 0))}</td>}
+                    {canSeePrice && <td className={td}>{curMoney((Number(it.buy_qty) || 0) * (Number(it.unit_price) || 0), it.currency)}</td>}
                   </tr>
                 );
               }
@@ -1136,7 +1160,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
           </tbody>
           {canSeePrice && (
             <tfoot>
-              <tr><td colSpan={cols.length - 1} className="px-2.5 py-2.5 text-right font-bold text-[#6B7280]">Buy total</td><td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{money(total)}</td></tr>
+              <tr><td colSpan={cols.length - 1} className="px-2.5 py-2.5 text-right font-bold text-[#6B7280]">Buy total{buyCurrencies.length > 1 ? " (mixed currencies)" : ""}</td><td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{curMoney(total, buyCurrency)}</td></tr>
               <tr><td colSpan={cols.length - 1} className="px-2.5 py-1 text-right text-[12px] text-[#6B7280]">Stock value</td><td className="px-2.5 py-1 text-[12px] font-semibold text-[#6366F1]">{money(stockTotal)}</td></tr>
             </tfoot>
           )}
@@ -1215,7 +1239,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
           const buyItems = items.filter((it) => Number(it.buy_qty) > 0);
           const allBuyHaveSupplier = buyItems.every((it) => it.supplier_id);
           const allBuyHavePrice = buyItems.every((it) => Number(it.unit_price) > 0);
-          const saveAssign = async () => api.assignItems(pr.pr_no, buyItems.map((it) => ({ id: it.id, supplier_id: it.supplier_id || null, supplier_name: it.supplier_name, unit_price: Number(it.unit_price) || 0 })));
+          const saveAssign = async () => api.assignItems(pr.pr_no, buyItems.map((it) => ({ id: it.id, supplier_id: it.supplier_id || null, supplier_name: it.supplier_name, unit_price: Number(it.unit_price) || 0, currency: it.currency || "SGD" })));
           // Each half is "done" once its own PO exists. A PR with both halves needs
           // BOTH actions — the buttons below only disappear once each is truly done.
           const buyPending = hasBuy && !pr.buy_po_created;

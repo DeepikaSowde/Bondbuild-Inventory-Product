@@ -225,6 +225,8 @@ CREATE TABLE IF NOT EXISTS pr_items (
   supplier_name   TEXT,
   supplier_type   TEXT    DEFAULT 'Local',
   unit_price      NUMERIC NOT NULL DEFAULT 0,
+  currency        VARCHAR(3) NOT NULL DEFAULT 'SGD'
+                  CHECK (currency IN ('SGD','EUR','USD','CNY','JPY','INR','MYR')),
   stock_unit_price NUMERIC NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_pr_items_pr_id ON pr_items(pr_id);

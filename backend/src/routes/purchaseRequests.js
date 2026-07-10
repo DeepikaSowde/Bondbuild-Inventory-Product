@@ -29,6 +29,10 @@ const asUuid = (v) => (typeof v === "string" && UUID_RE.test(v) ? v : null);
 // hand them only the "PR-001" tail to avoid printing the job twice.
 const prTail = (prNo) => String(prNo).split("/").pop();
 
+// Currencies the Purchaser may assign to a buy line — must match the frontend
+// dropdown and the pr_items.currency CHECK. Anything else falls back to SGD.
+const PR_CURRENCIES = new Set(["SGD", "EUR", "USD", "CNY", "JPY", "INR", "MYR"]);
+
 // Description length cap — must match the frontend textarea maxLength (500).
 // Returns an error message for the first over-limit item, or null if all OK.
 const DESC_MAX = 500;
@@ -382,8 +386,8 @@ router.put("/:prNo/items", canDo("assign_supplier"), async (req, res) => {
     await withTransaction(async (c) => {
       for (const it of items) {
         await c.query(
-          "UPDATE pr_items SET supplier_id=$2, supplier_name=$3, unit_price=$4 WHERE id=$1 AND pr_id=$5",
-          [it.id, it.supplier_id || null, it.supplier_name, Number(it.unit_price) || 0, pr.id]
+          "UPDATE pr_items SET supplier_id=$2, supplier_name=$3, unit_price=$4, currency=$6 WHERE id=$1 AND pr_id=$5",
+          [it.id, it.supplier_id || null, it.supplier_name, Number(it.unit_price) || 0, pr.id, PR_CURRENCIES.has(it.currency) ? it.currency : "SGD"]
         );
       }
       // price the stock portion automatically from inventory.unit_price
