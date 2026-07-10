@@ -4,7 +4,9 @@
 //
 // Fires in-app notifications (po_notifications) — and, when the Microsoft Graph
 // mail channel is switched on (MAIL_ENABLED=true), the SAME content by email —
-// for six overdue conditions across the PR → PO → delivery lifecycle.
+// for conditions across the PR → PO → delivery lifecycle: six overdue nags, a
+// repeating "shipment dates not filled" nudge to the Purchaser, and two one-time
+// "Shipment ETD/ETA date reached" reminders to the Factory In-charge & Manager.
 //
 // Design notes
 //  • Windows are CALENDAR days, measured from each item's raise timestamp.
@@ -212,6 +214,101 @@ async function ruleStockNotCollected() {
   return rows.length;
 }
 
+// ── Shipment date rules (BUY POs only — shipment ETD/ETA live in
+//    po_delivery_tracking and only apply to bought-in / imported goods) ─────────
+
+// Nag the Purchaser every 2 days while a BUY PO still has no Shipment ETD and/or
+// ETA. Fires from 2 days after the PO was raised and REPEATS every 2 days until
+// BOTH dates are filled (the WHERE drops the PO the moment both are present).
+async function ruleShipmentDatesMissing() {
+  const rule = "PO_SHIPMENT_DATES_MISSING", interval = 2;
+  const { rows } = await db.query(
+    `SELECT p.id, p.po_no, p.pr_no, p.supplier_name, p.prepared_by, p.po_date
+       FROM purchase_orders p
+       LEFT JOIN po_delivery_tracking t ON t.po_id = p.id
+       LEFT JOIN alert_ledger l ON l.rule=$1 AND l.entity_type='PO' AND l.entity_id=p.id
+      WHERE p.po_type='BUY' AND p.status='OPEN'
+        AND (t.po_id IS NULL OR t.shipment_etd IS NULL OR t.shipment_eta IS NULL)
+        AND p.po_date <= NOW() - make_interval(days => $2)
+        AND (l.last_fired_at IS NULL OR l.last_fired_at <= NOW() - make_interval(days => $2))`,
+    [rule, interval]
+  );
+  for (const po of rows) {
+    const n = daysBetween(po.po_date);
+    const title = `PO ${po.po_no}: Shipment ETD/ETA still not filled (${n} days)`;
+    const body = `Purchase order ${po.po_no} (${po.supplier_name || "supplier"}) was raised ${n} days ago but its Shipment ETD and/or Shipment ETA dates are still empty. Purchaser: please open the PO and enter both the Shipment ETD and Shipment ETA. This reminder repeats every ${interval} days until both dates are filled.`;
+    // Personal nag to the purchaser who prepared it (fall back to the whole role).
+    const owner = await userByName(po.prepared_by);
+    await insertNotification({ role: owner?.role || "Purchaser", targetUserId: owner?.id || null,
+      title, body, type: "warning", refPr: po.pr_no, refPo: po.po_no });
+    sendSlaEmail({ toEmails: owner?.email ? [owner.email] : await emailsForRoles(["Purchaser"]),
+      subject: title, title: "Shipment dates missing on a PO", lines: [body], prNo: po.pr_no, poNo: po.po_no });
+    await stampLedger(rule, "PO", po.id);
+  }
+  return rows.length;
+}
+
+// Shared body for the two "shipment date reached" reminders. Both are ONE-TIME
+// per PO (the ledger guard is `last_fired_at IS NULL`): once the ETD/ETA day is
+// announced we never re-announce it. Both target the Factory In-charge and the
+// Manager as whole roles.
+async function fireShipmentDateAlert({ rule, po, title, body }) {
+  await insertNotification({ role: "Factory In-charge", title, body, type: "info", refPr: po.pr_no, refPo: po.po_no });
+  await insertNotification({ role: "Manager", title, body, type: "info", refPr: po.pr_no, refPo: po.po_no });
+  sendSlaEmail({ toEmails: await emailsForRoles(["Factory In-charge", "Manager"]),
+    subject: title, title: "Shipment date reached", lines: [body], prNo: po.pr_no, poNo: po.po_no });
+  await stampLedger(rule, "PO", po.id);
+}
+
+// On the Shipment ETD date: tell FIC + Manager the goods are due to leave the
+// supplier. `<= CURRENT_DATE` (not `=`) so a missed sweep day still fires late.
+async function ruleShipmentEtdDue() {
+  const rule = "PO_SHIPMENT_ETD_DUE";
+  const { rows } = await db.query(
+    `SELECT p.id, p.po_no, p.pr_no, p.supplier_name,
+            to_char(t.shipment_etd,'YYYY-MM-DD') AS shipment_etd
+       FROM purchase_orders p
+       JOIN po_delivery_tracking t ON t.po_id = p.id
+       LEFT JOIN alert_ledger l ON l.rule=$1 AND l.entity_type='PO' AND l.entity_id=p.id
+      WHERE p.po_type='BUY' AND p.status='OPEN'
+        AND t.shipment_etd IS NOT NULL
+        AND t.shipment_etd <= CURRENT_DATE
+        AND (p.delivery_stage IS DISTINCT FROM 'RECEIVED_FACTORY')
+        AND l.last_fired_at IS NULL`,
+    [rule]
+  );
+  for (const po of rows) {
+    const title = `PO ${po.po_no}: Shipment ETD (${po.shipment_etd}) reached`;
+    const body = `The Shipment ETD for purchase order ${po.po_no} (${po.supplier_name || "supplier"}) is ${po.shipment_etd} — the goods are due to depart the supplier. Factory In-charge / Manager: please confirm dispatch and keep the delivery status updated.`;
+    await fireShipmentDateAlert({ rule, po, title, body });
+  }
+  return rows.length;
+}
+
+// On the Shipment ETA date: tell FIC + Manager the goods are due to arrive.
+async function ruleShipmentEtaDue() {
+  const rule = "PO_SHIPMENT_ETA_DUE";
+  const { rows } = await db.query(
+    `SELECT p.id, p.po_no, p.pr_no, p.supplier_name,
+            to_char(t.shipment_eta,'YYYY-MM-DD') AS shipment_eta
+       FROM purchase_orders p
+       JOIN po_delivery_tracking t ON t.po_id = p.id
+       LEFT JOIN alert_ledger l ON l.rule=$1 AND l.entity_type='PO' AND l.entity_id=p.id
+      WHERE p.po_type='BUY' AND p.status='OPEN'
+        AND t.shipment_eta IS NOT NULL
+        AND t.shipment_eta <= CURRENT_DATE
+        AND (p.delivery_stage IS DISTINCT FROM 'RECEIVED_FACTORY')
+        AND l.last_fired_at IS NULL`,
+    [rule]
+  );
+  for (const po of rows) {
+    const title = `PO ${po.po_no}: Shipment ETA (${po.shipment_eta}) reached`;
+    const body = `The Shipment ETA for purchase order ${po.po_no} (${po.supplier_name || "supplier"}) is ${po.shipment_eta} — the goods are due to arrive. Factory In-charge / Manager: please receive the shipment and update the delivery status to Received.`;
+    await fireShipmentDateAlert({ rule, po, title, body });
+  }
+  return rows.length;
+}
+
 const RULES = [
   ["PR_APPROVAL_OVERDUE", rulePrApproval],
   ["PO_INITIATION_OVERDUE", rulePoInitiation],
@@ -219,6 +316,9 @@ const RULES = [
   ["PO_BUY_NOT_RECEIVED", ruleBuyNotReceived],
   ["PO_STOCK_NO_MOVEMENT", ruleStockNoMovement],
   ["PO_STOCK_NOT_COLLECTED", ruleStockNotCollected],
+  ["PO_SHIPMENT_DATES_MISSING", ruleShipmentDatesMissing],
+  ["PO_SHIPMENT_ETD_DUE", ruleShipmentEtdDue],
+  ["PO_SHIPMENT_ETA_DUE", ruleShipmentEtaDue],
 ];
 
 /**
