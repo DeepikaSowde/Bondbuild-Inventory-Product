@@ -14,6 +14,17 @@ const { protect, adminOnly } = require("../middleware/auth");
 
 const router = express.Router();
 
+// Same password policy enforced when creating/editing users (routes/users.js).
+const passwordError = (pw) => {
+  if (typeof pw !== "string" || pw.length < 8 || pw.length > 128)
+    return "Password must be 8–128 characters";
+  if (!/[A-Za-z]/.test(pw)) return "Password must include at least one letter";
+  if (!/[0-9]/.test(pw)) return "Password must include at least one number";
+  if (!/[^A-Za-z0-9]/.test(pw))
+    return "Password must include at least one special character (e.g. !@#$)";
+  return null;
+};
+
 // ── 1. Change my own password ──
 // Body: { currentPassword, newPassword }
 router.post("/change-password", protect, async (req, res) => {
@@ -27,13 +38,9 @@ router.post("/change-password", protect, async (req, res) => {
           error: "Current and new password are required",
         });
     }
-    if (String(newPassword).length < 6) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: "New password must be at least 6 characters",
-        });
+    const pErr = passwordError(String(newPassword));
+    if (pErr) {
+      return res.status(400).json({ success: false, error: pErr });
     }
 
     // load the current hash for the logged-in user
@@ -91,13 +98,9 @@ router.post(
   async (req, res) => {
     try {
       const { newPassword } = req.body || {};
-      if (!newPassword || String(newPassword).length < 6) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: "New password must be at least 6 characters",
-          });
+      const pErr = passwordError(String(newPassword || ""));
+      if (pErr) {
+        return res.status(400).json({ success: false, error: pErr });
       }
 
       const { rows } = await db.query(

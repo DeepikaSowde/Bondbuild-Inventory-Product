@@ -185,16 +185,17 @@ function UsersModule({
 
   const handleResetPassword = async (u) => {
     const newPassword = window.prompt(
-      `Reset password for "${u.name}" (${u.username}).\nEnter a new temporary password (min 6 characters):`,
+      `Reset password for "${u.name}" (${u.username}).\nEnter a new temporary password (8–128 chars, incl. a letter, a number, and a special character):`,
     );
     if (newPassword === null) return; // cancelled
-    if (newPassword.trim().length < 6) {
-      showNotify("Password must be at least 6 characters", "error");
+    const pErr = passwordError(newPassword); // never trim a password
+    if (pErr) {
+      showNotify(pErr, "error");
       return;
     }
     try {
       await api.post(`/auth/users/${u.id}/reset-password`, {
-        newPassword: newPassword.trim(),
+        newPassword,
       });
       showNotify(
         `Password reset for ${u.name}. Share the temporary password with them.`,
