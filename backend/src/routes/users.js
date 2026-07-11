@@ -9,7 +9,7 @@ const { protect, adminOnly } = require("../middleware/auth");
 const router = express.Router();
 
 // ── Shared validation ──────────────────────────────────────────
-const ALLOWED_ROLES = ["Drafter", "Manager", "Purchaser", "Factory In-charge", "Supervisor", "Admin"];
+const ALLOWED_ROLES = ["Drafter", "Manager", "Purchaser", "Factory In-charge", "Supervisor", "QS", "Admin"];
 const ALLOWED_STATUS = ["Active", "Inactive"];
 
 // Password policy: 8–128 chars, at least one letter, one number, one special char.

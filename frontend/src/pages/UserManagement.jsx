@@ -76,6 +76,7 @@ function UsersModule({
     "Purchaser",
     "Factory In-charge",
     "Supervisor",
+    "QS",
   ];
 
   const emptyForm = {
