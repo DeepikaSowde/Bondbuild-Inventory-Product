@@ -121,6 +121,7 @@ export async function exportPoPdf(po, opts = {}) {
   doc.setFont("helvetica", "bold"); doc.setFontSize(10);
   doc.text(isStock ? "*STOCK ISSUE" : "*PURCHASE ORDER", bx + bw / 2, by + 11.5, { align: "center" });
   doc.setFontSize(8.5);
+  const valX = bx + 96, valW = bx + bw - 4 - valX; // room for the value on one line
   rows.forEach((r, i) => {
     const ry = by + rowH * (i + 1);
     doc.line(bx, ry, bx + bw, ry);
@@ -128,7 +129,13 @@ export async function exportPoPdf(po, opts = {}) {
     doc.setFont("helvetica", r[0] === "Payment Terms" ? "bold" : "normal");
     if (r[0] === "Delivery Date") doc.setTextColor(200, 30, 30);
     else if (r[0] === "Payment Terms") doc.setTextColor(37, 99, 235);
-    doc.text(`: ${r[1]}`, bx + 96, ry + 11, { maxWidth: bw - 100 });
+    // Shrink long values (e.g. a full PO number) so they stay on one line
+    // instead of wrapping down into the next row.
+    const val = `: ${r[1]}`;
+    let fs = 8.5;
+    while (fs > 6 && doc.getTextWidth(val) > valW) { fs -= 0.5; doc.setFontSize(fs); }
+    doc.text(val, valX, ry + 11);
+    doc.setFontSize(8.5);
     doc.setTextColor(0);
   });
 
