@@ -32,7 +32,10 @@ export default function LoginPage() {
       setError({ username: "", password: "", general: "" });
       navigate("/home");
     } catch (err) {
-      setError({ username: "", password: "", general: err?.response?.data?.message || "Invalid username or password." });
+      const general = err?.code === "TAB_LOCKED"
+        ? err.message
+        : (err?.response?.data?.message || "Invalid username or password.");
+      setError({ username: "", password: "", general });
       setLoading(false);
     }
   };
