@@ -42,7 +42,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex w-screen h-screen font-sans overflow-hidden bg-[#080B14]">
+    <div className="flex w-screen h-screen font-sans overflow-hidden bg-[#080B14] relative">
       {/* ── LEFT PANEL ── */}
       <div className="w-1/2 h-full bg-gradient-to-br from-[#0A0E1A] via-[#0C1322] to-[#070A12] flex flex-col justify-center pl-28 pr-11 py-8 relative overflow-hidden">
         {/* Radial glow overlays */}
@@ -222,6 +222,21 @@ export default function LoginPage() {
           </div>
         </div>
       </div>
+      {/* ── Engineered-by attribution ── */}
+      <div className="absolute bottom-4 right-6 z-20 flex items-center gap-2 select-none">
+        <img
+          src="/yazhsey-logo.png"
+          alt="Yazhsey Technologies"
+          className="h-7 w-auto object-contain rounded"
+        />
+        <div className="text-right leading-tight">
+          <div className="text-[9px] text-gray-500 tracking-wide">Engineered by</div>
+          <div className="text-[11px] font-bold text-gray-300">
+            Yazhsey Technologies
+          </div>
+        </div>
+      </div>
+
       {/* ── Forgot Password popup ── */}
       {showForgot && (
         <div
