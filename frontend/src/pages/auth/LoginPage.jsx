@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
+import heroIsometric from "../../assets/hero-isometric.jpg";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -40,33 +41,6 @@ export default function LoginPage() {
     }
   };
 
-  const roles = [
-    {
-      role: "Drafter / Purchaser",
-      icon: "🛒",
-      color: "from-green-500 to-transparent",
-      desc: "PRs, POs & Suppliers",
-    },
-    {
-      role: "Manager",
-      icon: "📋",
-      color: "from-amber-500 to-transparent",
-      desc: "Approve PRs, manage orders",
-    },
-    {
-      role: "Supervisor / Factory In-charge",
-      icon: "🏭",
-      color: "from-blue-500 to-transparent",
-      desc: "Stock & Issue control",
-    },
-    {
-      role: "Admin",
-      icon: "👑",
-      color: "from-indigo-500 to-transparent",
-      desc: "Full system access",
-    },
-  ];
-
   return (
     <div className="flex w-screen h-screen font-sans overflow-hidden bg-[#0F0E1A]">
       {/* ── LEFT PANEL ── */}
@@ -94,7 +68,7 @@ export default function LoginPage() {
           </div>
           <div>
             <div className="text-xs font-black text-white tracking-wider uppercase">
-              Bond Build SG
+              Bond Building Products Pte Ltd
             </div>
             <div className="text-[9px] text-indigo-400 tracking-widest uppercase mt-0.5">
               Inventory System
@@ -107,37 +81,23 @@ export default function LoginPage() {
           <div className="text-[9px] text-indigo-400 font-bold tracking-[0.2em] uppercase mb-2.5">
             Welcome to
           </div>
-          <div className="text-4xl font-black text-white leading-tight tracking-tighter mb-2.5">
-            InventoryOpz
+          <div className="text-4xl font-black leading-tight tracking-tighter mb-2.5">
+            <span className="text-white">Inventory</span>
+            <span className="text-[#2B8FFF]">Opz</span>
             <br />
           </div>
           <div className="text-xs text-indigo-200 leading-relaxed max-w-xs">
-            Track stock, manage POs, coordinate between site and factory.
+            Track your stock. Control your spend. Accelerate your cash flow.
           </div>
         </div>
 
-        {/* System Roles Grid */}
+        {/* Hero Illustration */}
         <div className="relative z-10">
-          <div className="text-[9px] font-bold text-indigo-500 uppercase tracking-wider mb-2">
-            System Roles
-          </div>
-          <div className="grid grid-cols-2 gap-1.5">
-            {roles.map((r) => (
-              <div
-                key={r.role}
-                className="bg-white/5 border border-white/10 rounded-lg p-3 cursor-default hover:bg-white/10 transition-colors"
-              >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="text-sm">{r.icon}</span>
-                  <span className="text-xs font-bold text-white">{r.role}</span>
-                </div>
-                <div className="text-[9px] text-indigo-200 mb-2">{r.desc}</div>
-                <div
-                  className={`h-0.5 w-10 rounded-full bg-gradient-to-r ${r.color}`}
-                />
-              </div>
-            ))}
-          </div>
+          <img
+            src={heroIsometric}
+            alt="Site and warehouse logistics illustration"
+            className="w-full max-w-md rounded-xl border border-white/10 shadow-2xl"
+          />
         </div>
       </div>
 
@@ -256,7 +216,7 @@ export default function LoginPage() {
 
           {/* Footer */}
           <div className="mt-6 text-center text-[10px] text-gray-600">
-            Bond Build SG · v2.0
+            Bond Building Products Pte Ltd · v2.0
           </div>
         </div>
       </div>
