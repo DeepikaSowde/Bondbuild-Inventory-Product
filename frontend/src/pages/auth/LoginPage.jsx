@@ -42,22 +42,22 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex w-screen h-screen font-sans overflow-hidden bg-[#0F0E1A]">
+    <div className="flex w-screen h-screen font-sans overflow-hidden bg-[#080B14]">
       {/* ── LEFT PANEL ── */}
-      <div className="w-1/2 h-full bg-gradient-to-br from-[#1a1744] via-[#251d6b] to-[#1a1744] flex flex-col justify-center px-11 py-8 relative overflow-hidden">
+      <div className="w-1/2 h-full bg-gradient-to-br from-[#0A0E1A] via-[#0C1322] to-[#070A12] flex flex-col justify-center px-11 py-8 relative overflow-hidden">
         {/* Radial glow overlays */}
         <div
           className="absolute top-[-20%] right-[-15%] w-3/5 aspect-square rounded-full bg-radial-gradient pointer-events-none opacity-20"
           style={{
             background:
-              "radial-gradient(circle,rgba(99,102,241,.25) 0%,transparent 70%)",
+              "radial-gradient(circle,rgba(43,143,255,.25) 0%,transparent 70%)",
           }}
         />
         <div
           className="absolute bottom-[-15%] left-[-10%] w-5/12 aspect-square rounded-full pointer-events-none opacity-15"
           style={{
             background:
-              "radial-gradient(circle,rgba(129,140,248,.15) 0%,transparent 70%)",
+              "radial-gradient(circle,rgba(59,130,246,.15) 0%,transparent 70%)",
           }}
         />
 
@@ -72,7 +72,7 @@ export default function LoginPage() {
             <div className="text-xs font-black text-white tracking-wider uppercase">
               Bond Building Products Pte Ltd
             </div>
-            <div className="text-[9px] text-indigo-400 tracking-widest uppercase mt-0.5">
+            <div className="text-[9px] text-[#3B8CFF] tracking-widest uppercase mt-0.5">
               Inventory System
             </div>
           </div>
@@ -80,7 +80,7 @@ export default function LoginPage() {
 
         {/* Hero Section */}
         <div className="mb-6 relative z-10">
-          <div className="text-[9px] text-indigo-400 font-bold tracking-[0.2em] uppercase mb-2.5">
+          <div className="text-[9px] text-[#3B8CFF] font-bold tracking-[0.2em] uppercase mb-2.5">
             Welcome to
           </div>
           <div className="text-4xl font-black leading-tight tracking-tighter mb-2.5">
@@ -88,7 +88,7 @@ export default function LoginPage() {
             <span className="text-[#2B8FFF]">Opz</span>
             <br />
           </div>
-          <div className="text-xs text-indigo-200 leading-relaxed whitespace-nowrap">
+          <div className="text-xs text-[#2B8FFF] leading-relaxed whitespace-nowrap">
             Track your stock. Control your spend. Accelerate your cash flow.
           </div>
         </div>
