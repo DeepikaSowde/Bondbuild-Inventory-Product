@@ -44,7 +44,7 @@ export default function LoginPage() {
   return (
     <div className="flex w-screen h-screen font-sans overflow-hidden bg-[#080B14]">
       {/* ── LEFT PANEL ── */}
-      <div className="w-1/2 h-full bg-gradient-to-br from-[#0A0E1A] via-[#0C1322] to-[#070A12] flex flex-col justify-center px-11 py-8 relative overflow-hidden">
+      <div className="w-1/2 h-full bg-gradient-to-br from-[#0A0E1A] via-[#0C1322] to-[#070A12] flex flex-col justify-center pl-20 pr-11 py-8 relative overflow-hidden">
         {/* Radial glow overlays */}
         <div
           className="absolute top-[-20%] right-[-15%] w-3/5 aspect-square rounded-full bg-radial-gradient pointer-events-none opacity-20"
