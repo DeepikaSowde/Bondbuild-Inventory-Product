@@ -36,8 +36,20 @@ const ProjectProgress = () => (
   </div>
 );
 const Accounting = () => (
-  <div className="p-8">
-    <h1>💰 Accounting</h1>
+  <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 px-6">
+    <div className="bg-white rounded-2xl shadow-md px-10 py-12 max-w-md text-center border border-[#E5E7EB]">
+      <div className="w-20 h-20 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto mb-6 text-4xl">
+        💰
+      </div>
+      <h2 className="text-2xl font-black text-[#1E1B4B] mb-3">Accounting</h2>
+      <span className="inline-block text-[11px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-3 py-1 mb-4">
+        Coming Soon
+      </span>
+      <p className="text-[13px] text-gray-500 leading-relaxed">
+        Spend analysis and financial summaries are being polished and will be
+        available here soon.
+      </p>
+    </div>
   </div>
 );
 
