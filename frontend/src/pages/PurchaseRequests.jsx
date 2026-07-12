@@ -1220,7 +1220,12 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
             {pApprove && <Btn variant="success" disabled={busy} onClick={() => act(() => api.approvePR(pr.pr_no, user.name), `${pr.pr_no} approved`)}>Approve</Btn>}
           </>
         )}
-        {canCreate && pr.status === "SEND_BACK" && <Btn onClick={onEdit} disabled={busy}>Edit &amp; resubmit</Btn>}
+        {/* Edit & resubmit is the drafter's action — hide it from approvers (Manager/Admin) */}
+        {canCreate && !pApprove && !pReject && pr.status === "SEND_BACK" && <Btn onClick={onEdit} disabled={busy}>Edit &amp; resubmit</Btn>}
+        {/* A sent-back PR is with the drafter; approvers just wait for the resubmission */}
+        {(pApprove || pReject) && pr.status === "SEND_BACK" && (
+          <span className="self-center text-[12.5px] text-[#6B7280]">Awaiting drafter’s resubmission</span>
+        )}
         {assignMode && (() => {
           const hasStock = items.some((it) => Number(it.stock_qty) > 0);
           const hasBuy = items.some((it) => Number(it.buy_qty) > 0);
