@@ -113,12 +113,20 @@ export async function exportPrPdf(pr) {
   doc.setFont("helvetica", "normal");
   doc.text(String(pr.project_name || ""), M + 92, boxTop + 26, { maxWidth: 130 });
   doc.text(String(pr.job_no || ""), M + 92, boxTop + 50, { maxWidth: 130 });
-  // Middle: work-scope (Location) in red bold
+  // Middle: work-scope (Location) in red bold. Kept strictly between the left
+  // values and the divider, and vertically centred regardless of line count,
+  // so it never bleeds into the "PR No." column.
   if (pr.location) {
-    doc.setFont("helvetica", "bold"); doc.setTextColor(200, 30, 30);
-    doc.text(String(pr.location).toUpperCase(), (M + 232 + rightX) / 2, boxTop + 40,
-      { align: "center", maxWidth: rightX - (M + 232) - 8 });
-    doc.setTextColor(0);
+    const midLeft = M + 232;        // clears the left-column values
+    const midRight = rightX - 12;   // the divider line
+    const midCX = (midLeft + midRight) / 2;
+    const midW = midRight - midLeft - 8;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(200, 30, 30);
+    const locLines = doc.splitTextToSize(String(pr.location).toUpperCase(), midW);
+    const lineH = 11;
+    const startY = boxTop + boxH / 2 - ((locLines.length - 1) * lineH) / 2 + 3;
+    doc.text(locLines, midCX, startY, { align: "center" });
+    doc.setFontSize(10); doc.setTextColor(0);
   }
   // Right column
   doc.setFont("helvetica", "bold");
@@ -127,10 +135,12 @@ export async function exportPrPdf(pr) {
   doc.text("Date Required :", rightX, boxTop + 48);
   doc.text("PIC :", rightX, boxTop + 64);
   doc.setFont("helvetica", "normal");
-  doc.text(prNumberOnly(pr.pr_no), rightX + 84, boxTop + 16);
-  doc.text(fmtDate(pr.date_issued), rightX + 84, boxTop + 32);
-  doc.text(fmtDate(pr.date_required), rightX + 84, boxTop + 48);
-  doc.text(String(pr.pic || ""), rightX + 84, boxTop + 64);
+  const rvX = rightX + 84;
+  const rvW = W - M - rvX - 6;   // keep values inside the box's right edge
+  doc.text(prNumberOnly(pr.pr_no), rvX, boxTop + 16, { maxWidth: rvW });
+  doc.text(fmtDate(pr.date_issued), rvX, boxTop + 32, { maxWidth: rvW });
+  doc.text(fmtDate(pr.date_required), rvX, boxTop + 48, { maxWidth: rvW });
+  doc.text(String(pr.pic || ""), rvX, boxTop + 64, { maxWidth: rvW });
 
   // ── Items table ──
   // A material can be stored as several rows (one per source pallet + a buy row)
