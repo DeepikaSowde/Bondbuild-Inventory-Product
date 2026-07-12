@@ -75,9 +75,48 @@ function SupplierCard({ supplier, canEdit, onEdit, onDelete }) {
   );
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Phone/fax: allow digits, spaces, +, -, parentheses; need at least 6 digits.
+const isPhoneLike = (v) =>
+  /^[+\d][\d\s()\-]*$/.test(v.trim()) && (v.match(/\d/g) || []).length >= 6;
+
+function validateSupplier(f) {
+  const err = {};
+  if (!f.name.trim()) err.name = "Company name is required";
+  else if (f.name.trim().length < 2) err.name = "Name is too short";
+
+  if (f.email.trim() && !EMAIL_RE.test(f.email.trim()))
+    err.email = "Enter a valid email address";
+
+  if (f.phone.trim() && !isPhoneLike(f.phone))
+    err.phone = "Enter a valid phone number";
+
+  if (f.fax.trim() && !isPhoneLike(f.fax))
+    err.fax = "Enter a valid fax number";
+
+  return err;
+}
+
+// Inline validation message shown under a field.
+function ErrText({ msg }) {
+  if (!msg) return null;
+  return <span className="mt-1 block text-[11px] font-semibold text-[#EF4444]">{msg}</span>;
+}
+
 function SupplierForm({ initial, onSave, onClose, saving }) {
   const [form, setForm] = useState({ ...BLANK, ...initial });
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const [errors, setErrors] = useState({});
+  const set = (k) => (e) => {
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+    // Clear a field's error as soon as the user edits it.
+    setErrors((prev) => (prev[k] ? { ...prev, [k]: undefined } : prev));
+  };
+
+  const submit = () => {
+    const err = validateSupplier(form);
+    if (Object.keys(err).length > 0) { setErrors(err); return; }
+    onSave(form);
+  };
 
   return (
     <Modal title={initial?.id ? "Edit Supplier" : "Add Supplier"} onClose={onClose}>
@@ -85,6 +124,7 @@ function SupplierForm({ initial, onSave, onClose, saving }) {
         <div className="grid grid-cols-2 gap-3">
           <Field label="Company Name *" className="col-span-2">
             <Input value={form.name} onChange={set("name")} placeholder="e.g. Buildmate (S) Pte Ltd" required />
+            <ErrText msg={errors.name} />
           </Field>
 
           <Field label="Type">
@@ -99,14 +139,17 @@ function SupplierForm({ initial, onSave, onClose, saving }) {
 
           <Field label="Phone / WhatsApp">
             <Input value={form.phone} onChange={set("phone")} placeholder="+65 9123 4567" />
+            <ErrText msg={errors.phone} />
           </Field>
 
           <Field label="Fax">
             <Input value={form.fax} onChange={set("fax")} placeholder="+65 6xxx xxxx" />
+            <ErrText msg={errors.fax} />
           </Field>
 
           <Field label="Email">
             <Input type="email" value={form.email} onChange={set("email")} placeholder="orders@supplier.com" />
+            <ErrText msg={errors.email} />
           </Field>
 
           <Field label="Address" className="col-span-2">
@@ -122,10 +165,7 @@ function SupplierForm({ initial, onSave, onClose, saving }) {
 
         <div className="flex justify-end gap-2 pt-1">
           <Btn variant="ghost" onClick={onClose} disabled={saving}>Cancel</Btn>
-          <Btn
-            onClick={() => onSave(form)}
-            disabled={saving || !form.name.trim()}
-          >
+          <Btn onClick={submit} disabled={saving}>
             {saving ? "Saving…" : initial?.id ? "Save changes" : "Add Supplier"}
           </Btn>
         </div>
