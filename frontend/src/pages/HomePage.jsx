@@ -154,10 +154,7 @@ export default function HomePage() {
     okItems: 0,
     lowStockItems: 0,
     outOfStockItems: 0,
-    stockValue: 0,
     openPOs: 0,
-    closedPOs: 0,
-    totalPOValue: 0,
     openPRs: 0,
     totalProjects: 0,
     completedProjects: 0,
@@ -191,10 +188,7 @@ export default function HomePage() {
           okItems: invData.ok_items || 0,
           lowStockItems: invData.low_stock_items || 0,
           outOfStockItems: invData.out_of_stock_items || 0,
-          stockValue: invData.total_value || 0,
           openPOs: procData.open_pos || 0,
-          closedPOs: 0,
-          totalPOValue: 0,
           openPRs: procData.open_prs || 0,
           totalProjects: (opData.completed || 0) + (opData.in_progress || 0) + (opData.upcoming || 0),
           completedProjects: opData.completed || 0,
@@ -279,8 +273,7 @@ export default function HomePage() {
   );
 
   // ─── Derived values ───────────────────────────────────────────────────────
-  const { totalItems, lowStockItems: lowStock, openPOs, closedPOs, totalPOValue: totalPOVal, openPRs, stockValue, totalProjects, completedProjects, inProgressProjects, upcomingProjects, okItems } = dashboardData;
-  const fmtVal = (n) => n >= 1000 ? `S$${(n / 1000).toFixed(1)}k` : `S$${n.toFixed(0)}`;
+  const { totalItems, lowStockItems: lowStock, openPOs, openPRs, totalProjects, completedProjects, inProgressProjects, upcomingProjects, okItems } = dashboardData;
 
   const initials = (user?.full_name || user?.username || "U").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
 
@@ -301,7 +294,7 @@ export default function HomePage() {
     {
       label: "Open POs",
       value: openPOs,
-      sub: `Value ${fmtVal(totalPOVal)}`,
+      sub: "Active orders",
       accent: T.emerald,
       accentDim: T.emeraldDim,
       icon: <Ico.clipboard size={18} stroke={T.emerald} />,
@@ -319,7 +312,7 @@ export default function HomePage() {
     {
       label: "Projects",
       value: totalProjects,
-      sub: `${closedPOs} POs closed`,
+      sub: `${inProgressProjects} in progress`,
       accent: T.violet,
       accentDim: T.violetDim,
       icon: <Ico.barChart size={18} stroke={T.violet} />,
@@ -342,7 +335,6 @@ export default function HomePage() {
       stats: [
         { label: "Total Items", value: totalItems },
         { label: "Low Stock", value: lowStock },
-        { label: "Stock Value", value: fmtVal(stockValue) },
       ],
       cta: "View materials, pricing & inventory",
     },
