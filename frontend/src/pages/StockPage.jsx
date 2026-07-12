@@ -45,6 +45,7 @@ const DEFAULT_PERMISSIONS = {
     view_stock: true,
     view_unit_price: true,
     view_total_value: true,
+    // Purchaser adds NEW items and edits every field (full editor, no delete).
     edit_quantity: true,
     edit_location: true,
     add_item: true,
@@ -451,10 +452,15 @@ export default function StockPage() {
 
   const visibleColumns = columns.filter((col) => col.show);
 
-  // Editing the full item is Admin-only; delete still follows its own permission.
+  // Full editors (Admin, Purchaser) edit every field. Other non-admin editors
+  // (e.g. Factory In-charge) get a restricted edit — Location and/or Qty only.
+  // Delete stays Admin-only.
   const isAdmin = user?.role === "Admin";
+  const isFullEditor = isAdmin || user?.role === "Purchaser";
+  const canEditLimited = !!permissions.edit_location || !!permissions.edit_quantity;
+  const canEdit = isFullEditor || canEditLimited;
 
-  const showActions = isAdmin || permissions.delete_item;
+  const showActions = canEdit || permissions.delete_item;
 
   // ── FIX #3: clean "undefined" out of item names (backend band-aid) ──
   const cleanName = (name) => {
@@ -1049,8 +1055,8 @@ export default function StockPage() {
                           justifyContent: "center",
                         }}
                       >
-                        {/* Edit button - Admin only (full-item edit) */}
-                        {isAdmin && (
+                        {/* Edit button - Admin (all fields) or FIC (Location/Qty) */}
+                        {canEdit && (
                           <button
                             onClick={() => openEdit(item)}
                             style={{
@@ -1355,7 +1361,7 @@ export default function StockPage() {
         </div>
       )}
 
-      {/* ── Edit Item Modal (all fields · Admin only) ── */}
+      {/* ── Edit Item Modal (Admin/Purchaser: all fields · FIC: Location/Qty only) ── */}
       {editItem && (
         <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
@@ -1383,7 +1389,8 @@ export default function StockPage() {
                 {editItem.profile_name}{editItem.size ? ` · ${editItem.size}` : ""}{editItem.location_code ? ` · ${editItem.location_code}` : ""}
               </div>
 
-              {/* Fields — every field is editable (Admin only) */}
+              {/* Fields — Admin edits all; non-admins only the fields their
+                  role permits (Location if edit_location, Qty if edit_quantity). */}
               {[
                 { label: "Location *",     type: "text",   key: "location_code" },
                 { label: "Profile Code *", type: "text",   key: "item_code" },
@@ -1393,7 +1400,14 @@ export default function StockPage() {
                 { label: "Quantity *",     type: "number", key: "quantity_in_stock" },
                 { label: "Unit Price *",   type: "number", key: "unit_price" },
                 { label: "Remarks",        type: "text",   key: "remarks", placeholder: "Optional note" },
-              ].map(({ label, type, key, placeholder }) => (
+              ]
+                .filter(({ key }) => {
+                  if (isFullEditor) return true;
+                  if (key === "location_code") return !!permissions.edit_location;
+                  if (key === "quantity_in_stock") return !!permissions.edit_quantity;
+                  return false;
+                })
+                .map(({ label, type, key, placeholder }) => (
                 <div key={key}>
                   <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 5 }}>{label}</label>
                   <input
@@ -1406,7 +1420,8 @@ export default function StockPage() {
                 </div>
               ))}
 
-              {/* ── Photo Section ── */}
+              {/* ── Photo Section (full editors: Admin / Purchaser) ── */}
+              {isFullEditor && (
               <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: 16, marginTop: 4 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em" }}>
@@ -1482,6 +1497,7 @@ export default function StockPage() {
                   </div>
                 )}
               </div>
+              )}
             </div>
 
             {/* Footer */}
