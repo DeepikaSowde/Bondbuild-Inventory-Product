@@ -1043,7 +1043,8 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
   const pReject = !!perms.reject_pr || isAdmin;
   const pAssign = !!perms.assign_supplier || isAdmin;
   const pGenerate = !!perms.generate_po || isAdmin;
-  const pSendFic = !!perms.send_to_fic || isAdmin;
+  // FIC shouldn't send stock to themselves — hide "Send stock to FIC" for that role.
+  const pSendFic = (!!perms.send_to_fic || isAdmin) && user.role !== "Factory In-charge";
   const [items, setItems] = useState(pr.items.map((it) => ({ ...it })));
   const [tab, setTab] = useState("details");
   useEffect(() => { setItems(pr.items.map((it) => ({ ...it }))); }, [pr]);
