@@ -98,8 +98,21 @@ export async function exportPrPdf(pr) {
   }
 
   // ── Info box ──
-  const boxTop = 72, boxH = 70;
-  const rightX = W - M - 168;
+  const boxTop = 72;
+  const rightX = W - M - 190;
+  const rvX = rightX + 84;
+  const rvW = W - M - rvX - 6;   // keep values inside the box's right edge
+  const DR_LINE_H = 11;
+
+  // "Date Required" can be free text (e.g. "priority delivery before …"), so it
+  // may wrap onto several lines. Measure it first and grow the box (and push the
+  // "PIC" row down) so a long value never overlaps the row beneath it.
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+  const drLines = doc.splitTextToSize(fmtDate(pr.date_required) || "", rvW);
+  const drExtra = Math.max(0, drLines.length - 1) * DR_LINE_H;
+  const boxH = 70 + drExtra;
+  const picY = boxTop + 64 + drExtra;
+
   doc.setDrawColor(0); doc.setLineWidth(1);
   doc.rect(M, boxTop, W - 2 * M, boxH);
   doc.setLineWidth(0.5);
@@ -128,19 +141,19 @@ export async function exportPrPdf(pr) {
     doc.text(locLines, midCX, startY, { align: "center" });
     doc.setFontSize(10); doc.setTextColor(0);
   }
-  // Right column
-  doc.setFont("helvetica", "bold");
+  // Right column — "PIC" sits below "Date Required", which may span >1 line.
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10);
   doc.text("PR No. :", rightX, boxTop + 16);
   doc.text("Date Issued :", rightX, boxTop + 32);
   doc.text("Date Required :", rightX, boxTop + 48);
-  doc.text("PIC :", rightX, boxTop + 64);
+  doc.text("PIC :", rightX, picY);
   doc.setFont("helvetica", "normal");
-  const rvX = rightX + 84;
-  const rvW = W - M - rvX - 6;   // keep values inside the box's right edge
   doc.text(prNumberOnly(pr.pr_no), rvX, boxTop + 16, { maxWidth: rvW });
   doc.text(fmtDate(pr.date_issued), rvX, boxTop + 32, { maxWidth: rvW });
-  doc.text(fmtDate(pr.date_required), rvX, boxTop + 48, { maxWidth: rvW });
-  doc.text(String(pr.pic || ""), rvX, boxTop + 64, { maxWidth: rvW });
+  doc.setFontSize(9);
+  doc.text(drLines, rvX, boxTop + 48);            // pre-measured, wraps cleanly
+  doc.setFontSize(10);
+  doc.text(String(pr.pic || ""), rvX, picY, { maxWidth: rvW });
 
   // ── Items table ──
   // A material can be stored as several rows (one per source pallet + a buy row)
