@@ -100,7 +100,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
         </span>
       </div>
 
-      <Table columns={[
+      <Table minWidth={1100} columns={[
         { label: "PO No" }, { label: "PR" }, { label: "Project" }, { label: "Supplier" },
         { label: <SortHead label="Date" keyName="po_date" /> },
         ...(canSeeAmount ? [{ label: <SortHead label="Amount" keyName="amount" />, align: "right" }] : []),
@@ -126,7 +126,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
               <span className="inline-flex justify-end gap-1.5">
                 <Btn variant="ghost" small title="Download PDF"
                   onClick={() => api.po(p.po_no).then((full) => exportPoPdf(full, { showPrice: canSeePrice })).catch((e) => notify(apiError(e), "error"))}>PDF</Btn>
-                <Btn variant="ghost" small onClick={() => api.po(p.po_no).then(setView)}>Open</Btn>
+                <Btn variant="ghost" small onClick={() => api.po(p.po_no).then(setView)}>View</Btn>
               </span>
             </Td>
           </tr>

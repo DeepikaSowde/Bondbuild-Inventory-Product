@@ -164,6 +164,11 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
   const [rejecting, setRejecting] = useState(null);
   const [suppliers, setSuppliers] = useState([]);
   const [busy, setBusy] = useState(false);
+  // Free-text search + per-field filters (job no / project / PR no)
+  const [search, setSearch] = useState("");
+  const [fJob, setFJob] = useState("");
+  const [fProject, setFProject] = useState("");
+  const [fPrNo, setFPrNo] = useState("");
 
   const role = user.role, isAdmin = role === "Admin";
   // Purchasers only work with approved PRs (to action) and PO-raised ones (to track),
@@ -183,8 +188,31 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
   const counts = useMemo(() => { const c = {}; prs.forEach((p) => (c[p.status] = (c[p.status] || 0) + 1)); return c; }, [prs]);
   const refresh = () => { load(); refreshInbox?.(); };
 
-  // Paginate the list, 20 per page; reset to page 1 when the status filter changes.
-  const { page, setPage, slice: pagePrs, total, pageSize, pageCount } = usePaged(prs, filter);
+  // Search (PR no / job / project) + dropdown filters, applied client-side to
+  // the loaded list. Dropdown options are the distinct values in that list.
+  const jobOptions = useMemo(() => [...new Set(prs.map((p) => p.job_no).filter(Boolean))].sort(), [prs]);
+  const projectOptions = useMemo(() => [...new Set(prs.map((p) => p.project_name).filter(Boolean))].sort(), [prs]);
+  const prNoOptions = useMemo(() => [...new Set(prs.map((p) => p.pr_no).filter(Boolean))].sort(), [prs]);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return prs.filter((p) => {
+      if (fJob && p.job_no !== fJob) return false;
+      if (fProject && p.project_name !== fProject) return false;
+      if (fPrNo && p.pr_no !== fPrNo) return false;
+      if (q && !`${p.pr_no || ""} ${p.job_no || ""} ${p.project_name || ""}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [prs, search, fJob, fProject, fPrNo]);
+
+  // Paginate, 20 per page; reset to page 1 when the tab, search or filters change.
+  const { page, setPage, slice: pagePrs, total, pageSize, pageCount } =
+    usePaged(filtered, `${filter}|${search}|${fJob}|${fProject}|${fPrNo}`);
+
+  const fieldCls = "rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-[13px] text-[#374151] outline-none focus:border-[#6366F1] max-w-[190px]";
+  const STATUS_LABEL = { All: "All statuses", APPROVED: "Approved", PENDING: "Pending", SEND_BACK: "Sent back", PO_RAISED: "PO raised", REJECTED: "Rejected" };
+  const defaultStatus = role === "Purchaser" ? "APPROVED" : "All";
+  const anyFilter = search || fJob || fProject || fPrNo || filter !== defaultStatus;
+  const clearFilters = () => { setSearch(""); setFJob(""); setFProject(""); setFPrNo(""); setFilter(defaultStatus); };
 
   // PR number is now assigned per-job on submit, so there is nothing to preview here.
   const openCreate = () => {
@@ -207,11 +235,45 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
         {canCreate && <Btn onClick={openCreate}>+ New purchase request</Btn>}
       </div>
 
+      {/* Search + per-field filters (job no / project / PR no) */}
+      <div className="mb-[18px] flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#9CA3AF]">🔍</span>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search PR no, job no or project…"
+            className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 pl-9 pr-3 text-[13px] outline-none focus:border-[#6366F1]"
+          />
+        </div>
+        <select value={filter} onChange={(e) => setFilter(e.target.value)} className={fieldCls}>
+          {STATUS_TABS.map((s) => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
+        </select>
+        <select value={fJob} onChange={(e) => setFJob(e.target.value)} className={fieldCls}>
+          <option value="">All jobs</option>
+          {jobOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <select value={fProject} onChange={(e) => setFProject(e.target.value)} className={fieldCls}>
+          <option value="">All projects</option>
+          {projectOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <select value={fPrNo} onChange={(e) => setFPrNo(e.target.value)} className={fieldCls}>
+          <option value="">All PR numbers</option>
+          {prNoOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+        {anyFilter && (
+          <button onClick={clearFilters}
+            className="rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-[12.5px] font-semibold text-[#6B7280] transition-colors hover:border-[#6366F1]">
+            Clear
+          </button>
+        )}
+      </div>
+
       <Table columns={[
         { label: "PR No" }, { label: "Job" }, { label: "Project" }, { label: "Requested by" },
         { label: "Required" }, { label: "Items", align: "center" }, { label: "Status" }, { label: "" },
       ]}>
-        {prs.length === 0 && <EmptyRow colSpan={8}>No purchase requests yet.</EmptyRow>}
+        {filtered.length === 0 && <EmptyRow colSpan={8}>{prs.length === 0 ? "No purchase requests yet." : "No PRs match your search / filters."}</EmptyRow>}
         {pagePrs.map((p) => (
           <tr key={p.pr_no}>
             <Td mono bold className="!text-[#6366F1]">{p.pr_no}</Td>
@@ -225,7 +287,7 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
               <span className="inline-flex justify-end gap-1.5">
                 <Btn variant="ghost" small title="Download PDF"
                   onClick={() => api.pr(p.pr_no).then(exportPrPdf).catch((e) => notify(apiError(e), "error"))}>PDF</Btn>
-                <Btn variant="ghost" small onClick={() => api.pr(p.pr_no).then(setViewPR)}>Open</Btn>
+                <Btn variant="ghost" small onClick={() => api.pr(p.pr_no).then(setViewPR)}>View</Btn>
               </span>
             </Td>
           </tr>

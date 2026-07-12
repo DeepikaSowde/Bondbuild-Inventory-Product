@@ -1,10 +1,12 @@
 // components/Table.jsx — Tailwind version
 import { useState, useEffect } from "react";
 
-export function Table({ columns, children }) {
+// Pass `minWidth` (px) to keep the table from squeezing on narrow screens —
+// the card then shows a horizontal scrollbar instead of cramming columns.
+export function Table({ columns, children, minWidth }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05)]">
-      <table className="w-full border-collapse">
+    <div className={`rounded-2xl border border-[#E5E7EB] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05)] ${minWidth ? "overflow-x-auto" : "overflow-hidden"}`}>
+      <table className="w-full border-collapse" style={minWidth ? { minWidth } : undefined}>
         <thead>
           <tr>
             {columns.map((c, i) => (
