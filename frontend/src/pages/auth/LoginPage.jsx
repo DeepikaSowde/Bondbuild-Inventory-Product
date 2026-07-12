@@ -63,9 +63,11 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div className="flex items-center gap-2.5 mb-7 relative z-10">
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-400 flex items-center justify-center text-lg flex-shrink-0">
-            📦
-          </div>
+          <img
+            src="/bdb-logo.png"
+            alt="Bond Building Products logo"
+            className="w-10 h-10 rounded-lg object-contain flex-shrink-0"
+          />
           <div>
             <div className="text-xs font-black text-white tracking-wider uppercase">
               Bond Building Products Pte Ltd
@@ -86,7 +88,7 @@ export default function LoginPage() {
             <span className="text-[#2B8FFF]">Opz</span>
             <br />
           </div>
-          <div className="text-xs text-indigo-200 leading-relaxed max-w-xs">
+          <div className="text-xs text-indigo-200 leading-relaxed whitespace-nowrap">
             Track your stock. Control your spend. Accelerate your cash flow.
           </div>
         </div>
@@ -96,7 +98,7 @@ export default function LoginPage() {
           <img
             src={heroIsometric}
             alt="Site and warehouse logistics illustration"
-            className="w-full max-w-md rounded-xl border border-white/10 shadow-2xl"
+            className="w-full max-w-[26.6rem] rounded-xl border border-white/10 shadow-2xl"
           />
         </div>
       </div>
