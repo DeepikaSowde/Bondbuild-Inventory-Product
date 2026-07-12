@@ -217,7 +217,16 @@ export default function StockPage() {
 
   // ── Edit Item modal state ──
   const [editItem, setEditItem] = useState(null);
-  const [editForm, setEditForm] = useState({ quantity_in_stock: "", unit_price: "", remarks: "" });
+  const [editForm, setEditForm] = useState({
+    location_code: "",
+    item_code: "",
+    profile_name: "",
+    size: "",
+    length: "",
+    quantity_in_stock: "",
+    unit_price: "",
+    remarks: "",
+  });
   const [editError, setEditError] = useState("");
 
   // ── Photo state for edit modal ──
@@ -232,6 +241,11 @@ export default function StockPage() {
   const openEdit = async (item) => {
     setEditItem(item);
     setEditForm({
+      location_code: item.location_code ?? "",
+      item_code: item.item_code ?? "",
+      profile_name: item.profile_name ?? "",
+      size: item.size ?? "",
+      length: item.length ?? "",
       quantity_in_stock: item.quantity_in_stock ?? "",
       unit_price: item.unit_price ?? "",
       remarks: item.remarks ?? "",
@@ -289,19 +303,40 @@ export default function StockPage() {
   const openLightbox = (src) => { setLightboxSrc(src); setLightbox(true); };
 
   const handleEditSave = async () => {
-    if (String(editForm.quantity_in_stock).trim() === "") {
-      setEditError("Qty is required"); return;
+    // Full validation: all required except remarks (mirrors Add Item).
+    const required = [
+      ["location_code", "Location"],
+      ["item_code", "Profile Code"],
+      ["profile_name", "Profile"],
+      ["size", "Size"],
+      ["length", "Length"],
+      ["quantity_in_stock", "Qty"],
+      ["unit_price", "Unit Price"],
+    ];
+    const missing = required
+      .filter(([k]) => String(editForm[k] ?? "").trim() === "")
+      .map(([, label]) => label);
+    if (missing.length > 0) {
+      setEditError("Please fill: " + missing.join(", ")); return;
     }
     if (Number(editForm.quantity_in_stock) < 0) {
       setEditError("Qty cannot be negative"); return;
+    }
+    if (Number(editForm.unit_price) < 0) {
+      setEditError("Unit Price cannot be negative"); return;
     }
     try {
       setSaving(true);
       setEditError("");
       await api.put(`/inventory/${editItem.id}`, {
+        location_code: String(editForm.location_code).trim(),
+        item_code: String(editForm.item_code).trim(),
+        profile_name: String(editForm.profile_name).trim(),
+        size: String(editForm.size).trim(),
+        length: editForm.length,
         quantity_in_stock: editForm.quantity_in_stock,
         unit_price: editForm.unit_price,
-        remarks: editForm.remarks,
+        remarks: String(editForm.remarks).trim(),
       });
       // upload any newly selected photos
       if (newFiles.length) {
@@ -416,10 +451,10 @@ export default function StockPage() {
 
   const visibleColumns = columns.filter((col) => col.show);
 
-  const showActions =
-    permissions.edit_quantity ||
-    permissions.edit_location ||
-    permissions.delete_item;
+  // Editing the full item is Admin-only; delete still follows its own permission.
+  const isAdmin = user?.role === "Admin";
+
+  const showActions = isAdmin || permissions.delete_item;
 
   // ── FIX #3: clean "undefined" out of item names (backend band-aid) ──
   const cleanName = (name) => {
@@ -1014,9 +1049,8 @@ export default function StockPage() {
                           justifyContent: "center",
                         }}
                       >
-                        {/* Edit button - if user can edit qty or location */}
-                        {(permissions.edit_quantity ||
-                          permissions.edit_location) && (
+                        {/* Edit button - Admin only (full-item edit) */}
+                        {isAdmin && (
                           <button
                             onClick={() => openEdit(item)}
                             style={{
@@ -1321,7 +1355,7 @@ export default function StockPage() {
         </div>
       )}
 
-      {/* ── Edit Item Modal (Qty / Unit Price / Remarks) ── */}
+      {/* ── Edit Item Modal (all fields · Admin only) ── */}
       {editItem && (
         <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
@@ -1349,11 +1383,16 @@ export default function StockPage() {
                 {editItem.profile_name}{editItem.size ? ` · ${editItem.size}` : ""}{editItem.location_code ? ` · ${editItem.location_code}` : ""}
               </div>
 
-              {/* Fields */}
+              {/* Fields — every field is editable (Admin only) */}
               {[
-                { label: "Quantity *", type: "number", key: "quantity_in_stock" },
-                { label: "Unit Price", type: "number", key: "unit_price" },
-                { label: "Remarks", type: "text",   key: "remarks", placeholder: "Optional note" },
+                { label: "Location *",     type: "text",   key: "location_code" },
+                { label: "Profile Code *", type: "text",   key: "item_code" },
+                { label: "Profile *",      type: "text",   key: "profile_name" },
+                { label: "Size *",         type: "text",   key: "size" },
+                { label: "Length *",       type: "text",   key: "length" },
+                { label: "Quantity *",     type: "number", key: "quantity_in_stock" },
+                { label: "Unit Price *",   type: "number", key: "unit_price" },
+                { label: "Remarks",        type: "text",   key: "remarks", placeholder: "Optional note" },
               ].map(({ label, type, key, placeholder }) => (
                 <div key={key}>
                   <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 5 }}>{label}</label>

@@ -4,6 +4,7 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../config/db");
+const { protect, adminOnly } = require("../middleware/auth");
 
 // ================================================================================
 // GET /api/inventory/summary - Dashboard summary (total items, low stock, etc)
@@ -440,20 +441,123 @@ router.post("/remove-stock", async (req, res) => {
 // PUT /api/inventory/:id - Update inventory item
 // ================================================================================
 
-router.put("/:id", async (req, res) => {
+// Admin-only. Edits every field and recomputes total_value / stock_status.
+router.put("/:id", protect, adminOnly, async (req, res) => {
   try {
     const { id } = req.params;
-    const { quantity_in_stock, unit_price, remarks } = req.body;
+    const {
+      location_code,
+      item_code, // "Profile Code" (e.g. LA-051)
+      profile_name,
+      size,
+      length,
+      quantity_in_stock,
+      unit_price,
+      remarks,
+    } = req.body;
+
+    // --- Validate required fields (all required except remarks) ---
+    const missing = [];
+    if (!location_code) missing.push("Location");
+    if (!item_code) missing.push("Profile Code");
+    if (!profile_name) missing.push("Profile");
+    if (size === undefined || size === null || size === "") missing.push("Size");
+    if (length === undefined || length === null || length === "")
+      missing.push("Length");
+    if (
+      quantity_in_stock === undefined ||
+      quantity_in_stock === null ||
+      quantity_in_stock === ""
+    )
+      missing.push("Qty");
+    if (unit_price === undefined || unit_price === null || unit_price === "")
+      missing.push("Unit Price");
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields: " + missing.join(", "),
+      });
+    }
+
+    // --- Resolve profile_id (look up by name or code, create if missing) ---
+    const profileCode = String(item_code).substring(0, 2).toUpperCase();
+    let profileId = null;
+    const profileResult = await pool.query(
+      "SELECT id FROM inventory_profiles WHERE profile_name = $1 OR profile_code = $2 LIMIT 1",
+      [profile_name, profileCode],
+    );
+    if (profileResult.rows.length > 0) {
+      profileId = profileResult.rows[0].id;
+    } else {
+      const createProfile = await pool.query(
+        `INSERT INTO inventory_profiles (profile_code, profile_name, status)
+         VALUES ($1, $2, 'Active')
+         RETURNING id`,
+        [profileCode, profile_name],
+      );
+      profileId = createProfile.rows[0].id;
+    }
+
+    // --- Resolve location_id (look up by code, create if missing) ---
+    let locationId = null;
+    const locationResult = await pool.query(
+      "SELECT id FROM storage_locations WHERE location_code = $1",
+      [location_code],
+    );
+    if (locationResult.rows.length > 0) {
+      locationId = locationResult.rows[0].id;
+    } else {
+      const createLocation = await pool.query(
+        `INSERT INTO storage_locations (location_code, location_name, location_type, status)
+         VALUES ($1, $2, 'Pallet', 'Active')
+         RETURNING id`,
+        [location_code, location_code],
+      );
+      locationId = createLocation.rows[0].id;
+    }
+
+    // --- Recompute derived values ---
+    const qty = parseInt(quantity_in_stock) || 0;
+    const price = parseFloat(unit_price) || 0;
+    const totalValue = qty * price;
+
+    let stockStatus = "OK";
+    if (qty === 0) stockStatus = "OUT_OF_STOCK";
+    else if (qty <= 10) stockStatus = "LOW_STOCK";
 
     const updateResult = await pool.query(
-      `UPDATE inventory 
-       SET quantity_in_stock = COALESCE($1, quantity_in_stock),
-           unit_price = COALESCE($2, unit_price),
-           remarks = COALESCE($3, remarks),
+      `UPDATE inventory
+       SET location_code = $1,
+           location_id = $2,
+           item_code = $3,
+           profile_name = $4,
+           profile_id = $5,
+           size = $6,
+           length = $7,
+           quantity_in_stock = $8,
+           unit_price = $9,
+           total_value = $10,
+           stock_status = $11,
+           remarks = $12,
            updated_at = NOW()
-       WHERE id = $4
+       WHERE id = $13
        RETURNING *`,
-      [quantity_in_stock, unit_price, remarks, id],
+      [
+        location_code,
+        locationId,
+        item_code,
+        profile_name,
+        profileId,
+        size,
+        length,
+        qty,
+        price,
+        totalValue,
+        stockStatus,
+        remarks ?? null,
+        id,
+      ],
     );
 
     if (updateResult.rows.length === 0) {
