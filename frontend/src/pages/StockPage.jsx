@@ -304,6 +304,40 @@ export default function StockPage() {
   const openLightbox = (src) => { setLightboxSrc(src); setLightbox(true); };
 
   const handleEditSave = async () => {
+    // Limited editors (FIC / Supervisor) submit only the fields their role may
+    // change — validate and send just those, so the full-field rules below
+    // (e.g. Unit Price, which they can't even see) don't block the save.
+    if (!isFullEditor) {
+      const payload = {};
+      if (permissions.edit_location) {
+        if (String(editForm.location_code ?? "").trim() === "") {
+          setEditError("Please fill: Location"); return;
+        }
+        payload.location_code = String(editForm.location_code).trim();
+      }
+      if (permissions.edit_quantity) {
+        if (String(editForm.quantity_in_stock ?? "").trim() === "") {
+          setEditError("Please fill: Qty"); return;
+        }
+        if (Number(editForm.quantity_in_stock) < 0) {
+          setEditError("Qty cannot be negative"); return;
+        }
+        payload.quantity_in_stock = editForm.quantity_in_stock;
+      }
+      try {
+        setSaving(true);
+        setEditError("");
+        await api.put(`/inventory/${editItem.id}`, payload);
+        closeEdit();
+        await fetchData();
+      } catch (err) {
+        setEditError(err.response?.data?.error || "Failed to update item. Please try again.");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     // Full validation: all required except remarks (mirrors Add Item).
     const required = [
       ["location_code", "Location"],

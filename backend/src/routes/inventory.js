@@ -6,6 +6,18 @@ const router = express.Router();
 const pool = require("../config/db");
 const { protect, adminOnly } = require("../middleware/auth");
 
+// Who may edit a stock item, and which fields. Mirrors the frontend
+// stockPermissions.js so the UI and API agree: full editors change every
+// field; limited editors (Factory In-charge / Supervisor) may only move stock
+// (Location) and/or adjust Quantity. Roles absent here cannot edit at all.
+const STOCK_EDIT = {
+  Admin: { full: true, location: true, quantity: true },
+  Purchaser: { full: true, location: true, quantity: true },
+  Manager: { full: true, location: true, quantity: true },
+  "Factory In-charge": { full: false, location: true, quantity: true },
+  Supervisor: { full: false, location: false, quantity: true },
+};
+
 // ================================================================================
 // GET /api/inventory/summary - Dashboard summary (total items, low stock, etc)
 // ================================================================================
@@ -442,7 +454,7 @@ router.post("/remove-stock", async (req, res) => {
 // ================================================================================
 
 // Admin-only. Edits every field and recomputes total_value / stock_status.
-router.put("/:id", protect, adminOnly, async (req, res) => {
+router.put("/:id", protect, async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -456,6 +468,107 @@ router.put("/:id", protect, adminOnly, async (req, res) => {
       remarks,
     } = req.body;
 
+    const caps = STOCK_EDIT[req.user?.role];
+    if (!caps) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to edit inventory items",
+      });
+    }
+
+    // --- Limited editors (FIC / Supervisor): only the fields their role may
+    //     change. Other submitted fields are ignored, not trusted. ---
+    if (!caps.full) {
+      const current = await pool.query(
+        "SELECT unit_price FROM inventory WHERE id = $1",
+        [id],
+      );
+      if (current.rows.length === 0) {
+        return res
+          .status(404)
+          .json({ success: false, error: "Item not found" });
+      }
+
+      const sets = [];
+      const values = [];
+      let p = 1;
+
+      if (caps.location) {
+        if (!location_code || String(location_code).trim() === "") {
+          return res.status(400).json({
+            success: false,
+            error: "Missing required fields: Location",
+          });
+        }
+        // Resolve location_id (look up by code, create if missing)
+        let locationId = null;
+        const locationResult = await pool.query(
+          "SELECT id FROM storage_locations WHERE location_code = $1",
+          [location_code],
+        );
+        if (locationResult.rows.length > 0) {
+          locationId = locationResult.rows[0].id;
+        } else {
+          const createLocation = await pool.query(
+            `INSERT INTO storage_locations (location_code, location_name, location_type, status)
+             VALUES ($1, $2, 'Pallet', 'Active')
+             RETURNING id`,
+            [location_code, location_code],
+          );
+          locationId = createLocation.rows[0].id;
+        }
+        sets.push(`location_code = $${p++}`);
+        values.push(String(location_code).trim());
+        sets.push(`location_id = $${p++}`);
+        values.push(locationId);
+      }
+
+      if (caps.quantity) {
+        if (
+          quantity_in_stock === undefined ||
+          quantity_in_stock === null ||
+          quantity_in_stock === ""
+        ) {
+          return res
+            .status(400)
+            .json({ success: false, error: "Missing required fields: Qty" });
+        }
+        const qty = parseInt(quantity_in_stock);
+        if (isNaN(qty) || qty < 0) {
+          return res
+            .status(400)
+            .json({ success: false, error: "Qty cannot be negative" });
+        }
+        const price = parseFloat(current.rows[0].unit_price) || 0;
+        let stockStatus = "OK";
+        if (qty === 0) stockStatus = "OUT_OF_STOCK";
+        else if (qty <= 10) stockStatus = "LOW_STOCK";
+        sets.push(`quantity_in_stock = $${p++}`);
+        values.push(qty);
+        sets.push(`total_value = $${p++}`);
+        values.push(qty * price);
+        sets.push(`stock_status = $${p++}`);
+        values.push(stockStatus);
+      }
+
+      if (sets.length === 0) {
+        return res.status(403).json({
+          success: false,
+          error: "You do not have permission to edit these fields",
+        });
+      }
+
+      sets.push(`updated_at = NOW()`);
+      values.push(id);
+      const limitedResult = await pool.query(
+        `UPDATE inventory SET ${sets.join(", ")} WHERE id = $${p} RETURNING *`,
+        values,
+      );
+      console.log(`✅ Item ${id} updated (limited: ${req.user.role})`);
+      return res.json({ success: true, data: limitedResult.rows[0] });
+    }
+
+    // --- Full editors (Admin / Purchaser / Manager): all fields. ---
     // --- Validate required fields (all required except remarks) ---
     const missing = [];
     if (!location_code) missing.push("Location");
