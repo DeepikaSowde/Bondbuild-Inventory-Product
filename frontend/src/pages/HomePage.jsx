@@ -391,10 +391,8 @@ export default function HomePage() {
   const openPanel = (open) => () => { setDropdownOpen(false); open(); };
 
   const dropdownItems = [
-    { icon: <Ico.user />, label: "Profile", sub: "View your account", action: () => setDropdownOpen(false) },
     { icon: <Ico.inbox />, label: "Inbox", sub: "PR & PO activity", badge: messageCount, badgeColor: T.violet, action: openPanel(openInbox) },
     { icon: <Ico.bell />, label: "Alerts", sub: "Overdue PRs & POs", badge: alertCount, badgeColor: T.red, action: openPanel(openAlerts) },
-    { icon: <Ico.settings />, label: "Settings", sub: "System preferences", action: () => setDropdownOpen(false) },
     { icon: <Ico.key />, label: "Change Password", sub: "Update your password", action: () => { setDropdownOpen(false); navigate("/change-password"); } },
     { divider: true },
     { icon: <Ico.logOut />, label: "Sign Out", sub: "Log out of your account", action: handleSignOut, danger: true },
@@ -449,14 +447,6 @@ export default function HomePage() {
             title={alertCount ? `Alerts — ${alertCount} unread` : "Alerts — nothing overdue"}>
             <Ico.bell size={16} />
             {alertCount > 0 && <NavBadge count={alertCount} color={T.red} />}
-          </button>
-
-          {/* Settings */}
-          <button style={{ width: 36, height: 36, borderRadius: 10, border: `1px solid ${T.border}`, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: T.textSec, transition: "all 0.18s" }}
-            onMouseEnter={e => { e.currentTarget.style.background = T.card; e.currentTarget.style.color = T.text; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.textSec; }}
-            title="Settings">
-            <Ico.settings size={16} />
           </button>
 
           {/* Divider */}
