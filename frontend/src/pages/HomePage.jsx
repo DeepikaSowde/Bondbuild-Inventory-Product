@@ -142,7 +142,6 @@ export default function HomePage() {
   // The 🔔 Alerts and 📬 Inbox panels live in App (outside the router), so the
   // bell and the profile dropdown just ask the shared context to open them.
   const { alertCount, messageCount, openAlerts, openInbox } = useNotifications();
-  const [showAccounting, setShowAccounting] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -234,21 +233,6 @@ export default function HomePage() {
     await logout();
     navigate("/login");
   };
-
-  if (showAccounting) return (
-    <Shell>
-      <div style={{ textAlign: "center", maxWidth: 360 }}>
-        <div style={{ width: 72, height: 72, borderRadius: 20, background: T.amberDim, border: `1px solid rgba(245,158,11,0.25)`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px", fontSize: 32 }}>⏳</div>
-        <h1 style={{ fontSize: 26, fontWeight: 800, color: T.text, letterSpacing: "-0.03em", marginBottom: 8 }}>Accounting Module</h1>
-        <p style={{ fontSize: 14, color: T.textSec, marginBottom: 32, lineHeight: 1.6 }}>Financials are being polished. Coming soon.</p>
-        <button onClick={() => setShowAccounting(false)} style={{ padding: "10px 24px", borderRadius: 10, fontSize: 13, fontWeight: 600, color: T.text, background: T.blueDim, border: `1px solid rgba(59,130,246,0.25)`, cursor: "pointer", transition: "all 0.2s" }}
-          onMouseEnter={e => { e.currentTarget.style.background = "rgba(59,130,246,0.2)"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = T.blueDim; }}>
-          ← Return to Dashboard
-        </button>
-      </div>
-    </Shell>
-  );
 
   if (loading) return (
     <Shell>
@@ -557,7 +541,7 @@ export default function HomePage() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
           {cards.map((card) => (
             <button key={card.id}
-              onClick={() => card.id === "accounting" ? setShowAccounting(true) : navigate(`/${card.id}`)}
+              onClick={() => navigate(`/${card.id}`)}
               style={{
                 ...glass,
                 borderRadius: 20,
