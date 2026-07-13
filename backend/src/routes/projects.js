@@ -2,7 +2,8 @@
 // Projects Routes - InventoryOpz
 // Reads the NEW client template: sheet "Project Forecast",
 // 4 rows per project (Target % / Achieved % / Claimed % / Received $),
-// down-payment column J, months in cols L..AD (19 months).
+// down-payment column J, months in cols L..AD (19 months),
+// down-payment month in col AE.
 // ============================================================
 
 const express = require("express");
@@ -74,6 +75,9 @@ const COL = {
   total: 10,
 };
 const MONTH_START = 11; // column L
+// "Down Payment Month" is appended AFTER the 19 month columns (column AE) so the
+// existing column positions never shift. Optional — blank on older files.
+const DP_MONTH_COL = MONTH_START + 19; // 30 → column AE
 
 // Map a month KEY like "July'26" -> { year, idx } so we can compare against today.
 const MONTH_IDX = {
@@ -311,6 +315,18 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         const totalClaimedPct = Math.min(downPct + sumClaimed, 1);
         const totalReceived = downAmt + sumReceived;
 
+        // Down Payment Month (col AE) — which month the down payment landed.
+        // Optional; accept it on any of the block's rows.
+        const dpmRaw =
+          targetRow[DP_MONTH_COL] ||
+          receivedRow[DP_MONTH_COL] ||
+          achievedRow[DP_MONTH_COL] ||
+          claimedRow[DP_MONTH_COL] ||
+          null;
+        const downPaymentMonth = dpmRaw
+          ? canonicalMonthKey(String(dpmRaw).trim())
+          : null;
+
         const project = {
           projectName: String(name).trim(),
           status,
@@ -325,6 +341,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
           achievedMonthly,
           claimedMonthly,
           receivedMonthly,
+          downPaymentMonth,
           riskLevel: "low", // risk is set manually after import
         };
 
@@ -368,8 +385,8 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             project_name, status, contract_sum, total_received, down_payment,
             site_progress, claim_till_date, total_target_pct, total_claimed_pct,
             target_monthly, claimed_monthly, received_monthly, achieved_monthly,
-            risk_level, uploaded_by, excel_source
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+            down_payment_month, risk_level, uploaded_by, excel_source
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
           ON CONFLICT (project_name) DO UPDATE SET
             status = EXCLUDED.status,
             contract_sum = EXCLUDED.contract_sum,
@@ -383,6 +400,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             claimed_monthly = EXCLUDED.claimed_monthly,
             received_monthly = EXCLUDED.received_monthly,
             achieved_monthly = EXCLUDED.achieved_monthly,
+            down_payment_month = EXCLUDED.down_payment_month,
             risk_level = EXCLUDED.risk_level,
             uploaded_by = EXCLUDED.uploaded_by,
             excel_source = EXCLUDED.excel_source,
@@ -403,6 +421,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
           JSON.stringify(p.claimedMonthly),
           JSON.stringify(p.receivedMonthly),
           JSON.stringify(p.achievedMonthly),
+          p.downPaymentMonth,
           p.riskLevel,
           "admin",
           req.file.originalname,
