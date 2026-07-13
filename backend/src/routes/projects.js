@@ -1,7 +1,7 @@
 // ============================================================
 // Projects Routes - InventoryOpz
 // Reads the NEW client template: sheet "Project Forecast",
-// 3 rows per project (Target % / Claimed % / Received $),
+// 4 rows per project (Target % / Achieved % / Claimed % / Received $),
 // down-payment column J, months in cols L..AD (19 months).
 // ============================================================
 
@@ -230,6 +230,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       });
 
     const projects = [];
+    const skipped = []; // detected blocks that were empty placeholders
 
     for (let i = 0; i < data.length; i++) {
       const row = data[i] || [];
@@ -238,12 +239,28 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
       // A project starts on its "🎯 Target %" row, which also carries the name.
       if (typ && String(typ).includes("Target") && name) {
+        // Each project is a Target % row followed by its Achieved % / Claimed %
+        // / Received $ sub-rows. Read them by their Type label (col C) rather
+        // than by a fixed offset, so the importer tolerates row order and stays
+        // compatible with older 3-row files that have no Achieved row.
         const targetRow = row;
-        const claimedRow = data[i + 1] || [];
-        const receivedRow = data[i + 2] || [];
+        let achievedRow = [],
+          claimedRow = [],
+          receivedRow = [];
+        let j = i + 1;
+        while (j < data.length) {
+          const r = data[j] || [];
+          const rt = r[COL.type] ? String(r[COL.type]) : "";
+          const rn = r[COL.name];
+          if (rt.includes("Target") && rn) break; // next project starts here
+          if (rt.includes("Achieved")) achievedRow = r;
+          else if (rt.includes("Claimed")) claimedRow = r;
+          else if (rt.includes("Received")) receivedRow = r;
+          else break; // a blank / unrelated row ends this project block
+          j++;
+        }
 
         const status = normalizeStatus(targetRow[COL.status]);
-        const site = pct(targetRow[COL.site]);
         const claimTill = pct(targetRow[COL.claimtill]);
 
         const downPct = pct(targetRow[COL.downpay]); // J on Target row (decimal)
@@ -251,6 +268,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         const downAmt = n(receivedRow[COL.downpay]); // J on Received row ($)
 
         const targetMonthly = {};
+        const achievedMonthly = {};
         const claimedMonthly = {};
         const receivedMonthly = {};
         let sumTarget = 0,
@@ -260,11 +278,15 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         for (let m = 0; m < MONTHS.length; m++) {
           const col = MONTH_START + m;
           const tv = pct(targetRow[col]);
+          const av = pct(achievedRow[col]);
           const cv = pct(claimedRow[col]);
           const rv = n(receivedRow[col]);
           if (tv) {
             targetMonthly[MONTHS[m]] = tv;
             sumTarget += tv;
+          }
+          if (av) {
+            achievedMonthly[MONTHS[m]] = av;
           }
           if (cv) {
             claimedMonthly[MONTHS[m]] = cv;
@@ -275,6 +297,14 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             sumReceived += rv;
           }
         }
+
+        // Site progress = cumulative achieved % up to today's month when the
+        // client supplied Achieved % data; otherwise fall back to the typed
+        // "Site %" column (E). Matches the in-app behaviour.
+        const site =
+          Object.keys(achievedMonthly).length > 0
+            ? computeSiteProgress(achievedMonthly)
+            : pct(targetRow[COL.site]);
 
         // Client's formula: total = down payment + sum of monthly
         const totalTargetPct = Math.min(downPct + sumTarget, 1);
@@ -292,6 +322,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
           totalTargetPct,
           totalClaimedPct,
           targetMonthly,
+          achievedMonthly,
           claimedMonthly,
           receivedMonthly,
           riskLevel: "low", // risk is set manually after import
@@ -304,6 +335,10 @@ router.post("/upload", upload.single("file"), async (req, res) => {
           Object.keys(targetMonthly).length === 0
         ) {
           console.log(`⏭️  Skipping empty project: ${project.projectName}`);
+          skipped.push({
+            name: project.projectName,
+            reason: "No contract sum, received amount, or monthly target values",
+          });
         } else {
           projects.push(project);
           console.log(
@@ -311,7 +346,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
           );
         }
 
-        i += 2; // jump past the Claimed + Received rows
+        i = j - 1; // resume after the sub-rows we just consumed (loop does i++)
       }
     }
 
@@ -324,6 +359,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
     let inserted = 0;
     const errors = [];
+    const importedNames = [];
 
     for (const p of projects) {
       try {
@@ -331,9 +367,9 @@ router.post("/upload", upload.single("file"), async (req, res) => {
           INSERT INTO projects (
             project_name, status, contract_sum, total_received, down_payment,
             site_progress, claim_till_date, total_target_pct, total_claimed_pct,
-            target_monthly, claimed_monthly, received_monthly,
+            target_monthly, claimed_monthly, received_monthly, achieved_monthly,
             risk_level, uploaded_by, excel_source
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
           ON CONFLICT (project_name) DO UPDATE SET
             status = EXCLUDED.status,
             contract_sum = EXCLUDED.contract_sum,
@@ -346,6 +382,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             target_monthly = EXCLUDED.target_monthly,
             claimed_monthly = EXCLUDED.claimed_monthly,
             received_monthly = EXCLUDED.received_monthly,
+            achieved_monthly = EXCLUDED.achieved_monthly,
             risk_level = EXCLUDED.risk_level,
             uploaded_by = EXCLUDED.uploaded_by,
             excel_source = EXCLUDED.excel_source,
@@ -365,6 +402,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
           JSON.stringify(p.targetMonthly),
           JSON.stringify(p.claimedMonthly),
           JSON.stringify(p.receivedMonthly),
+          JSON.stringify(p.achievedMonthly),
           p.riskLevel,
           "admin",
           req.file.originalname,
@@ -372,6 +410,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         const result = await pool.query(query, values);
         if (result.rowCount > 0) {
           inserted++;
+          importedNames.push(p.projectName);
           console.log(`✅ ${p.projectName}`);
         }
       } catch (err) {
@@ -388,10 +427,15 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: `Successfully imported ${inserted} projects`,
+      message:
+        `Imported ${inserted} project${inserted === 1 ? "" : "s"}` +
+        (skipped.length ? `, skipped ${skipped.length}` : "") +
+        (errors.length ? `, ${errors.length} failed` : ""),
       data: {
         total: projects.length,
         imported: inserted,
+        importedNames,
+        skipped,
         errors,
         fileName: req.file.originalname,
       },

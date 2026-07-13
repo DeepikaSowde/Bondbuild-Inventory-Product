@@ -158,9 +158,24 @@ const ProjectsImport = () => {
           <p className="font-bold text-blue-900 mb-2">📋 File Requirements:</p>
           <ul className="space-y-1 text-sm text-blue-800">
             <li>✅ Excel file (.xlsx or .xls)</li>
-            <li>✅ Sheet name: "📊 Projects"</li>
-            <li>✅ Contains all 46 projects</li>
-            <li>✅ File name: InventoryOpz_Projects_Complete.xlsx</li>
+            <li>
+              ✅ Data sheet named exactly{" "}
+              <span className="font-mono bg-white px-1.5 py-0.5 rounded">
+                Project Forecast
+              </span>{" "}
+              (keep the column order as-is)
+            </li>
+            <li>
+              ✅ Each project = 4 rows: <strong>Target %</strong> →{" "}
+              <strong>Achieved %</strong> → <strong>Claimed %</strong> →{" "}
+              <strong>Received $</strong>
+            </li>
+            <li>
+              ✅ Project Name on the <strong>Target %</strong> row (required, unique)
+            </li>
+            <li>
+              ✅ Percentages as decimals (0.45 = 45%); dollars as plain numbers
+            </li>
           </ul>
         </div>
 
@@ -280,6 +295,44 @@ const ProjectsImport = () => {
             )}
           </div>
 
+          {/* IMPORTED PROJECTS — verify every project you filled is here */}
+          {importedData.importedNames?.length > 0 && (
+            <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded mb-4">
+              <h4 className="font-bold text-green-900 mb-2">
+                ✅ Imported ({importedData.importedNames.length}) — check every
+                project you filled appears below:
+              </h4>
+              <div className="flex flex-wrap gap-2">
+                {importedData.importedNames.map((name, i) => (
+                  <span
+                    key={i}
+                    className="text-sm bg-white text-green-800 border border-green-200 px-2 py-1 rounded"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* SKIPPED PROJECTS — detected but not imported */}
+          {importedData.skipped?.length > 0 && (
+            <div className="bg-orange-50 border-l-4 border-orange-500 p-4 rounded mb-4">
+              <h4 className="font-bold text-orange-900 mb-3">
+                ⏭️ Skipped ({importedData.skipped.length}) — these rows had a name
+                but no data, so nothing was imported:
+              </h4>
+              <ul className="space-y-2">
+                {importedData.skipped.map((s, i) => (
+                  <li key={i} className="text-sm text-orange-800">
+                    <strong className="text-orange-900">{s.name}:</strong>{" "}
+                    {s.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* ERROR DETAILS */}
           {importedData.errors.length > 0 && (
             <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded">
@@ -307,17 +360,20 @@ const ProjectsImport = () => {
       <div className="bg-white rounded-lg border border-gray-200 p-8">
         <h3 className="text-xl font-bold text-gray-800 mb-4">❓ How to use:</h3>
         <ol className="space-y-3 text-gray-700 list-decimal list-inside">
-          <li>Download or prepare your Excel file with projects data</li>
+          <li>Fill in the official Project Forecast template</li>
           <li>
-            Ensure the sheet is named{" "}
+            Ensure the data sheet is named{" "}
             <span className="font-mono bg-gray-100 px-2 py-1 rounded">
-              "📊 Projects"
+              Project Forecast
             </span>
           </li>
           <li>Click "Choose Excel file" or drag & drop the file</li>
-          <li>Click "Upload & Import Projects" button</li>
+          <li>Click "Upload &amp; Import Projects" button</li>
           <li>Wait for the import to complete</li>
-          <li>View the import summary and verify the data</li>
+          <li>
+            Check the import summary — confirm every project you filled appears
+            under <strong>Imported</strong>
+          </li>
         </ol>
       </div>
     </div>
