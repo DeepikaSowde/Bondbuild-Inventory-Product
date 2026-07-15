@@ -125,6 +125,19 @@ db.query(`
     ADD COLUMN IF NOT EXISTS target_user_id UUID REFERENCES users(id) ON DELETE CASCADE
 `).catch((err) => console.error("Notification target_user_id migration:", err.message));
 
+// po_notifications.category — splits the feed into 🔔 Alerts ('alert') and
+// 📬 Inbox ('message'). Default 'message' so writers that forget still land safely.
+// (Was previously only in db_schema.sql, which isn't auto-run — causing
+// "column category ... does not exist" on databases that never had it applied.)
+db.query(`
+  ALTER TABLE po_notifications
+    ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'message'
+`).catch((err) => console.error("Notification category migration:", err.message));
+db.query(`
+  CREATE INDEX IF NOT EXISTS idx_po_notifications_category
+    ON po_notifications (category, id DESC)
+`).catch((err) => console.error("Notification category index:", err.message));
+
 // Audit trail: structured before→after detail for edits (see utils/auditTrail.js).
 // Price fields inside `details` are redacted server-side per see_pr_price/see_po_price.
 db.query(`ALTER TABLE pr_approvals ADD COLUMN IF NOT EXISTS details JSONB`)
