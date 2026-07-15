@@ -385,8 +385,15 @@ router.put("/:prNo/items", canDo("assign_supplier"), async (req, res) => {
     const items = req.body?.items || [];
     await withTransaction(async (c) => {
       for (const it of items) {
+        // Changing the supplier (or currency) invalidates any quotation already
+        // requested on this line — clear the stamp so the RFQ gate re-triggers for
+        // the new supplier. The CASE reads the row's OLD values on the right-hand side.
         await c.query(
-          "UPDATE pr_items SET supplier_id=$2, supplier_name=$3, unit_price=$4, currency=$6 WHERE id=$1 AND pr_id=$5",
+          `UPDATE pr_items SET supplier_id=$2, supplier_name=$3, unit_price=$4, currency=$6,
+             quote_requested_at = CASE
+               WHEN supplier_id IS DISTINCT FROM $2 OR currency IS DISTINCT FROM $6 THEN NULL
+               ELSE quote_requested_at END
+           WHERE id=$1 AND pr_id=$5`,
           [it.id, it.supplier_id || null, it.supplier_name, Number(it.unit_price) || 0, pr.id, PR_CURRENCIES.has(it.currency) ? it.currency : "SGD"]
         );
       }
@@ -519,6 +526,49 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
 // PO in one atomic action. The old per-item PR "reduce-stock" shortcut was
 // removed so the two paths can't diverge (stage-less closes / un-reduced stock).
 
+// ── Request for Quotation (one supplier, or all) ──
+// Stamps the supplier's buy lines with quote_requested_at. The PDF/Excel RFQ
+// document itself is built on the client; this just records that the request went
+// out, which unlocks Generate Buy PO (gated below). Buy-only: stock goes to the FIC.
+router.post("/:prNo/request-quote", canDo("assign_supplier"), async (req, res) => {
+  try {
+    const pr = await getPR(req.params.prNo);
+    if (!pr) return fail(res, 404, "PR not found");
+    if (!["APPROVED", "PO_RAISED"].includes(pr.status))
+      return fail(res, 409, `Quotations can only be requested after approval (current: ${pr.status})`);
+
+    const buyItems = pr.items.filter((it) => Number(it.buy_qty) > 0 && it.supplier_id);
+    if (!buyItems.length) return fail(res, 400, "Assign a supplier to the buy items before requesting a quotation");
+
+    const all = !!req.body?.all;
+    const supplierId = req.body?.supplier_id != null ? String(req.body.supplier_id) : null;
+    if (!all && !supplierId) return fail(res, 400, "supplier_id (or all:true) is required");
+
+    const target = all ? buyItems : buyItems.filter((it) => String(it.supplier_id) === supplierId);
+    if (!target.length) return fail(res, 400, "No buy items found for that supplier");
+
+    const supNames = [...new Set(target.map((it) => it.supplier_name).filter(Boolean))];
+    await withTransaction(async (c) => {
+      if (all) {
+        await c.query(
+          "UPDATE pr_items SET quote_requested_at = NOW() WHERE pr_id = $1 AND buy_qty > 0 AND supplier_id IS NOT NULL",
+          [pr.id]
+        );
+      } else {
+        await c.query(
+          "UPDATE pr_items SET quote_requested_at = NOW() WHERE pr_id = $1 AND buy_qty > 0 AND supplier_id = $2",
+          [pr.id, supplierId]
+        );
+      }
+      await c.query(
+        "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'REQUEST_QUOTE',$2,$2,$3,$4,$5)",
+        [pr.id, pr.status, req.user.name, req.user.role, `Quotation requested from ${supNames.join(", ") || "supplier"}`]
+      );
+    });
+    ok(res, await getPR(pr.pr_no));
+  } catch (e) { fail(res, 500, e.message); }
+});
+
 // ── Generate POs from the BUY portion (one PO per supplier) ──
 router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
   let audience;   // built inside the txn, mailed once it commits
@@ -530,6 +580,7 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
     if (!buyItems.length) return fail(res, 400, "No buy-quantity items on this PR");
     for (const it of buyItems) {
       if (!it.supplier_id) return fail(res, 400, `Assign a supplier to "${it.description}" first`);
+      if (!it.quote_requested_at) return fail(res, 400, `Request a quotation from ${it.supplier_name || "the supplier"} before generating the PO`);
       if (!(Number(it.unit_price) > 0)) return fail(res, 400, `Enter a unit price (> 0) for "${it.description}" before generating the PO`);
     }
 

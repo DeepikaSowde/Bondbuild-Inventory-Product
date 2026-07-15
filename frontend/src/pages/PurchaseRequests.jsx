@@ -4,6 +4,7 @@ import { api, apiError, downloadAttachment } from "../lib/api";
 import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money, curMoney, fmtDate } from "../components/ui";
 import { Table, Td, usePaged, Pagination } from "../components/Table";
 import { exportPrPdf } from "../lib/prPdf";
+import { exportRfqPdf, exportRfqExcel } from "../lib/rfqDoc";
 import AuditTrail from "../components/AuditTrail";
 
 // Currencies the Purchaser may assign to a buy line. SGD is the default so the
@@ -1272,6 +1273,11 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
         <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[#9CA3AF]">Attachments</div>
         <PRAttachments pr={pr} notify={notify} onChanged={() => onChanged(pr)} />
       </div>
+
+      {assignMode && (
+        <RfqPanel pr={pr} user={user} items={items} suppliers={suppliers}
+          canEditBuy={canEditBuy} busy={busy} act={act} notify={notify} />
+      )}
       </>)}
 
       {tab === "details" && (
@@ -1296,6 +1302,9 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
           const buyItems = items.filter((it) => Number(it.buy_qty) > 0);
           const allBuyHaveSupplier = buyItems.every((it) => it.supplier_id);
           const allBuyHavePrice = buyItems.every((it) => Number(it.unit_price) > 0);
+          // A quotation must be requested from every buy supplier before the PO can be raised.
+          const allBuyQuoted = buyItems.every((it) => it.quote_requested_at);
+          const firstUnquoted = buyItems.find((it) => it.supplier_id && !it.quote_requested_at);
           const saveAssign = async () => api.assignItems(pr.pr_no, buyItems.map((it) => ({ id: it.id, supplier_id: it.supplier_id || null, supplier_name: it.supplier_name, unit_price: Number(it.unit_price) || 0, currency: it.currency || "SGD" })));
           // Each half is "done" once its own PO exists. A PR with both halves needs
           // BOTH actions — the buttons below only disappear once each is truly done.
@@ -1320,8 +1329,10 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                 }}>Send stock to FIC</Btn>
               )}
               {showGenerate && (
-                <Btn disabled={busy || !allBuyHaveSupplier || !allBuyHavePrice}
-                  title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first" : !allBuyHavePrice ? "Enter a unit price (> 0) for every buy item first" : ""}
+                <Btn disabled={busy || !allBuyHaveSupplier || !allBuyQuoted || !allBuyHavePrice}
+                  title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first"
+                    : !allBuyQuoted ? `Request a quotation from ${firstUnquoted?.supplier_name || "every supplier"} before generating the PO`
+                    : !allBuyHavePrice ? "Enter a unit price (> 0) for every buy item first" : ""}
                   onClick={() => {
                     if (stockPending && !window.confirm("The Buy PO will be created.\n\nYou still have stock items awaiting the Factory In-charge — remember to click \"Send stock to FIC\" as well, or the Stock PO won't be created.\n\nContinue?")) return;
                     act(async () => {
@@ -1338,6 +1349,101 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
       </div>
       )}
     </Modal>
+  );
+}
+
+// ── Request for Quotation panel ─────────────────────────────────────────────
+// Groups the PR's buy lines by supplier (one RFQ = one supplier). Each group can
+// export a Quotation Request (PDF / Excel, blank price column) and be marked as
+// "requested" — which is the gate that unlocks Generate Buy PO. A supplier line
+// with no supplier assigned yet is listed but can't be quoted.
+function RfqPanel({ pr, user, items, suppliers, canEditBuy, busy, act, notify }) {
+  const buyItems = items.filter((it) => Number(it.buy_qty) > 0);
+  // Once the Buy PO exists the RFQ step is done — the panel is only for the pre-PO stage.
+  if (!buyItems.length || pr.buy_po_created) return null;
+
+  const groups = {};
+  for (const it of buyItems) {
+    if (!it.supplier_id) continue;
+    const k = String(it.supplier_id);
+    (groups[k] ||= { supplier_id: it.supplier_id, supplier_name: it.supplier_name, currency: it.currency || "SGD", items: [] }).items.push(it);
+  }
+  const groupList = Object.values(groups);
+  const unassignedCount = buyItems.filter((it) => !it.supplier_id).length;
+  const isRequested = (g) => g.items.every((it) => it.quote_requested_at);
+  const allRequested = groupList.length > 0 && groupList.every(isRequested);
+
+  // Persist any unsaved supplier/price edits before hitting the server (mirrors the
+  // Generate-PO flow), so request-quote sees the assignment the user just made.
+  const saveAssign = () => api.assignItems(pr.pr_no, buyItems.map((it) => ({
+    id: it.id, supplier_id: it.supplier_id || null, supplier_name: it.supplier_name,
+    unit_price: Number(it.unit_price) || 0, currency: it.currency || "SGD",
+  })));
+
+  const docGroup = (g) => ({
+    pr_no: pr.pr_no, job_no: pr.job_no, project_name: pr.project_name, prepared_by: user.name,
+    currency: g.currency,
+    supplier: suppliers.find((s) => String(s.id) === String(g.supplier_id)) || { name: g.supplier_name },
+    items: g.items.map((it) => ({ description: it.description, colour: it.colour, qty: it.buy_qty, unit: it.unit })),
+  });
+
+  const exportPdf = (g) => exportRfqPdf(docGroup(g)).catch((e) => notify(apiError(e), "error"));
+  const exportExcel = (g) => exportRfqExcel(docGroup(g)).catch((e) => notify(apiError(e), "error"));
+
+  const requestOne = (g) => act(async () => {
+    if (canEditBuy) await saveAssign();
+    await api.requestQuote(pr.pr_no, { supplierId: g.supplier_id });
+    await exportPdf(g); // hand the purchaser the document to send
+  }, `Quotation requested from ${g.supplier_name}`);
+
+  const requestAll = () => act(async () => {
+    if (canEditBuy) await saveAssign();
+    await api.requestQuote(pr.pr_no, { all: true });
+    for (const g of groupList) await exportPdf(g); // one form per supplier
+  }, `Quotation requested from ${groupList.length} supplier(s)`);
+
+  return (
+    <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[14px] font-extrabold text-[#1E1B4B]">📄 Request for Quotation</span>
+        {groupList.length > 1 && (
+          <Btn variant="soft" small disabled={busy || allRequested} onClick={requestAll}
+            title={allRequested ? "All suppliers already requested" : "Generate every supplier's form and mark all as requested"}>
+            Request all quotes
+          </Btn>
+        )}
+      </div>
+
+      {groupList.length === 0 ? (
+        <div className="text-[12.5px] text-[#9CA3AF]">Assign a supplier to the buy items above to request quotations.</div>
+      ) : (
+        <div className="grid gap-2">
+          {groupList.map((g) => {
+            const req = isRequested(g);
+            return (
+              <div key={g.supplier_id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2">
+                <div className="mr-auto min-w-[180px]">
+                  <div className="text-[13.5px] font-semibold text-[#374151]">{g.supplier_name || "—"}</div>
+                  <div className="text-[11px] text-[#9CA3AF]">{g.items.length} item{g.items.length > 1 ? "s" : ""} · {g.currency}</div>
+                </div>
+                {req
+                  ? <span className="rounded-full bg-[#ECFDF5] px-2.5 py-0.5 text-[11px] font-bold text-[#059669] border border-[#B7E9CF]">✓ Quote requested</span>
+                  : <span className="rounded-full bg-[#FEF3C7] px-2.5 py-0.5 text-[11px] font-bold text-[#D97706] border border-[#F5D98A]">○ Not requested</span>}
+                <Btn variant="ghost" small disabled={busy} onClick={() => exportExcel(g)}>⬇ Excel</Btn>
+                <Btn variant="ghost" small disabled={busy} onClick={() => exportPdf(g)}>⬇ PDF</Btn>
+                <Btn variant={req ? "soft" : undefined} small disabled={busy} onClick={() => requestOne(g)}
+                  title={req ? "Re-send / re-export this supplier's quotation request" : "Mark quote requested and download the form to send"}>
+                  {req ? "Re-request" : "Request Quote"}
+                </Btn>
+              </div>
+            );
+          })}
+          {unassignedCount > 0 && (
+            <div className="text-[11.5px] text-[#B45309]">{unassignedCount} buy item(s) still need a supplier before you can request a quote or generate the PO.</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

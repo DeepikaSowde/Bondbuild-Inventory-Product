@@ -145,6 +145,12 @@ db.query(`ALTER TABLE pr_approvals ADD COLUMN IF NOT EXISTS details JSONB`)
 db.query(`ALTER TABLE po_approvals ADD COLUMN IF NOT EXISTS details JSONB`)
   .catch((err) => console.error("po_approvals.details migration:", err.message));
 
+// Request for Quotation: a buy line is stamped when its supplier's RFQ is
+// requested. Generating the Buy PO is gated on every buy line being stamped, so
+// no PO is raised without a supplier quotation on file. NULL = not yet requested.
+db.query(`ALTER TABLE pr_items ADD COLUMN IF NOT EXISTS quote_requested_at TIMESTAMPTZ`)
+  .catch((err) => console.error("pr_items.quote_requested_at migration:", err.message));
+
 db.query(`
   CREATE TABLE IF NOT EXISTS alert_ledger (
     rule          TEXT        NOT NULL,

@@ -14,6 +14,7 @@ const ACTION = {
   RESUBMIT:       { label: "Resubmitted",        cls: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
   EDIT:           { label: "Edited",             cls: "bg-sky-50 text-sky-700 ring-sky-200" },
   APPROVE:        { label: "Approved",           cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  REQUEST_QUOTE:  { label: "Quote requested",    cls: "bg-amber-50 text-amber-700 ring-amber-200" },
   SEND_BACK:      { label: "Sent back",          cls: "bg-amber-50 text-amber-700 ring-amber-200" },
   REJECT:         { label: "Rejected",           cls: "bg-red-50 text-red-700 ring-red-200" },
   CREATE:         { label: "PO created",         cls: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
