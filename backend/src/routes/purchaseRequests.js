@@ -387,14 +387,18 @@ router.put("/:prNo/items", canDo("assign_supplier"), async (req, res) => {
       for (const it of items) {
         // Changing the supplier (or currency) invalidates any quotation already
         // requested on this line — clear the stamp so the RFQ gate re-triggers for
-        // the new supplier. The CASE reads the row's OLD values on the right-hand side.
+        // the new supplier. `supplier_id`/`currency` in the CASE read the row's OLD
+        // values; $7/$8 carry the NEW values. They must be SEPARATE params from the
+        // SET ($2/$6): reusing one param in both an assignment and a comparison makes
+        // Postgres deduce "inconsistent types" for it and the whole statement fails.
+        const cur = PR_CURRENCIES.has(it.currency) ? it.currency : "SGD";
         await c.query(
           `UPDATE pr_items SET supplier_id=$2, supplier_name=$3, unit_price=$4, currency=$6,
              quote_requested_at = CASE
-               WHEN supplier_id IS DISTINCT FROM $2 OR currency IS DISTINCT FROM $6 THEN NULL
+               WHEN supplier_id IS DISTINCT FROM $7 OR currency IS DISTINCT FROM $8 THEN NULL
                ELSE quote_requested_at END
            WHERE id=$1 AND pr_id=$5`,
-          [it.id, it.supplier_id || null, it.supplier_name, Number(it.unit_price) || 0, pr.id, PR_CURRENCIES.has(it.currency) ? it.currency : "SGD"]
+          [it.id, it.supplier_id || null, it.supplier_name, Number(it.unit_price) || 0, pr.id, cur, it.supplier_id || null, cur]
         );
       }
       // price the stock portion automatically from inventory.unit_price
