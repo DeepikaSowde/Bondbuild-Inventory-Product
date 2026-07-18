@@ -585,7 +585,11 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
     for (const it of buyItems) {
       if (!it.supplier_id) return fail(res, 400, `Assign a supplier to "${it.description}" first`);
       if (!it.quote_requested_at) return fail(res, 400, `Request a quotation from ${it.supplier_name || "the supplier"} before generating the PO`);
-      if (!(Number(it.unit_price) > 0)) return fail(res, 400, `Enter a unit price (> 0) for "${it.description}" before generating the PO`);
+      // Unit price is NOT required here. A PO may be raised before the supplier
+      // has come back with prices; it lands OPEN · awaiting pricing (amount 0)
+      // and the Purchaser fills the prices in on the PO itself
+      // (PUT /purchase-orders/:poNo/prices). The quotation gate above still
+      // stands — the RFQ must have gone out, only the reply may be outstanding.
     }
 
     // don't create buy POs twice

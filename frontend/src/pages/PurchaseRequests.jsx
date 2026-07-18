@@ -1187,7 +1187,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                             <Select value={it.currency || "SGD"} onChange={(e) => setIt(i, "currency", e.target.value)} className="!w-[64px] shrink-0 !px-1.5">
                               {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                             </Select>
-                            <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} className={`!w-auto min-w-0 flex-1 ${Number(it.unit_price) > 0 ? "" : "!border-[#DC2626]"}`} placeholder="0.00" />
+                            <Input type="number" min="0" step="0.01" value={it.unit_price || ""} onChange={(e) => setIt(i, "unit_price", e.target.value)} className="!w-auto min-w-0 flex-1" placeholder="later" />
                           </div>
                         ) : curMoney(it.unit_price, it.currency)}
                       </td>
@@ -1329,14 +1329,16 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                 }}>Send stock to FIC</Btn>
               )}
               {showGenerate && (
-                <Btn disabled={busy || !allBuyHaveSupplier || !allBuyQuoted || !allBuyHavePrice}
+                <Btn disabled={busy || !allBuyHaveSupplier || !allBuyQuoted}
                   title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first"
                     : !allBuyQuoted ? `Request a quotation from ${firstUnquoted?.supplier_name || "every supplier"} before generating the PO`
-                    : !allBuyHavePrice ? "Enter a unit price (> 0) for every buy item first" : ""}
+                    : !allBuyHavePrice ? "Prices are still blank — the PO will be raised awaiting pricing" : ""}
                   onClick={() => {
                     if (stockPending && !window.confirm("The Buy PO will be created.\n\nYou still have stock items awaiting the Factory In-charge — remember to click \"Send stock to FIC\" as well, or the Stock PO won't be created.\n\nContinue?")) return;
+                    // Unpriced is allowed — the supplier may not have quoted yet. The PO
+                    // is raised "awaiting pricing" and the prices go in on the PO screen.
+                    if (!allBuyHavePrice && !window.confirm("Some buy items have no unit price.\n\nThe PO will be created awaiting pricing — enter the prices later on the Purchase Orders screen.\n\nContinue?")) return;
                     act(async () => {
-                      if (!allBuyHavePrice) throw new Error("Enter a unit price for every buy item before generating the PO");
                       await saveAssign();
                       const r = await api.generatePOs(pr.pr_no);
                       notify(`${r.created_pos.length} Buy PO(s) created: ${r.created_pos.join(", ")}`, "success");

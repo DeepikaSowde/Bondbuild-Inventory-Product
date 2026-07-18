@@ -7,6 +7,26 @@ import { exportPoPdf } from "../lib/poPdf";
 import { hasGst, gstAmount, grossAmount, gstRatePct } from "../lib/gst";
 import AuditTrail from "../components/AuditTrail";
 
+// A BUY PO may be raised before the supplier has quoted — it stays OPEN with a
+// zero amount until the prices are entered here. The list endpoint returns no
+// line items, so "unpriced" is read off the total; the detail view refines it
+// per line.
+const awaitingPricing = (po) =>
+  po?.po_type !== "STOCK" && po?.status === "OPEN" && Number(po?.amount || 0) === 0;
+
+// Two flavours: before the goods arrive "awaiting pricing" is routine, after they
+// arrive it's the only thing holding the PO open — so it escalates to amber.
+const AwaitingPricingTag = ({ received }) => (
+  <span
+    className={`rounded px-2 py-0.5 text-[11px] font-bold ${
+      received ? "bg-[#FEF3C7] text-[#B45309]" : "bg-[#EEF2FF] text-[#4F46E5]"}`}
+    title={received
+      ? "Goods received — entering the unit prices will close this PO."
+      : "Raised before the supplier quoted — enter the unit prices on the PO to set its value."}>
+    {received ? "Received · needs pricing" : "Awaiting pricing"}
+  </span>
+);
+
 export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox }) {
   const [pos, setPOs] = useState([]);
   const [q, setQ] = useState("");
@@ -115,10 +135,15 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
             <Td>{p.project_name || "—"}</Td>
             <Td>{p.po_type === "STOCK" ? <span className="text-[#6366F1]">From stock <span className="text-[11px] text-[#9CA3AF]">@ {p.source_location}</span></span> : p.supplier_name}</Td>
             <Td>{fmtDate(p.po_date)}</Td>
-            {canSeeAmount && <Td align="right">{curMoney(grossAmount(p), p.currency)}</Td>}
+            {canSeeAmount && (
+              <Td align="right">
+                {awaitingPricing(p) ? <span className="text-[#9CA3AF]">—</span> : curMoney(grossAmount(p), p.currency)}
+              </Td>
+            )}
             <Td>
               <span className="inline-flex flex-wrap items-center gap-1.5">
                 <Badge status={p.status} />
+                {awaitingPricing(p) && <AwaitingPricingTag received={!!p.goods_received_date} />}
                 {p.overdue && <span className="rounded bg-[#FEF2F2] px-2 py-0.5 text-[11px] font-bold text-[#DC2626]" title="STOCK PO open >30 days — awaiting the FIC. Consider cancelling to release the reserved stock.">⏰ Overdue</span>}
               </span>
             </Td>
@@ -152,8 +177,11 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
             setBusy(true);
             try {
               if (files.length) await api.uploadReceivePhotos(receiveTarget.po_no, files);
-              await api.receivePO(receiveTarget.po_no, receivedBy);
-              notify("Goods received — PO closed");
+              const received = await api.receivePO(receiveTarget.po_no, receivedBy);
+              notify(received.status === "CLOSED"
+                ? "Goods received — PO closed"
+                : "Goods received — PO stays open until its unit prices are entered",
+                received.status === "CLOSED" ? "success" : "warning");
               const fresh = await api.po(receiveTarget.po_no);
               setView(fresh);
               refresh();
@@ -188,6 +216,24 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
   const setT = (k, v) => setD((s) => ({ ...s, tracking: { ...s.tracking, [k]: v } }));
   const [tab, setTab] = useState("details");
 
+  // Prices are entered on the PO itself — either because it was raised before the
+  // supplier quoted, or to correct a mis-keyed figure. OPEN BUY POs only.
+  const canPrice = canManage && canSeePrice && po.status === "OPEN" && po.po_type !== "STOCK";
+  const [prices, setPrices] = useState(() =>
+    Object.fromEntries(po.items.map((it) => [it.id, it.unit_price ?? ""]))
+  );
+  // Re-seed when the PO reloads (after a save), so the inputs show what was stored.
+  useEffect(() => {
+    setPrices(Object.fromEntries(po.items.map((it) => [it.id, it.unit_price ?? ""])));
+  }, [po]);
+  const pricesDirty = po.items.some((it) => Number(prices[it.id] || 0) !== Number(it.unit_price || 0));
+  const unpriced = po.items.some((it) => !(Number(it.unit_price) > 0));
+  // Receipt and closure are separate: the FIC records goods whenever they land,
+  // but an unpriced buy PO stays OPEN until the prices are in, at which point the
+  // server closes it. So "received but still open" is a real, expected state.
+  const awaitingPrice = unpriced && po.po_type !== "STOCK";
+  const receivedPendingPrice = awaitingPrice && !!po.goods_received_date;
+
   const act = async (fn, msg) => {
     setBusy(true);
     try { await fn(); if (msg) notify(msg); onChanged(await api.po(po.po_no)); }
@@ -195,7 +241,9 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
   };
   const isSC = d.delivery_method === "SC";
 
-  const meta = [["Status", <Badge status={po.status} />], ["Supplier", po.supplier_name], ["Type", po.supplier_type],
+  const meta = [["Status", <span className="inline-flex flex-wrap items-center gap-1.5">
+      <Badge status={po.status} />{awaitingPrice && po.status === "OPEN" && <AwaitingPricingTag received={receivedPendingPrice} />}
+    </span>], ["Supplier", po.supplier_name], ["Type", po.supplier_type],
     ["Job", po.job_no || "—"], ["From PR", po.pr_no || "—"], ["Currency", po.currency || "SGD"],
     ["Prepared by", po.prepared_by || "—"],
     ["PO date", fmtDate(po.po_date)], ["Received", fmtDate(po.goods_received_date) || "—"]];
@@ -238,14 +286,32 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
               <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.description}</td>
               <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.qty}</td>
               <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.unit}</td>
-              {canSeePrice && <td className="border-b border-[#F3F4F6] px-2.5 py-2">{curMoney(it.unit_price, po.currency)}</td>}
-              {canSeeAmount && <td className="border-b border-[#F3F4F6] px-2.5 py-2">{curMoney(it.line_total, po.currency)}</td>}
+              {canSeePrice && (
+                <td className="border-b border-[#F3F4F6] px-2.5 py-2">
+                  {canPrice
+                    ? <Input type="number" step="0.01" min="0" className="!w-28" placeholder="—"
+                        value={prices[it.id] ?? ""} onChange={(e) => setPrices({ ...prices, [it.id]: e.target.value })} />
+                    : Number(it.unit_price) > 0 ? curMoney(it.unit_price, po.currency) : <span className="text-[#9CA3AF]">— to be priced</span>}
+                </td>
+              )}
+              {canSeeAmount && (
+                <td className="border-b border-[#F3F4F6] px-2.5 py-2">
+                  {Number(it.unit_price) > 0
+                    ? curMoney(Number(it.qty) * Number(it.unit_price), po.currency)
+                    : <span className="text-[#9CA3AF]">—</span>}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
         {canSeeAmount && (() => {
           const span = 4 + (canSeePrice ? 1 : 0);
           const lbl = "px-2.5 py-2.5 text-right font-bold text-[#6B7280]";
+          // Nothing priced yet — a 0.00 total would read as "free", so show a dash.
+          if (Number(po.amount || 0) === 0 && unpriced) return (
+            <tfoot><tr><td colSpan={span} className={lbl}>Total</td>
+              <td className="px-2.5 py-2.5 font-bold text-[#9CA3AF]">— awaiting pricing</td></tr></tfoot>
+          );
           // Local-supplier BUY POs carry GST: show Subtotal / GST / Total.
           return (
             <tfoot>
@@ -264,6 +330,23 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
           );
         })()}
       </table>
+
+      {canPrice && (
+        <div className="mb-4 flex items-center justify-end gap-2.5">
+          {awaitingPrice && (
+            <span className={`mr-auto text-[12px] ${receivedPendingPrice ? "font-semibold text-[#B45309]" : "text-[#6B7280]"}`}>
+              {receivedPendingPrice
+                ? "Goods received — saving the unit prices will close this PO."
+                : "This PO was raised without prices. Enter the supplier's unit prices above to set its value."}
+            </span>
+          )}
+          <Btn disabled={busy || !pricesDirty}
+            onClick={() => act(
+              () => api.setPOPrices(po.po_no, po.items.map((it) => ({ id: it.id, unit_price: Number(prices[it.id] || 0) }))),
+              "Prices saved"
+            )}>{receivedPendingPrice ? "Save prices & close PO" : "Save prices"}</Btn>
+        </div>
+      )}
 
       {canManage && po.status === "OPEN" && po.po_type !== "STOCK" && (
         <>
@@ -291,7 +374,9 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
 
       {/* Delivery Status Tracker — FIC / Supervisor click a stage */}
       <DeliveryTracker po={po} canTrack={canTrack && po.status === "OPEN"} busy={busy}
-        canReceive={canReceive} onReceive={onOpenReceive}
+        canReceive={canReceive && !po.goods_received_date}
+        blockedNote={receivedPendingPrice ? "Goods received. This PO stays open until its unit prices are entered above — saving them closes it." : ""}
+        onReceive={onOpenReceive}
         onSet={(stage) => act(() => api.setDeliveryStage(po.po_no, stage), stage ? "Delivery stage updated" : "Stage cleared")} />
 
       <PhotoGallery photos={po.receive_photos || []} />
@@ -304,8 +389,11 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
         {canCancel && po.status === "OPEN" && (
           <Btn variant="danger" disabled={busy} onClick={() => act(() => api.cancelPO(po.po_no, ""), "PO cancelled")}>Cancel PO</Btn>
         )}
-        {canReceive && po.status === "OPEN" && (
-          <Btn variant="success" disabled={busy} onClick={onOpenReceive}>✅ Receive goods (close)</Btn>
+        {canReceive && po.status === "OPEN" && !po.goods_received_date && (
+          <Btn variant="success" disabled={busy} onClick={onOpenReceive}
+            title={awaitingPrice ? "Records the goods as received — the PO stays open until its prices are entered" : ""}>
+            {awaitingPrice ? "✅ Receive goods" : "✅ Receive goods (close)"}
+          </Btn>
         )}
       </div>
       </>)}
@@ -330,7 +418,7 @@ export const STOCK_STAGES = [
 export const STAGES = [...BUY_STAGES, ...STOCK_STAGES];
 export const stageLabel = (key) => STAGES.find((s) => s.key === key)?.label || "—";
 
-function DeliveryTracker({ po, canTrack, canReceive, onReceive, busy, onSet }) {
+function DeliveryTracker({ po, canTrack, canReceive, blockedNote = "", onReceive, busy, onSet }) {
   const isStock    = po.po_type === "STOCK";
   const stages     = isStock ? STOCK_STAGES : BUY_STAGES;
   const current    = po.delivery_stage;
@@ -402,6 +490,9 @@ function DeliveryTracker({ po, canTrack, canReceive, onReceive, busy, onSet }) {
         })}
       </div>
 
+      {blockedNote && isOpen && (
+        <div className="mt-2 text-center text-[11px] font-semibold text-[#B45309]">{blockedNote}</div>
+      )}
       {(canTrack || canReceive) && isOpen && (
         <div className="mt-2 text-center text-[11px] text-[#9CA3AF]">
           Click a future stage to advance · the final stage opens “Receive goods” · completed stages are locked

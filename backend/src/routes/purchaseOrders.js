@@ -160,6 +160,88 @@ router.put("/:poNo", canDo("generate_po"), async (req, res) => {
   } catch (e) { fail(res, 500, e.message); }
 });
 
+// ── Enter / correct unit prices on an OPEN PO ──
+// A BUY PO may be generated before the supplier has quoted (see generate-pos):
+// it sits OPEN · awaiting pricing with amount 0 until the prices land here.
+// Body: { items: [{ id, unit_price }, ...] } — only the lines sent are touched.
+// amount is rewritten from ALL lines afterwards, so gst_amount (generated from
+// amount) follows automatically.
+//
+// DELIBERATELY PERMISSIVE (client decision, 2026-07-18): this sets prices on any
+// OPEN buy PO, blank or not, on the `generate_po` permission alone. That means no
+// second signature on committed spend, and it doubles as a post-generation price
+// edit without the "controlled amendment" guardrails the spec asks for. Every
+// change is audited below. Tightening is planned, not forgotten — when it lands,
+// the QS approval gate belongs HERE rather than on the PR, because once pricing
+// happens after generation this is where the money is actually committed.
+router.put("/:poNo/prices", canDo("generate_po"), async (req, res) => {
+  try {
+    const po = await getPO(req.params.poNo);
+    if (!po) return fail(res, 404, "PO not found");
+    if (po.status !== "OPEN") return fail(res, 409, `Prices can only be set on an OPEN PO (current: ${po.status})`);
+    if (po.po_type === "STOCK") return fail(res, 400, "A stock PO carries no supplier prices");
+
+    const byId = new Map(po.items.map((i) => [i.id, i]));
+    const updates = [];
+    for (const row of req.body?.items || []) {
+      const item = byId.get(Number(row.id));
+      if (!item) return fail(res, 400, `Line ${row.id} is not on this PO`);
+      const price = Number(row.unit_price);
+      if (!Number.isFinite(price) || price < 0) return fail(res, 400, `Invalid unit price for "${item.description}"`);
+      if (Number(item.unit_price) === price) continue;   // no-op line, skip
+      updates.push({ item, price });
+    }
+    if (!updates.length) return ok(res, po);
+
+    const closed = await withTransaction(async (c) => {
+      for (const u of updates)
+        await c.query("UPDATE po_items SET unit_price=$2 WHERE id=$1", [u.item.id, u.price]);
+      // Recompute from the table, not from the payload — untouched lines count too.
+      await c.query(
+        `UPDATE purchase_orders SET amount =
+           (SELECT COALESCE(SUM(qty * unit_price), 0) FROM po_items WHERE po_id = $1)
+         WHERE id = $1`,
+        [po.id]
+      );
+      const details = {
+        fields: [],
+        items: updates.map((u) => ({
+          line: Number(u.item.line_no) || 0,
+          change: "modified",
+          description: u.item.description,
+          // `price: true` marks the entry for redaction in GET /:poNo/history
+          diffs: [{ field: "Unit Price", from: String(u.item.unit_price), to: String(u.price), price: true }],
+        })),
+      };
+      await c.query(
+        "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, details) VALUES ($1,'PRICE_UPDATE',$2,$2,$3,$4,$5)",
+        [po.id, po.status, req.user.name, req.user.role, JSON.stringify(details)]
+      );
+
+      // If the goods already landed, pricing is the last thing holding the PO
+      // open — closing it here completes the receive the FIC started. Read the
+      // prices back from the table so a partly-priced PO stays open.
+      if (!po.goods_received_date) return false;
+      const left = await c.query(
+        "SELECT 1 FROM po_items WHERE po_id = $1 AND NOT (unit_price > 0) LIMIT 1", [po.id]
+      );
+      if (left.rows.length) return false;
+      await c.query("UPDATE purchase_orders SET status='CLOSED' WHERE id=$1", [po.id]);
+      await c.query(
+        "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'CLOSE','OPEN','CLOSED',$2,$3,$4)",
+        [po.id, req.user.name, req.user.role, "Priced after receipt — PO closed"]
+      );
+      await notify(c, ["Purchaser", "Manager"], `PO closed: ${po.po_no}`,
+        `Prices entered on ${po.po_no} — goods were already received, so the PO is now closed.`,
+        "success", po.pr_no, po.po_no);
+      return true;
+    });
+    const fresh = await getPO(po.po_no);
+    if (closed) Email.poClosed(fresh);
+    ok(res, fresh);
+  } catch (e) { fail(res, 500, e.message); }
+});
+
 // ── Set delivery stage (FIC / Supervisor click the tracker) ──
 const BUY_STAGE_ORDER   = ["WITH_VENDOR", "SHIPPED", "ARRIVED_HUB", "RECEIVED_FACTORY"];
 const STOCK_STAGE_ORDER = ["PENDING_ISSUE", "READY_COLLECT", "COLLECTED"];
@@ -223,6 +305,14 @@ router.post("/:poNo/receive", canDo("receive_po"), async (req, res) => {
     const po = await getPO(req.params.poNo);
     if (!po) return fail(res, 404, "PO not found");
     if (po.status !== "OPEN") return fail(res, 409, `PO is already ${po.status}`);
+    if (po.goods_received_date) return fail(res, 409, "Goods on this PO are already recorded as received");
+    // Receiving goods and closing the PO are two different events. The FIC records
+    // the physical receipt whenever the goods land — that must never be blocked on
+    // paperwork. But a CLOSED PO is the settled record of committed spend, so an
+    // unpriced buy PO stays OPEN ("received · needs pricing") until the prices are
+    // entered; PUT /:poNo/prices closes it at that point. Stock POs carry no
+    // supplier prices, so they close on receipt as before.
+    const stillUnpriced = po.po_type !== "STOCK" && po.items.some((it) => !(Number(it.unit_price) > 0));
     // Receiving also advances the tracker to its final stage so the delivery
     // status and the PO status can't disagree.
     const finalStage = po.po_type === "STOCK" ? "COLLECTED" : "RECEIVED_FACTORY";
@@ -250,21 +340,30 @@ router.post("/:poNo/receive", canDo("receive_po"), async (req, res) => {
         }
       }
       await c.query(
-        "UPDATE purchase_orders SET status='CLOSED', goods_received_date=CURRENT_DATE, delivery_stage=$2 WHERE id=$1", [po.id, finalStage]
+        "UPDATE purchase_orders SET status=$3, goods_received_date=CURRENT_DATE, delivery_stage=$2 WHERE id=$1",
+        [po.id, finalStage, stillUnpriced ? "OPEN" : "CLOSED"]
       );
       await c.query(
-        "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'RECEIVE','OPEN','CLOSED',$2,$3,$4)",
-        [po.id, req.user.name, req.user.role, req.body?.notes || ""]
+        "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'RECEIVE','OPEN',$2,$3,$4,$5)",
+        [po.id, stillUnpriced ? "OPEN" : "CLOSED", req.user.name, req.user.role, req.body?.notes || ""]
       );
-      await notify(c, ["Purchaser", "Manager"], `PO closed: ${po.po_no}`,
-        po.po_type === "STOCK"
-          ? `Stock issued from ${po.source_location || "stock"}.`
-          : `Goods received from ${po.supplier_name}.`,
-        "success", po.pr_no, po.po_no);
+      // An unpriced PO nags the Purchaser instead of announcing a close — the
+      // goods are in, and only the pricing is holding the PO open.
+      if (stillUnpriced) {
+        await notify(c, ["Purchaser"], `Goods received — PO needs pricing: ${po.po_no}`,
+          `Goods received from ${po.supplier_name}. Enter the unit prices on ${po.po_no} to close it.`,
+          "warning", po.pr_no, po.po_no);
+      } else {
+        await notify(c, ["Purchaser", "Manager"], `PO closed: ${po.po_no}`,
+          po.po_type === "STOCK"
+            ? `Stock issued from ${po.source_location || "stock"}.`
+            : `Goods received from ${po.supplier_name}.`,
+          "success", po.pr_no, po.po_no);
+      }
     });
-    const closedPO = await getPO(po.po_no);
-    Email.poClosed(closedPO);
-    ok(res, closedPO);
+    const freshPO = await getPO(po.po_no);
+    if (!stillUnpriced) Email.poClosed(freshPO);   // only a real close is announced
+    ok(res, freshPO);
   } catch (e) {
     // Surface the friendly stock message from the DB function (e.g. "Not enough
     // stock…") as a 409 rather than a raw 500.
@@ -280,6 +379,9 @@ router.post("/:poNo/cancel", canDo("cancel_po"), async (req, res) => {
     const po = await getPO(req.params.poNo);
     if (!po) return fail(res, 404, "PO not found");
     if (po.status !== "OPEN") return fail(res, 409, `Only OPEN POs can be cancelled (current: ${po.status})`);
+    // An unpriced PO stays OPEN after its goods arrive, so "OPEN" alone no longer
+    // means "nothing has happened yet" — the goods may already be on the floor.
+    if (po.goods_received_date) return fail(res, 409, "Goods on this PO have already been received — it can't be cancelled. Enter the prices to close it.");
     await withTransaction(async (c) => {
       await c.query("UPDATE purchase_orders SET status='CANCELLED' WHERE id=$1", [po.id]);
       await c.query(

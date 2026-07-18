@@ -157,9 +157,14 @@ export async function exportPoPdf(po, opts = {}) {
   const head = showPrice
     ? [["Item", "Descriptions", "Qty", "Unit", `Rate (${sym})`, `Price (${sym})`]]
     : [["Item", "Descriptions", "Qty", "Unit"]];
+  // A PO may be raised before the supplier has quoted. An unpriced line prints
+  // blank Rate / Price cells rather than "0.00", which would read as free.
   const body = items.map((it, i) => {
     const base = [i + 1, descs[i] + (colours[i] ? `\n${colours[i]}` : ""), it.qty ?? "", it.unit || ""];
-    return showPrice ? [...base, num2(it.unit_price), num2((Number(it.qty) || 0) * (Number(it.unit_price) || 0))] : base;
+    if (!showPrice) return base;
+    return Number(it.unit_price) > 0
+      ? [...base, num2(it.unit_price), num2((Number(it.qty) || 0) * (Number(it.unit_price) || 0))]
+      : [...base, "", ""];
   });
   const colStyles = showPrice
     ? { 0: { cellWidth: 34, halign: "center" }, 1: { cellWidth: 230, valign: "top" }, 2: { cellWidth: 40, halign: "center" }, 3: { cellWidth: 45, halign: "center" }, 4: { cellWidth: 72, halign: "right" }, 5: { cellWidth: 93, halign: "right" } }
@@ -170,7 +175,10 @@ export async function exportPoPdf(po, opts = {}) {
   // PO's stored gst_amount, so the document always agrees with the dashboard.
   const lbl = (t) => ({ content: t, colSpan: 5, styles: { halign: "right", fontStyle: "bold" } });
   const val = (n) => ({ content: num2(n), styles: { halign: "right", fontStyle: "bold" } });
-  const footRows = hasGst(po)
+  const fullyUnpriced = items.length > 0 && items.every((it) => !(Number(it.unit_price) > 0));
+  const footRows = fullyUnpriced
+    ? [[lbl("TOTAL"), { content: "", styles: { halign: "right", fontStyle: "bold" } }]]
+    : hasGst(po)
     ? [[lbl("SUBTOTAL"), val(po.amount)],
        [lbl(`GST ${gstRatePct(po)}%`), val(gstAmount(po))],
        [lbl("TOTAL"), val(grossAmount(po))]]

@@ -87,6 +87,8 @@ export const api = {
   po: (poNo) => data(axiosClient.get(`/purchase-orders/${enc(poNo)}`)),
   createPO: (f) => data(axiosClient.post("/purchase-orders", f)),
   updatePO: (poNo, f) => data(axiosClient.put(`/purchase-orders/${enc(poNo)}`, f)),
+  // items: [{ id, unit_price }] — prices an "awaiting pricing" PO, or corrects one
+  setPOPrices: (poNo, items) => data(axiosClient.put(`/purchase-orders/${enc(poNo)}/prices`, { items })),
   setDeliveryStage: (poNo, stage) => data(axiosClient.put(`/purchase-orders/${enc(poNo)}/delivery-stage`, { stage })),
   receivePO: (poNo, notes) => data(axiosClient.post(`/purchase-orders/${enc(poNo)}/receive`, { notes })),
   cancelPO: (poNo, reason) => data(axiosClient.post(`/purchase-orders/${enc(poNo)}/cancel`, { reason })),
