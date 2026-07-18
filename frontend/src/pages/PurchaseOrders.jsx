@@ -4,6 +4,7 @@ import { api, apiError } from "../lib/api";
 import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, curMoney, fmtDate } from "../components/ui";
 import { Table, Td, usePaged, Pagination } from "../components/Table";
 import { exportPoPdf } from "../lib/poPdf";
+import { hasGst, gstAmount, grossAmount, gstRatePct } from "../lib/gst";
 import AuditTrail from "../components/AuditTrail";
 
 export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox }) {
@@ -35,7 +36,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
   const totalParts = useMemo(() => {
     const byCur = pos.reduce((m, p) => {
       const c = p.currency || "SGD";
-      m[c] = (m[c] || 0) + Number(p.amount || 0);
+      m[c] = (m[c] || 0) + grossAmount(p); // gross: incl. GST on local BUY POs
       return m;
     }, {});
     return Object.entries(byCur)
@@ -114,7 +115,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
             <Td>{p.project_name || "—"}</Td>
             <Td>{p.po_type === "STOCK" ? <span className="text-[#6366F1]">From stock <span className="text-[11px] text-[#9CA3AF]">@ {p.source_location}</span></span> : p.supplier_name}</Td>
             <Td>{fmtDate(p.po_date)}</Td>
-            {canSeeAmount && <Td align="right">{curMoney(p.amount, p.currency)}</Td>}
+            {canSeeAmount && <Td align="right">{curMoney(grossAmount(p), p.currency)}</Td>}
             <Td>
               <span className="inline-flex flex-wrap items-center gap-1.5">
                 <Badge status={p.status} />
@@ -242,12 +243,26 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
             </tr>
           ))}
         </tbody>
-        {canSeeAmount && (
-          <tfoot>
-            <tr><td colSpan={4 + (canSeePrice ? 1 : 0)} className="px-2.5 py-2.5 text-right font-bold text-[#6B7280]">Total</td>
-              <td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{curMoney(po.amount, po.currency)}</td></tr>
-          </tfoot>
-        )}
+        {canSeeAmount && (() => {
+          const span = 4 + (canSeePrice ? 1 : 0);
+          const lbl = "px-2.5 py-2.5 text-right font-bold text-[#6B7280]";
+          // Local-supplier BUY POs carry GST: show Subtotal / GST / Total.
+          return (
+            <tfoot>
+              {hasGst(po) ? (<>
+                <tr><td colSpan={span} className={lbl}>Subtotal</td>
+                  <td className="px-2.5 py-2.5 font-semibold text-[#374151]">{curMoney(po.amount, po.currency)}</td></tr>
+                <tr><td colSpan={span} className={lbl}>GST {gstRatePct(po)}%</td>
+                  <td className="px-2.5 py-2.5 font-semibold text-[#374151]">{curMoney(gstAmount(po), po.currency)}</td></tr>
+                <tr><td colSpan={span} className={lbl}>Total</td>
+                  <td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{curMoney(grossAmount(po), po.currency)}</td></tr>
+              </>) : (
+                <tr><td colSpan={span} className={lbl}>Total</td>
+                  <td className="px-2.5 py-2.5 font-extrabold text-[#1E1B4B]">{curMoney(po.amount, po.currency)}</td></tr>
+              )}
+            </tfoot>
+          );
+        })()}
       </table>
 
       {canManage && po.status === "OPEN" && po.po_type !== "STOCK" && (

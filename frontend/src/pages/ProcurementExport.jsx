@@ -7,6 +7,7 @@
 // Requires: npm install jspdf jspdf-autotable   (xlsx is already in the project)
 import { useState } from "react";
 import { api } from "../lib/api";
+import { netAmount, gstAmount, grossAmount } from "../lib/gst";
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -46,7 +47,10 @@ const PO_COLS = [
   ["Project", (r) => r.project_name || ""],
   ["Type", (r) => (r.po_type === "STOCK" ? "Stock" : "Buy")],
   ["Supplier / Source", (r) => (r.po_type === "STOCK" ? (r.source_location || "From stock") : (r.supplier_name || ""))],
-  ["Amount", (r) => money(r.amount)],
+  // Value split: net + GST (9%, local suppliers only) = the gross Amount.
+  ["PO Value", (r) => money(netAmount(r))],
+  ["GST", (r) => money(gstAmount(r))],
+  ["Amount", (r) => money(grossAmount(r))],
   ["Status", (r) => r.status],
 ];
 

@@ -8,6 +8,7 @@
 // Logo/cert images load at runtime from /public (text fallback if missing).
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { hasGst, gstAmount, grossAmount, gstRatePct } from "./gst";
 
 const COMPANY = [
   "8 Jalan Kilang Barat #01-02 Singapore 159351",
@@ -164,6 +165,17 @@ export async function exportPoPdf(po, opts = {}) {
     ? { 0: { cellWidth: 34, halign: "center" }, 1: { cellWidth: 230, valign: "top" }, 2: { cellWidth: 40, halign: "center" }, 3: { cellWidth: 45, halign: "center" }, 4: { cellWidth: 72, halign: "right" }, 5: { cellWidth: 93, halign: "right" } }
     : { 0: { cellWidth: 40, halign: "center" }, 1: { cellWidth: 359, valign: "top" }, 2: { cellWidth: 55, halign: "center" }, 3: { cellWidth: 60, halign: "center" } };
 
+  // Totals. Local-supplier BUY POs carry GST, so they show Subtotal / GST /
+  // Total; everyone else keeps the single (GST-free) Total. Values come from the
+  // PO's stored gst_amount, so the document always agrees with the dashboard.
+  const lbl = (t) => ({ content: t, colSpan: 5, styles: { halign: "right", fontStyle: "bold" } });
+  const val = (n) => ({ content: num2(n), styles: { halign: "right", fontStyle: "bold" } });
+  const footRows = hasGst(po)
+    ? [[lbl("SUBTOTAL"), val(po.amount)],
+       [lbl(`GST ${gstRatePct(po)}%`), val(gstAmount(po))],
+       [lbl("TOTAL"), val(grossAmount(po))]]
+    : [[lbl("TOTAL"), val(po.amount)]];
+
   autoTable(doc, {
     startY: py + 8,
     head,
@@ -191,7 +203,7 @@ export async function exportPoPdf(po, opts = {}) {
         doc.setTextColor(0);
       }
     },
-    foot: showPrice ? [[{ content: "TOTAL", colSpan: 5, styles: { halign: "right", fontStyle: "bold" } }, { content: num2(po.amount), styles: { halign: "right", fontStyle: "bold" } }]] : undefined,
+    foot: showPrice ? footRows : undefined,
     footStyles: { fillColor: [255, 255, 255], textColor: 0, lineColor: [0, 0, 0], lineWidth: 0.7 },
     didDrawPage: () => {
       let fy = H - 46;

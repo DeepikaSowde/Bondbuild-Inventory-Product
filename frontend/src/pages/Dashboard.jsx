@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import api from "../services/api";
 import * as XLSX from "xlsx";
 import { fmtDate } from "../components/ui";
+import { netAmount, gstAmount, grossAmount, hasGst, gstRatePct } from "../lib/gst";
 
 // S$ formatter: 2400 -> "2.4k", 420 -> "420"
 function money(n) {
@@ -202,6 +203,8 @@ export default function Dashboard() {
           PRs: s.pr_count || 0,
           POs: s.po_count || 0,
           "Open POs": s.po_open || 0,
+          "PO Value (S$)": s.po_net || 0,
+          "GST (S$)": s.po_gst || 0,
           "Total Value (S$)": s.po_value || 0,
         };
       });
@@ -399,12 +402,19 @@ export default function Dashboard() {
                     <div className="grid grid-cols-3 gap-2">
                       <Stat label="PRs" value={st.pr_count} color="#6366F1" />
                       <Stat label="POs" value={st.po_count} color="#1E1B4B" />
+                      {/* S$ tile is the GROSS value (net + GST). */}
                       <Stat
                         label="S$"
                         value={money(st.po_value)}
                         color="#D97706"
                       />
                     </div>
+                    {/* Split of the gross figure above — GST is 9% on local suppliers. */}
+                    {st.po_gst > 0 && (
+                      <div className="mt-2 text-center text-[11px] font-medium text-[#6B7280]">
+                        Net {money(st.po_net)} · GST {money(st.po_gst)}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -554,8 +564,15 @@ export default function Dashboard() {
                 <div className="grid grid-cols-3 gap-2">
                   <Stat label="POs" value={s.po_count} color="#0891B2" />
                   <Stat label="Open" value={s.po_open} color="#059669" />
+                  {/* S$ tile is the GROSS value (net + GST). */}
                   <Stat label="S$" value={money(s.po_value)} color="#D97706" />
                 </div>
+                {/* Split of the gross figure above — GST is 9% on local suppliers. */}
+                {s.po_gst > 0 && (
+                  <div className="mt-2 text-center text-[11px] font-medium text-[#6B7280]">
+                    Net {money(s.po_net)} · GST {money(s.po_gst)}
+                  </div>
+                )}
               </button>
             ))}
           </div>
@@ -660,10 +677,23 @@ export default function Dashboard() {
                     }
                   />
                   <Info label="Status" value={detail.po?.status} />
+                  {/* Value split: net + GST (9%, local suppliers only) = gross. */}
                   <Info
-                    label="Amount"
-                    value={"S$ " + Number(detail.po?.amount || 0).toFixed(2)}
+                    label="PO Value"
+                    value={"S$ " + netAmount(detail.po).toFixed(2)}
                   />
+                  {hasGst(detail.po) && (
+                    <Info
+                      label={`GST ${gstRatePct(detail.po)}%`}
+                      value={"S$ " + gstAmount(detail.po).toFixed(2)}
+                    />
+                  )}
+                  {hasGst(detail.po) && (
+                    <Info
+                      label="Gross Amount"
+                      value={"S$ " + grossAmount(detail.po).toFixed(2)}
+                    />
+                  )}
                   <Info label="PR No" value={detail.po?.pr_no} />
                   <Info label="Job No" value={detail.po?.job_no} />
                 </div>

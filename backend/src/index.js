@@ -151,6 +151,23 @@ db.query(`ALTER TABLE po_approvals ADD COLUMN IF NOT EXISTS details JSONB`)
 db.query(`ALTER TABLE pr_items ADD COLUMN IF NOT EXISTS quote_requested_at TIMESTAMPTZ`)
   .catch((err) => console.error("pr_items.quote_requested_at migration:", err.message));
 
+// GST 9% on local-supplier BUY POs (overseas suppliers and internal STOCK POs
+// are excluded — a Stock PO is stamped supplier_type 'Local', hence the po_type
+// check). Generated columns, so every PO write path stays correct with no app
+// changes, gst_amount can never drift from amount, and adding the column
+// backfills every existing PO in one shot. Gross = amount + gst_amount.
+db.query(`
+  ALTER TABLE purchase_orders
+    ADD COLUMN IF NOT EXISTS gst_rate NUMERIC NOT NULL GENERATED ALWAYS AS
+      (CASE WHEN po_type = 'BUY' AND supplier_type = 'Local' THEN 0.09 ELSE 0 END) STORED
+`).catch((err) => console.error("purchase_orders.gst_rate migration:", err.message));
+db.query(`
+  ALTER TABLE purchase_orders
+    ADD COLUMN IF NOT EXISTS gst_amount NUMERIC NOT NULL GENERATED ALWAYS AS
+      (CASE WHEN po_type = 'BUY' AND supplier_type = 'Local'
+            THEN ROUND(amount * 0.09, 2) ELSE 0 END) STORED
+`).catch((err) => console.error("purchase_orders.gst_amount migration:", err.message));
+
 db.query(`
   CREATE TABLE IF NOT EXISTS alert_ledger (
     rule          TEXT        NOT NULL,

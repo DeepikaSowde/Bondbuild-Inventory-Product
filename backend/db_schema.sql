@@ -266,7 +266,20 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   required_date    TEXT,
   delivery_method  TEXT,
   delivery_address TEXT,
-  amount           NUMERIC NOT NULL DEFAULT 0,
+  amount           NUMERIC NOT NULL DEFAULT 0,   -- NET value (Σ qty × unit_price)
+  -- GST (9%) is charged on LOCAL-supplier BUY POs only. Overseas suppliers are
+  -- out of scope, and an internal STOCK PO is not a taxable supply — it is
+  -- stamped supplier_type 'Local', so po_type is checked too.
+  -- Generated (not written by the app) so every path that creates or updates a
+  -- PO — generate-pos, manual PO, both importers — stays correct automatically
+  -- and gst_amount can never drift from amount. Gross = amount + gst_amount.
+  -- NOTE: changing the rate here recomputes historical POs; if rates ever need
+  -- to coexist, convert these to plain columns first, preserving stored values.
+  gst_rate         NUMERIC NOT NULL GENERATED ALWAYS AS
+                   (CASE WHEN po_type = 'BUY' AND supplier_type = 'Local' THEN 0.09 ELSE 0 END) STORED,
+  gst_amount       NUMERIC NOT NULL GENERATED ALWAYS AS
+                   (CASE WHEN po_type = 'BUY' AND supplier_type = 'Local'
+                         THEN ROUND(amount * 0.09, 2) ELSE 0 END) STORED,
   currency         VARCHAR(3) NOT NULL DEFAULT 'SGD'
                    CHECK (currency IN ('SGD','EUR','USD','CNY','JPY','INR','MYR')),
   status           TEXT    NOT NULL DEFAULT 'OPEN'
