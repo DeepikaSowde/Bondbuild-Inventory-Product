@@ -81,15 +81,15 @@ CREATE TABLE IF NOT EXISTS pr_po_permissions (
 );
 
 -- Seed default permissions (do nothing if rows exist)
-INSERT INTO pr_po_permissions (role, raise_pr, approve_pr, reject_pr, assign_supplier, send_to_fic, issue_stock, generate_po, set_delivery, receive_po, cancel_po, see_pr_price, see_po_price, see_po_amount)
+INSERT INTO pr_po_permissions (role, raise_pr, approve_pr, reject_pr, assign_supplier, send_to_fic, issue_stock, generate_po, qs_approve, set_delivery, receive_po, cancel_po, see_pr_price, see_po_price, see_po_amount)
 VALUES
-  ('Drafter',           TRUE,  FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE),
-  ('Manager',           FALSE, TRUE,  TRUE,  FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  TRUE,  TRUE ),
-  ('Purchaser',         FALSE, FALSE, FALSE, TRUE,  TRUE,  FALSE, TRUE,  FALSE, TRUE,  TRUE,  TRUE,  TRUE,  TRUE ),
-  ('Factory In-charge', FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, TRUE,  TRUE,  FALSE, FALSE, FALSE, FALSE),
-  ('Supervisor',        FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  TRUE,  FALSE, FALSE, FALSE, FALSE),
-  ('QS',                FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  TRUE,  TRUE ),
-  ('Admin',             TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE )
+  ('Drafter',           TRUE,  FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE),
+  ('Manager',           FALSE, TRUE,  TRUE,  FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  TRUE,  TRUE ),
+  ('Purchaser',         FALSE, FALSE, FALSE, TRUE,  TRUE,  FALSE, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  TRUE ),
+  ('Factory In-charge', FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE, TRUE,  TRUE,  FALSE, FALSE, FALSE, FALSE),
+  ('Supervisor',        FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  TRUE,  FALSE, FALSE, FALSE, FALSE),
+  ('QS',                FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE, FALSE, TRUE,  TRUE,  TRUE ),
+  ('Admin',             TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE )
 ON CONFLICT (role) DO NOTHING;
 
 -- A5. (removed) The old global pr_number_seq is gone — PR numbers are now

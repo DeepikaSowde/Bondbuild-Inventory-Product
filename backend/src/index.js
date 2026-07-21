@@ -197,9 +197,20 @@ db.query(`
   END $$;
 `).catch((err) => console.error("purchase_orders price_status CHECK migration:", err.message));
 
-// New QS permission action (one action covers both gates).
-db.query(`ALTER TABLE pr_po_permissions ADD COLUMN IF NOT EXISTS qs_approve BOOLEAN NOT NULL DEFAULT FALSE`)
-  .catch((err) => console.error("pr_po_permissions.qs_approve migration:", err.message));
+// New QS permission action (one action covers both gates). A plain ADD COLUMN
+// would leave every existing role row at FALSE, and because a stored row value
+// overrides the ROLE_DEFAULTS fallback, QS would be denied. So on FIRST creation
+// only, backfill QS/Admin to TRUE. Guarded on the column not yet existing, so later
+// boots never clobber an Admin's permission edits.
+db.query(`
+  DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'pr_po_permissions' AND column_name = 'qs_approve') THEN
+      ALTER TABLE pr_po_permissions ADD COLUMN qs_approve BOOLEAN NOT NULL DEFAULT FALSE;
+      UPDATE pr_po_permissions SET qs_approve = TRUE WHERE role IN ('QS','Admin');
+    END IF;
+  END $$;
+`).catch((err) => console.error("pr_po_permissions.qs_approve migration:", err.message));
 
 // GST 9% on local-supplier BUY POs (overseas suppliers and internal STOCK POs
 // are excluded — a Stock PO is stamped supplier_type 'Local', hence the po_type
