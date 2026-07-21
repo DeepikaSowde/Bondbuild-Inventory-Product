@@ -144,6 +144,9 @@ export async function exportPoPdf(po, opts = {}) {
   let py = Math.max(ly, by + boxH) + 16;
   doc.setTextColor(0); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
   doc.text(`PROJECT: ${po.project_name || ""}`, M, py); py += 15;
+  // Site/delivery location carried from the PR. Omitted entirely when absent —
+  // a bare "LOCATION:" on a document going to a supplier reads as a defect.
+  if (po.location) { doc.text(`LOCATION: ${po.location}`, M, py, { maxWidth: W - M * 2 }); py += 15; }
   if (!isStock) {
     doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(80);
     doc.text("With reference to the above, we would like to confirm the order as follow :-", M, py);

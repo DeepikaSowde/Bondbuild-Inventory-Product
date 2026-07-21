@@ -16,7 +16,15 @@ const CURRENCIES = ["SGD", "EUR", "USD", "CNY", "JPY", "INR", "MYR"];
 const emptyItem = () => ({
   profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
   remarks: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
-  unit_price: "", allocations: [],
+  unit_price: "", allocations: [], services: [],
+});
+
+// A blank supplier sub-line (1a/1b/1c): the same item sent to another supplier for a
+// different purpose. qty defaults to the parent's on add; supplier/price are the
+// Purchaser's to assign, mirroring how the main buy line works.
+const emptyService = () => ({
+  purpose: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
+  qty: "", unit_price: "", currency: "SGD", remarks: "",
 });
 
 // Format a native date input value (YYYY-MM-DD) into the project-wide
@@ -75,13 +83,17 @@ const isOneDriveUrl = (raw) => {
   } catch { return false; }
 };
 
+// Sub-line labels under a parent item: 1a, 1b, 1c … ('' is the main item itself).
+const subLabel = (i) => String.fromCharCode(97 + i); // 0->'a', 1->'b', …
+
 // Visual items -> flat pr_items rows. line_no (1-based item index) groups them.
 function flattenItems(visualItems) {
   const out = [];
   visualItems.forEach((it, idx) => {
     const line_no = idx + 1;
     const base = {
-      line_no, profile_code: it.profile_code || "", description: it.description.trim(),
+      line_no, line_suffix: "", purpose: null,
+      profile_code: it.profile_code || "", description: it.description.trim(),
       colour: it.colour || "", unit: it.unit || "pcs", remarks: it.remarks || "",
       // every flat row of one visual item carries the same uid, exactly as it carries
       // the same line_no — the server reads it off any of them
@@ -113,6 +125,26 @@ function flattenItems(visualItems) {
         supplier_type: it.supplier_type || "Local", unit_price: 0,
       });
     }
+    // Supplier sub-lines (1a/1b/1c): the same item routed to another supplier for a
+    // different purpose. Each is a buy row sharing the parent's line_no, distinguished
+    // by line_suffix, carrying its own purpose / supplier / qty / price. Empty rows
+    // (no purpose, no supplier, no qty) are dropped so a stray blank sub-line is lost.
+    (it.services || []).forEach((s, sIdx) => {
+      const purpose = (s.purpose || "").trim();
+      const sQty = Number(s.qty) || 0;
+      if (!purpose && !s.supplier_id && sQty <= 0) return;
+      out.push({
+        ...base,
+        line_suffix: subLabel(sIdx),
+        purpose: purpose || null,
+        // a sub-line describes the SAME item (description/colour/profile carried through)
+        // but keeps its OWN remark — not the parent's.
+        remarks: s.remarks || "",
+        qty: sQty, stock_qty: 0, inventory_id: null, stock_location: "", buy_qty: sQty,
+        supplier_id: s.supplier_id || null, supplier_name: s.supplier_name || null,
+        supplier_type: s.supplier_type || "Local", unit_price: Number(s.unit_price) || 0,
+      });
+    });
   });
   return out;
 }
@@ -129,24 +161,36 @@ function groupItemsForEdit(rawItems) {
   }
   return order.map((key) => {
     const rows = byLine.get(key);
-    const base = rows[0];
-    const allocations = rows
+    // Split the main item (line_suffix '') from its supplier sub-lines ('a','b','c'…).
+    const mainRows = rows.filter((r) => !r.line_suffix);
+    const subRows = rows.filter((r) => r.line_suffix);
+    const base = mainRows[0] || rows[0];
+    const allocations = mainRows
       .filter((r) => Number(r.stock_qty) > 0)
       .map((r) => ({
         inventory_id: r.inventory_id || "", stock_location: r.stock_location || "",
         available_stock_qty: "", // backfilled from live stock once it loads
         stock_qty: String(Number(r.stock_qty) || 0),
       }));
-    const buyRow = rows.find((r) => Number(r.buy_qty) > 0);
-    // total = every portion added up (works for split rows and legacy combined rows)
-    const total = rows.reduce(
+    const buyRow = mainRows.find((r) => Number(r.buy_qty) > 0);
+    // total = the main item's own portions (services are separate purposes, not part
+    // of the item's requested quantity), added up across split/legacy rows.
+    const total = mainRows.reduce(
       (s, r) => s + Math.max(0, Number(r.stock_qty) || 0) + Math.max(0, Number(r.buy_qty) || 0), 0);
+    // Sub-lines, in suffix order (getPR already sorts by line_suffix).
+    const services = subRows.map((r) => ({
+      purpose: r.purpose || "", supplier_id: r.supplier_id || "", supplier_name: r.supplier_name || "",
+      supplier_type: r.supplier_type || "Local", remarks: r.remarks || "",
+      qty: r.buy_qty != null ? String(Number(r.buy_qty) || 0) : "",
+      unit_price: r.unit_price ?? "", currency: r.currency || "SGD",
+      quote_requested_at: r.quote_requested_at || null,
+    }));
     return {
       profile_code: base.profile_code || "", description: base.description || "", colour: base.colour || "",
       qty: total ? String(total) : (base.qty ?? ""), unit: base.unit || "pcs", remarks: base.remarks || "",
       supplier_id: buyRow?.supplier_id || "", supplier_name: buyRow?.supplier_name || "",
       supplier_type: (buyRow || base).supplier_type || "Local", unit_price: buyRow?.unit_price || "",
-      allocations,
+      allocations, services,
       // PRs raised before the item_uid migration have none; mint one so the item can
       // take attachments from here on
       item_uid: base.item_uid || newItemUid(),
@@ -158,7 +202,8 @@ function groupItemsForEdit(rawItems) {
 export default function PurchaseRequests({ user, perms = {}, notify, refreshInbox }) {
   const [prs, setPRs] = useState([]);
   // Purchasers land on Approved (their first actionable tab); everyone else on All.
-  const [filter, setFilter] = useState(user.role === "Purchaser" ? "APPROVED" : "All");
+  const [filter, setFilter] = useState(
+    user.role === "Purchaser" ? "APPROVED" : user.role === "QS" ? "PENDING_QS_APPROVAL" : "All");
   const [showCreate, setShowCreate] = useState(false);
   const [editPR, setEditPR] = useState(null);
   const [viewPR, setViewPR] = useState(null);
@@ -175,8 +220,10 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
   // Purchasers only work with approved PRs (to action) and PO-raised ones (to track),
   // so their tab bar is scoped to those two stages. Other roles see every status.
   const STATUS_TABS = role === "Purchaser"
-    ? ["APPROVED", "PO_RAISED"]
-    : ["All", "PENDING", "APPROVED", "SEND_BACK", "PO_RAISED", "REJECTED"];
+    ? ["APPROVED", "PENDING_QS_APPROVAL", "QS_APPROVED", "PO_RAISED"]
+    : role === "QS"
+    ? ["PENDING_QS_APPROVAL", "QS_APPROVED", "All"]
+    : ["All", "PENDING", "APPROVED", "PENDING_QS_APPROVAL", "QS_APPROVED", "SEND_BACK", "PO_RAISED", "REJECTED"];
   const canCreate = !!perms.raise_pr || isAdmin;
   const canApprove = !!perms.approve_pr || !!perms.reject_pr || isAdmin;
   const canPurchase = !!perms.assign_supplier || !!perms.generate_po || !!perms.send_to_fic || isAdmin;
@@ -211,7 +258,7 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
 
   const fieldCls = "rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-[13px] text-[#374151] outline-none focus:border-[#6366F1] max-w-[190px]";
   const STATUS_LABEL = { All: "All statuses", APPROVED: "Approved", PENDING: "Pending", SEND_BACK: "Sent back", PO_RAISED: "PO raised", REJECTED: "Rejected" };
-  const defaultStatus = role === "Purchaser" ? "APPROVED" : "All";
+  const defaultStatus = role === "Purchaser" ? "APPROVED" : role === "QS" ? "PENDING_QS_APPROVAL" : "All";
   const anyFilter = search || fJob || fProject || fPrNo || filter !== defaultStatus;
   const clearFilters = () => { setSearch(""); setFJob(""); setFProject(""); setFPrNo(""); setFilter(defaultStatus); };
 
@@ -324,7 +371,7 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
   const blankItem = () => ({
     profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
     remarks: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
-    unit_price: "", allocations: [], item_uid: newItemUid(), onedrive_url: "",
+    unit_price: "", allocations: [], services: [], item_uid: newItemUid(), onedrive_url: "",
   });
   const [form, setForm] = useState(() => editPR ? {
     job_no: editPR.job_no, project_name: editPR.project_name || "", location: editPR.location || "",
@@ -361,6 +408,28 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
       if (x !== i) return it;
       if (key === "qty" && val !== "" && (isNaN(Number(val)) || Number(val) < 0)) return it;
       return { ...it, [key]: val };
+    }),
+  }));
+  // Supplier sub-lines (1a/1b/1c) on item i — same shape as the main buy line, so the
+  // Drafter assigns a supplier here and the Purchaser can reassign it later.
+  const addService = (i) => setForm((f) => ({
+    ...f,
+    items: f.items.map((it, x) =>
+      x === i
+        ? { ...it, services: [...(it.services || []), { ...emptyService(), qty: it.qty || "" }] }
+        : it),
+  }));
+  const removeService = (i, s) => setForm((f) => ({
+    ...f,
+    items: f.items.map((it, x) =>
+      x === i ? { ...it, services: (it.services || []).filter((_, y) => y !== s) } : it),
+  }));
+  const setService = (i, s, key, val) => setForm((f) => ({
+    ...f,
+    items: f.items.map((it, x) => {
+      if (x !== i) return it;
+      if (key === "qty" && val !== "" && (isNaN(Number(val)) || Number(val) < 0)) return it;
+      return { ...it, services: (it.services || []).map((sv, y) => (y === s ? { ...sv, [key]: val } : sv)) };
     }),
   }));
   const removeItem = (i) => {
@@ -784,6 +853,69 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
                 <input className={inp} value={it.remarks || ""} maxLength={200} onChange={(e) => setItem(i, "remarks", e.target.value)} placeholder="e.g. URGENT, Preference (P&M)" />
               </div>
 
+              {/* Supplier sub-lines (1a/1b/1c): the SAME item routed to another supplier
+                  for a different purpose (powder coating, polishing…). Each is its own
+                  buy line — assign a supplier here; the Purchaser can reassign later. */}
+              <div className="px-3 pb-2">
+                {(it.services || []).length > 0 && (
+                  <div className="mt-1 rounded-lg border border-[#E5E7EB] bg-[#F5F6FF] p-2">
+                    <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#6366F1]">
+                      Also send this item to
+                    </div>
+                    <div className="grid gap-2">
+                      {(it.services || []).map((sv, s) => (
+                        <div key={s} className="rounded-lg border border-[#E5E7EB] bg-white p-2">
+                          <div className="grid grid-cols-[38px_1fr_1fr_76px_28px] items-end gap-2">
+                            <div className="flex h-9 items-center justify-center rounded-lg border border-[#C7D2FE] bg-[#EEF2FF] text-[12px] font-extrabold text-[#6366F1]">
+                              {i + 1}{subLabel(s)}
+                            </div>
+                            <div>
+                              <label className={lbl}>Purpose</label>
+                              <input className={inp} value={sv.purpose} maxLength={120}
+                                onChange={(e) => setService(i, s, "purpose", e.target.value)}
+                                placeholder="e.g. Powder coating" />
+                            </div>
+                            <div>
+                              <label className={lbl}>Supplier</label>
+                              <select className={inp} value={sv.supplier_id}
+                                onChange={(e) => {
+                                  const sup = suppliers.find((x) => String(x.id) === e.target.value);
+                                  setService(i, s, "supplier_id", e.target.value);
+                                  setService(i, s, "supplier_name", sup?.name || "");
+                                  if (sup) setService(i, s, "supplier_type", sup.type);
+                                }}>
+                                <option value="">— Select supplier —</option>
+                                {suppliers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label className={lbl}>Qty</label>
+                              <input type="number" min="0" className={inp} value={sv.qty}
+                                onKeyDown={(e) => e.key === "-" && e.preventDefault()}
+                                onChange={(e) => { const v = e.target.value; if (v === "" || Number(v) >= 0) setService(i, s, "qty", v); }}
+                                placeholder="0" />
+                            </div>
+                            <button type="button" title="Remove sub-line"
+                              onClick={() => removeService(i, s)}
+                              className="mb-1 flex h-9 w-7 items-center justify-center rounded-lg border border-[#FCA5A5] text-[13px] text-[#DC2626] hover:bg-[#FEF2F2]">✕</button>
+                          </div>
+                          <div className="mt-1.5 pl-[46px]">
+                            <label className={lbl}>Remark ({(sv.remarks || "").length}/200)</label>
+                            <input className={inp} value={sv.remarks || ""} maxLength={200}
+                              onChange={(e) => setService(i, s, "remarks", e.target.value)}
+                              placeholder="e.g. matte finish, RAL 9005" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <button type="button" onClick={() => addService(i)}
+                  className="mt-1.5 rounded-lg border border-dashed border-[#C7D2FE] px-2.5 py-1 text-[11px] font-semibold text-[#6366F1] hover:bg-[#EEF2FF]">
+                  + Add supplier / purpose ({i + 1}{subLabel((it.services || []).length)})
+                </button>
+              </div>
+
               {/* OneDrive link — one per item, host-validated server-side */}
               <div className="px-3 pb-1.5">
                 <label className={lbl}>OneDrive link (optional)</label>
@@ -1044,18 +1176,21 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
   const pReject = !!perms.reject_pr || isAdmin;
   const pAssign = !!perms.assign_supplier || isAdmin;
   const pGenerate = !!perms.generate_po || isAdmin;
+  const pQsApprove = !!perms.qs_approve || isAdmin;   // QS approval Gate 1 (sourcing)
   // FIC shouldn't send stock to themselves — hide "Send stock to FIC" for that role.
   const pSendFic = (!!perms.send_to_fic || isAdmin) && user.role !== "Factory In-charge";
   const [items, setItems] = useState(pr.items.map((it) => ({ ...it })));
   const [tab, setTab] = useState("details");
   useEffect(() => { setItems(pr.items.map((it) => ({ ...it }))); }, [pr]);
-  // Stays open through PO_RAISED too: a PR with both buy + stock items needs BOTH
-  // "Generate Buy PO" and "Send stock to FIC", and generating the buy PO flips the
-  // status to PO_RAISED. Closing the section there would strand the stock portion.
-  const assignMode = (pAssign || pGenerate || pSendFic) && ["APPROVED", "PO_RAISED"].includes(pr.status);
-  // Buy-line supplier/price stay editable only until the Buy PO is generated —
-  // after that the section is still open purely so the stock half can be sent.
-  const canEditBuy = assignMode && !pr.buy_po_created;
+  // Stays open through the QS gate + PO_RAISED too: a PR with both buy + stock items
+  // needs BOTH "Generate Buy PO" and "Send stock to FIC", and generating the buy PO
+  // flips the status to PO_RAISED. Closing the section there would strand the stock.
+  const assignMode = (pAssign || pGenerate || pSendFic || pQsApprove) &&
+    ["APPROVED", "PENDING_QS_APPROVAL", "QS_APPROVED", "PO_RAISED"].includes(pr.status);
+  // Buy-line supplier/price stay editable only before submitting to QS and before the
+  // Buy PO is generated — a change after QS approval would need re-approval, so it's
+  // locked from PENDING_QS_APPROVAL onward.
+  const canEditBuy = assignMode && !pr.buy_po_created && ["APPROVED", "PO_RAISED"].includes(pr.status);
 
   const setIt = (i, key, val) => setItems((arr) => arr.map((it, x) => {
     if (x !== i) return it;
@@ -1164,9 +1299,19 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
               // BUY ROW — becomes the Buy PO (priced by Purchaser, real supplier)
               if (hasBuy) {
                 rows.push(
-                  <tr key={`${it.id}-b`}>
+                  <tr key={`${it.id}-b`} className={it.line_suffix ? "bg-[#F5F6FF]" : undefined}>
                     <td className={`${td} font-mono`}>{hasStock ? "—" : (it.profile_code || "—")}</td>
-                    <td className={td}>{it.description} <span className="text-[10px] text-[#9CA3AF]">· buy</span></td>
+                    <td className={td}>
+                      {it.line_suffix ? (
+                        <>
+                          <span className="mr-1 rounded bg-[#EEF2FF] px-1 font-mono text-[10px] font-bold text-[#6366F1]">{it.line_no}{it.line_suffix}</span>
+                          {it.description}
+                          {it.purpose && <span className="text-[10px] font-semibold text-[#6366F1]"> · {it.purpose}</span>}
+                        </>
+                      ) : (
+                        <>{it.description} <span className="text-[10px] text-[#9CA3AF]">· buy</span></>
+                      )}
+                    </td>
                     {attrCells(it, hasStock)}
                     <td className={td}>{it.buy_qty}</td>
                     <td className={td}>—</td>
@@ -1311,7 +1456,12 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
           const buyPending = hasBuy && !pr.buy_po_created;
           const stockPending = hasStock && anyAwaiting && !pr.stock_po_created;
           const showSendFic = pSendFic && stockPending;
-          const showGenerate = pGenerate && buyPending;
+          // Gate 1 (enhancement #3): Generate Buy PO only after QS approves the PR.
+          const showGenerate = pGenerate && buyPending && ["QS_APPROVED", "PO_RAISED"].includes(pr.status);
+          const showSubmitQs = pAssign && buyPending && pr.status === "APPROVED";
+          const showQsReview = pQsApprove && pr.status === "PENDING_QS_APPROVAL";
+          // QS button label reflects whether a price is already on every buy line.
+          const pricedAtGate1 = buyItems.length > 0 && buyItems.every((it) => Number(it.unit_price) > 0);
           return (
             <>
               {/* Remind the purchaser that a mixed PR isn't finished until both the
@@ -1321,7 +1471,33 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                   This PR has both buy and stock items — complete <b>both</b>: Generate Buy PO <i>and</i> Send stock to FIC.
                 </div>
               )}
+              {pr.status === "PENDING_QS_APPROVAL" && !showQsReview && (
+                <div className="mr-auto self-center text-[12px] font-medium text-[#B45309]">
+                  Waiting on QS approval before the Buy PO can be generated.
+                </div>
+              )}
               {canEditBuy && <Btn variant="soft" disabled={busy} onClick={() => act(saveAssign, "Saved")}>Save prices</Btn>}
+              {showSubmitQs && (
+                <Btn disabled={busy || !allBuyHaveSupplier || !allBuyQuoted}
+                  title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first"
+                    : !allBuyQuoted ? `Request a quotation from ${firstUnquoted?.supplier_name || "every supplier"} before submitting for QS approval` : ""}
+                  onClick={() => act(async () => {
+                    await saveAssign();
+                    await api.submitForQs(pr.pr_no);
+                  }, "Submitted for QS approval")}>Submit for QS approval</Btn>
+              )}
+              {showQsReview && (
+                <>
+                  <Btn variant="warning" disabled={busy} onClick={() => {
+                    const reason = window.prompt("Reason for sending back to the Purchaser:") || "";
+                    act(() => api.qsSendBackPr(pr.pr_no, reason), "Sent back to Purchaser");
+                  }}>Send back</Btn>
+                  <Btn disabled={busy} onClick={() => act(() => api.qsApprovePr(pr.pr_no),
+                    pricedAtGate1 ? "Sourcing + price approved" : "Sourcing approved")}>
+                    {pricedAtGate1 ? "QS Approve Price" : "QS Approve"}
+                  </Btn>
+                </>
+              )}
               {showSendFic && (
                 <Btn variant="warning" disabled={busy} onClick={() => {
                   if (buyPending && !window.confirm("Stock will be sent to the Factory In-charge and the Stock PO created.\n\nYou still have buy items — remember to click \"Generate Buy PO\" as well.\n\nContinue?")) return;
@@ -1386,7 +1562,10 @@ function RfqPanel({ pr, user, items, suppliers, canEditBuy, busy, act, notify })
     pr_no: pr.pr_no, job_no: pr.job_no, project_name: pr.project_name, prepared_by: user.name,
     currency: g.currency,
     supplier: suppliers.find((s) => String(s.id) === String(g.supplier_id)) || { name: g.supplier_name },
-    items: g.items.map((it) => ({ description: it.description, colour: it.colour, qty: it.buy_qty, unit: it.unit })),
+    items: g.items.map((it) => ({
+      description: it.purpose ? `${it.description} — ${it.purpose}` : it.description,
+      colour: it.colour, qty: it.buy_qty, unit: it.unit,
+    })),
   });
 
   const exportPdf = (g) => exportRfqPdf(docGroup(g)).catch((e) => notify(apiError(e), "error"));

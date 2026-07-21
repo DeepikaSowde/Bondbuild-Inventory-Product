@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS pr_po_permissions (
   send_to_fic      BOOLEAN NOT NULL DEFAULT FALSE,
   issue_stock      BOOLEAN NOT NULL DEFAULT FALSE,
   generate_po      BOOLEAN NOT NULL DEFAULT FALSE,
+  qs_approve       BOOLEAN NOT NULL DEFAULT FALSE,
   set_delivery     BOOLEAN NOT NULL DEFAULT FALSE,
   receive_po       BOOLEAN NOT NULL DEFAULT FALSE,
   cancel_po        BOOLEAN NOT NULL DEFAULT FALSE,
@@ -158,7 +159,11 @@ CREATE TABLE IF NOT EXISTS purchase_requests (
   approved_by      TEXT,
   remarks          TEXT,
   status           TEXT   NOT NULL DEFAULT 'PENDING'
-                   CHECK (status IN ('PENDING','APPROVED','SEND_BACK','REJECTED','PO_RAISED')),
+                   CHECK (status IN ('PENDING','APPROVED','SEND_BACK','REJECTED','PENDING_QS_APPROVAL','QS_APPROVED','PO_RAISED')),
+  -- QS approval Gate 1 (sourcing): who/when signed off, and the send-back reason.
+  qs_approved_by      TEXT,
+  qs_approved_at      TIMESTAMPTZ,
+  qs_sent_back_reason TEXT,
   rejection_type   TEXT,
   rejection_reason TEXT,
   approved_date    DATE,
@@ -173,6 +178,10 @@ CREATE TABLE IF NOT EXISTS pr_items (
   id              SERIAL PRIMARY KEY,
   pr_id           INTEGER NOT NULL REFERENCES purchase_requests(id) ON DELETE CASCADE,
   line_no         INTEGER NOT NULL DEFAULT 1,
+  -- Supplier sub-lines: '' = the main requested item; 'a'/'b'/'c'… = a copy of that
+  -- item routed to another supplier for a different processing purpose. Label = line_no+line_suffix.
+  line_suffix     TEXT    NOT NULL DEFAULT '',
+  purpose         TEXT,   -- free-text process label for a sub-line (e.g. "Powder coating")
   profile_code    TEXT,
   description     TEXT    NOT NULL,
   colour          TEXT,
@@ -231,6 +240,12 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
                    CHECK (currency IN ('SGD','EUR','USD','CNY','JPY','INR','MYR')),
   status           TEXT    NOT NULL DEFAULT 'OPEN'
                    CHECK (status IN ('OPEN','CLOSED','CANCELLED')),
+  -- QS approval Gate 2 (price): a track independent of status/delivery_stage.
+  -- AWAITING_PRICING → PENDING_QS_PRICE (on any price edit) → PRICE_APPROVED (QS).
+  price_status     TEXT    NOT NULL DEFAULT 'AWAITING_PRICING'
+                   CHECK (price_status IN ('AWAITING_PRICING','PENDING_QS_PRICE','PRICE_APPROVED')),
+  price_approved_by TEXT,
+  price_approved_at TIMESTAMPTZ,
   delivery_stage   TEXT
                    CHECK (delivery_stage IN (
                      'WITH_VENDOR','SHIPPED','ARRIVED_HUB','RECEIVED_FACTORY',

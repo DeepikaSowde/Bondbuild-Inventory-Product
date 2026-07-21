@@ -92,12 +92,18 @@ router.post("/", canDo("generate_po"), async (req, res) => {
       const poNo = num.rows[0].po_no;
       const amount = items.reduce((s, i) => s + Number(i.qty) * Number(i.unit_price || 0), 0);
       const deliveryAddr = f.delivery_method === "SC" ? sup.rows[0]?.address : f.delivery_address;
+      // Site location follows the parent PR when there is one; a manual PO with
+      // no PR can still be given one explicitly.
+      const prLoc = f.pr_no
+        ? (await c.query("SELECT location FROM purchase_requests WHERE pr_no = $1", [f.pr_no])).rows[0]?.location
+        : null;
       const po = await c.query(
         `INSERT INTO purchase_orders
-         (po_no, job_no, pr_no, project_name, supplier_id, supplier_name, supplier_type,
+         (po_no, job_no, pr_no, project_name, location, supplier_id, supplier_name, supplier_type,
           requested_by, prepared_by, required_date, delivery_method, delivery_address, amount)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
-        [poNo, f.job_no, f.pr_no, f.project_name, f.supplier_id, sup.rows[0]?.name,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+        [poNo, f.job_no, f.pr_no, f.project_name, f.location || prLoc || null,
+         f.supplier_id, sup.rows[0]?.name,
          sup.rows[0]?.type || "Local", f.requested_by, req.user.name, f.required_date,
          f.delivery_method, deliveryAddr, amount]
       );
@@ -167,13 +173,11 @@ router.put("/:poNo", canDo("generate_po"), async (req, res) => {
 // amount is rewritten from ALL lines afterwards, so gst_amount (generated from
 // amount) follows automatically.
 //
-// DELIBERATELY PERMISSIVE (client decision, 2026-07-18): this sets prices on any
-// OPEN buy PO, blank or not, on the `generate_po` permission alone. That means no
-// second signature on committed spend, and it doubles as a post-generation price
-// edit without the "controlled amendment" guardrails the spec asks for. Every
-// change is audited below. Tightening is planned, not forgotten — when it lands,
-// the QS approval gate belongs HERE rather than on the PR, because once pricing
-// happens after generation this is where the money is actually committed.
+// GATE 2 trigger (enhancement #3): entering or editing any unit price on an OPEN
+// BUY PO sends the price to the QS — price_status flips to PENDING_QS_PRICE and any
+// prior approval is cleared. This is why "every price edit re-triggers Gate 2", and
+// it stops the PO from closing on an unapproved price. Closing is now a separate,
+// explicit action (POST /:poNo/close) gated on delivery + price approval.
 router.put("/:poNo/prices", canDo("generate_po"), async (req, res) => {
   try {
     const po = await getPO(req.params.poNo);
@@ -193,7 +197,7 @@ router.put("/:poNo/prices", canDo("generate_po"), async (req, res) => {
     }
     if (!updates.length) return ok(res, po);
 
-    const closed = await withTransaction(async (c) => {
+    await withTransaction(async (c) => {
       for (const u of updates)
         await c.query("UPDATE po_items SET unit_price=$2 WHERE id=$1", [u.item.id, u.price]);
       // Recompute from the table, not from the payload — untouched lines count too.
@@ -201,6 +205,11 @@ router.put("/:poNo/prices", canDo("generate_po"), async (req, res) => {
         `UPDATE purchase_orders SET amount =
            (SELECT COALESCE(SUM(qty * unit_price), 0) FROM po_items WHERE po_id = $1)
          WHERE id = $1`,
+        [po.id]
+      );
+      // Gate 2: the edited price now needs (re-)approval; clear any prior approval.
+      await c.query(
+        "UPDATE purchase_orders SET price_status='PENDING_QS_PRICE', price_approved_by=NULL, price_approved_at=NULL WHERE id=$1",
         [po.id]
       );
       const details = {
@@ -217,27 +226,88 @@ router.put("/:poNo/prices", canDo("generate_po"), async (req, res) => {
         "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, details) VALUES ($1,'PRICE_UPDATE',$2,$2,$3,$4,$5)",
         [po.id, po.status, req.user.name, req.user.role, JSON.stringify(details)]
       );
+      await notify(c, ["QS"], `PO price pending approval: ${po.po_no}`,
+        `${po.supplier_name || "Supplier"} — review and approve the price on ${po.po_no}.`,
+        "message", po.pr_no, po.po_no);
+    });
+    ok(res, await getPO(po.po_no));
+  } catch (e) { fail(res, 500, e.message); }
+});
 
-      // If the goods already landed, pricing is the last thing holding the PO
-      // open — closing it here completes the receive the FIC started. Read the
-      // prices back from the table so a partly-priced PO stays open.
-      if (!po.goods_received_date) return false;
-      const left = await c.query(
-        "SELECT 1 FROM po_items WHERE po_id = $1 AND NOT (unit_price > 0) LIMIT 1", [po.id]
+// GATE 2 (enhancement #3): QS approves the price on the PO.
+router.post("/:poNo/qs-approve-price", canDo("qs_approve"), async (req, res) => {
+  try {
+    const po = await getPO(req.params.poNo);
+    if (!po) return fail(res, 404, "PO not found");
+    if (po.status !== "OPEN") return fail(res, 409, `PO is ${po.status}; price approval only applies while OPEN`);
+    if (po.price_status !== "PENDING_QS_PRICE")
+      return fail(res, 409, `Nothing pending price approval on ${po.po_no} (price status: ${po.price_status})`);
+    if (po.items.some((it) => !(Number(it.unit_price) > 0)))
+      return fail(res, 400, "Every line needs a price before it can be approved");
+    await withTransaction(async (c) => {
+      await c.query(
+        "UPDATE purchase_orders SET price_status='PRICE_APPROVED', price_approved_by=$2, price_approved_at=NOW() WHERE id=$1",
+        [po.id, req.user.name]
       );
-      if (left.rows.length) return false;
+      await c.query(
+        "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'QS_APPROVE_PRICE',$2,$2,$3,$4,$5)",
+        [po.id, po.status, req.user.name, req.user.role, "Price approved"]
+      );
+      await notify(c, ["Purchaser"], `PO price approved: ${po.po_no}`,
+        `The price on ${po.po_no} is approved. Close it once the goods are delivered.`,
+        "success", po.pr_no, po.po_no);
+    });
+    ok(res, await getPO(po.po_no));
+  } catch (e) { fail(res, 500, e.message); }
+});
+
+// GATE 2 (enhancement #3): QS sends the price back to the Purchaser to revise.
+router.post("/:poNo/qs-send-back-price", canDo("qs_approve"), async (req, res) => {
+  try {
+    const po = await getPO(req.params.poNo);
+    if (!po) return fail(res, 404, "PO not found");
+    if (po.price_status !== "PENDING_QS_PRICE")
+      return fail(res, 409, `Nothing pending price approval on ${po.po_no}`);
+    const reason = (req.body?.reason || "").trim();
+    await withTransaction(async (c) => {
+      await c.query(
+        "UPDATE purchase_orders SET price_status='AWAITING_PRICING', price_approved_by=NULL, price_approved_at=NULL WHERE id=$1",
+        [po.id]
+      );
+      await c.query(
+        "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'QS_SEND_BACK_PRICE',$2,$2,$3,$4,$5)",
+        [po.id, po.status, req.user.name, req.user.role, reason || "Price sent back"]
+      );
+      await notify(c, ["Purchaser"], `PO price sent back: ${po.po_no}`,
+        reason || `Revise the price on ${po.po_no} and resubmit for approval.`,
+        "warning", po.pr_no, po.po_no);
+    });
+    ok(res, await getPO(po.po_no));
+  } catch (e) { fail(res, 500, e.message); }
+});
+
+// Close a BUY PO (enhancement #3). Standalone from the FIC track, but Close is the
+// one point that joins them: it needs BOTH the goods received (FIC = Delivered) AND
+// the latest price QS-approved. Stock POs still close on receipt, not here.
+router.post("/:poNo/close", canDo("generate_po"), async (req, res) => {
+  try {
+    const po = await getPO(req.params.poNo);
+    if (!po) return fail(res, 404, "PO not found");
+    if (po.status !== "OPEN") return fail(res, 409, `PO is already ${po.status}`);
+    if (po.po_type === "STOCK") return fail(res, 400, "Stock POs close on receipt, not here");
+    if (!po.goods_received_date) return fail(res, 409, "The goods must be received (FIC) before the PO can be closed");
+    if (po.price_status !== "PRICE_APPROVED") return fail(res, 409, "The price must be QS-approved before the PO can be closed");
+    await withTransaction(async (c) => {
       await c.query("UPDATE purchase_orders SET status='CLOSED' WHERE id=$1", [po.id]);
       await c.query(
         "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'CLOSE','OPEN','CLOSED',$2,$3,$4)",
-        [po.id, req.user.name, req.user.role, "Priced after receipt — PO closed"]
+        [po.id, req.user.name, req.user.role, (req.body?.notes || "").trim() || "Delivered and price approved — PO closed"]
       );
       await notify(c, ["Purchaser", "Manager"], `PO closed: ${po.po_no}`,
-        `Prices entered on ${po.po_no} — goods were already received, so the PO is now closed.`,
-        "success", po.pr_no, po.po_no);
-      return true;
+        `${po.po_no} closed — goods delivered and price approved.`, "success", po.pr_no, po.po_no);
     });
     const fresh = await getPO(po.po_no);
-    if (closed) Email.poClosed(fresh);
+    Email.poClosed(fresh);
     ok(res, fresh);
   } catch (e) { fail(res, 500, e.message); }
 });
@@ -312,7 +382,10 @@ router.post("/:poNo/receive", canDo("receive_po"), async (req, res) => {
     // unpriced buy PO stays OPEN ("received · needs pricing") until the prices are
     // entered; PUT /:poNo/prices closes it at that point. Stock POs carry no
     // supplier prices, so they close on receipt as before.
-    const stillUnpriced = po.po_type !== "STOCK" && po.items.some((it) => !(Number(it.unit_price) > 0));
+    // Enhancement #3: receiving is the FIC "Delivered" event. It NO LONGER closes a
+    // BUY PO — that now needs an explicit Close (Delivered + QS-approved price, see
+    // POST /:poNo/close). Only STOCK POs (no price gate) still close on receipt.
+    const willClose = po.po_type === "STOCK";
     // Receiving also advances the tracker to its final stage so the delivery
     // status and the PO status can't disagree.
     const finalStage = po.po_type === "STOCK" ? "COLLECTED" : "RECEIVED_FACTORY";
@@ -341,28 +414,26 @@ router.post("/:poNo/receive", canDo("receive_po"), async (req, res) => {
       }
       await c.query(
         "UPDATE purchase_orders SET status=$3, goods_received_date=CURRENT_DATE, delivery_stage=$2 WHERE id=$1",
-        [po.id, finalStage, stillUnpriced ? "OPEN" : "CLOSED"]
+        [po.id, finalStage, willClose ? "CLOSED" : "OPEN"]
       );
       await c.query(
         "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'RECEIVE','OPEN',$2,$3,$4,$5)",
-        [po.id, stillUnpriced ? "OPEN" : "CLOSED", req.user.name, req.user.role, req.body?.notes || ""]
+        [po.id, willClose ? "CLOSED" : "OPEN", req.user.name, req.user.role, req.body?.notes || ""]
       );
-      // An unpriced PO nags the Purchaser instead of announcing a close — the
-      // goods are in, and only the pricing is holding the PO open.
-      if (stillUnpriced) {
-        await notify(c, ["Purchaser"], `Goods received — PO needs pricing: ${po.po_no}`,
-          `Goods received from ${po.supplier_name}. Enter the unit prices on ${po.po_no} to close it.`,
-          "warning", po.pr_no, po.po_no);
+      // A BUY PO stays OPEN after receipt: the goods are Delivered, but the Purchaser
+      // still Closes it explicitly once the price is QS-approved. A STOCK PO closes here.
+      if (!willClose) {
+        await notify(c, ["Purchaser"], `Goods received: ${po.po_no}`,
+          `Goods received from ${po.supplier_name}. Close ${po.po_no} once the price is QS-approved.`,
+          "message", po.pr_no, po.po_no);
       } else {
         await notify(c, ["Purchaser", "Manager"], `PO closed: ${po.po_no}`,
-          po.po_type === "STOCK"
-            ? `Stock issued from ${po.source_location || "stock"}.`
-            : `Goods received from ${po.supplier_name}.`,
+          `Stock issued from ${po.source_location || "stock"}.`,
           "success", po.pr_no, po.po_no);
       }
     });
     const freshPO = await getPO(po.po_no);
-    if (!stillUnpriced) Email.poClosed(freshPO);   // only a real close is announced
+    if (willClose) Email.poClosed(freshPO);   // only a real close is announced
     ok(res, freshPO);
   } catch (e) {
     // Surface the friendly stock message from the DB function (e.g. "Not enough

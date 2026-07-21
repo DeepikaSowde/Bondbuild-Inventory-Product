@@ -151,6 +151,56 @@ db.query(`ALTER TABLE po_approvals ADD COLUMN IF NOT EXISTS details JSONB`)
 db.query(`ALTER TABLE pr_items ADD COLUMN IF NOT EXISTS quote_requested_at TIMESTAMPTZ`)
   .catch((err) => console.error("pr_items.quote_requested_at migration:", err.message));
 
+// Supplier sub-lines (1a/1b/1c): one requested item can be routed to several
+// suppliers, each for a different processing purpose (powder coating, polishing,
+// anodising…). Sub-lines share the parent's line_no and are ordered by line_suffix
+// ('' = the main item, 'a'/'b'/'c'… = each purpose). `purpose` is the free-text
+// process label shown on the sub-line, RFQ and PO. Existing rows are all main
+// items (line_suffix = '', purpose = NULL), so this is fully backward compatible.
+db.query(`ALTER TABLE pr_items ADD COLUMN IF NOT EXISTS line_suffix TEXT NOT NULL DEFAULT ''`)
+  .catch((err) => console.error("pr_items.line_suffix migration:", err.message));
+db.query(`ALTER TABLE pr_items ADD COLUMN IF NOT EXISTS purpose TEXT`)
+  .catch((err) => console.error("pr_items.purpose migration:", err.message));
+
+// ── QS approval (enhancement #3): two gates ──
+// Gate 1 (PR, sourcing): new PR statuses PENDING_QS_APPROVAL / QS_APPROVED sit
+// between APPROVED and PO_RAISED, plus who/when/why columns. The status CHECK is
+// dropped + re-added in one DO block so the two statements can't race.
+db.query(`
+  DO $$ BEGIN
+    ALTER TABLE purchase_requests DROP CONSTRAINT IF EXISTS purchase_requests_status_check;
+    ALTER TABLE purchase_requests ADD CONSTRAINT purchase_requests_status_check
+      CHECK (status IN ('PENDING','APPROVED','SEND_BACK','REJECTED','PENDING_QS_APPROVAL','QS_APPROVED','PO_RAISED'));
+  END $$;
+`).catch((err) => console.error("purchase_requests QS status CHECK migration:", err.message));
+db.query(`ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS qs_approved_by TEXT`)
+  .catch((err) => console.error("purchase_requests.qs_approved_by migration:", err.message));
+db.query(`ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS qs_approved_at TIMESTAMPTZ`)
+  .catch((err) => console.error("purchase_requests.qs_approved_at migration:", err.message));
+db.query(`ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS qs_sent_back_reason TEXT`)
+  .catch((err) => console.error("purchase_requests.qs_sent_back_reason migration:", err.message));
+
+// Gate 2 (PO, price): a SEPARATE price-approval track on the PO, independent of the
+// delivery_stage/status track — the two never gate each other; only Close checks both.
+// AWAITING_PRICING → PENDING_QS_PRICE (on any price edit) → PRICE_APPROVED (QS).
+db.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS price_status TEXT NOT NULL DEFAULT 'AWAITING_PRICING'`)
+  .catch((err) => console.error("purchase_orders.price_status migration:", err.message));
+db.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS price_approved_by TEXT`)
+  .catch((err) => console.error("purchase_orders.price_approved_by migration:", err.message));
+db.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS price_approved_at TIMESTAMPTZ`)
+  .catch((err) => console.error("purchase_orders.price_approved_at migration:", err.message));
+db.query(`
+  DO $$ BEGIN
+    ALTER TABLE purchase_orders DROP CONSTRAINT IF EXISTS purchase_orders_price_status_check;
+    ALTER TABLE purchase_orders ADD CONSTRAINT purchase_orders_price_status_check
+      CHECK (price_status IN ('AWAITING_PRICING','PENDING_QS_PRICE','PRICE_APPROVED'));
+  END $$;
+`).catch((err) => console.error("purchase_orders price_status CHECK migration:", err.message));
+
+// New QS permission action (one action covers both gates).
+db.query(`ALTER TABLE pr_po_permissions ADD COLUMN IF NOT EXISTS qs_approve BOOLEAN NOT NULL DEFAULT FALSE`)
+  .catch((err) => console.error("pr_po_permissions.qs_approve migration:", err.message));
+
 // GST 9% on local-supplier BUY POs (overseas suppliers and internal STOCK POs
 // are excluded — a Stock PO is stamped supplier_type 'Local', hence the po_type
 // check). Generated columns, so every PO write path stays correct with no app
@@ -167,6 +217,12 @@ db.query(`
       (CASE WHEN po_type = 'BUY' AND supplier_type = 'Local'
             THEN ROUND(amount * 0.09, 2) ELSE 0 END) STORED
 `).catch((err) => console.error("purchase_orders.gst_amount migration:", err.message));
+
+// Delivery/site location, copied from the originating PR when the PO is raised
+// so the supplier and the yard both see where the goods are needed. POs created
+// before this (and Excel imports, which carry no PR) stay NULL and render "—".
+db.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS location TEXT`)
+  .catch((err) => console.error("purchase_orders.location migration:", err.message));
 
 db.query(`
   CREATE TABLE IF NOT EXISTS alert_ledger (

@@ -107,6 +107,7 @@ const PRPO_PERM_GROUPS = [
     group: "🛒 Purchase Orders",
     perms: [
       { key: "generate_po", label: "Generate Buy PO", desc: "Can create purchase orders" },
+      { key: "qs_approve", label: "QS Approve", desc: "Can approve sourcing (Gate 1) and price (Gate 2)" },
       { key: "set_delivery", label: "Set Delivery Stage", desc: "Can update the delivery tracker" },
       { key: "receive_po", label: "Receive / Close PO", desc: "Can mark goods received" },
       { key: "cancel_po", label: "Cancel PO", desc: "Can cancel a purchase order" },

@@ -13,6 +13,7 @@ const ROLE_DEFAULTS = {
   send_to_fic:     ["Purchaser", "Admin"],
   issue_stock:     ["Factory In-charge", "Admin"],
   generate_po:     ["Purchaser", "Admin"],
+  qs_approve:      ["QS", "Admin"],
   set_delivery:    ["Factory In-charge", "Supervisor", "Admin"],
   receive_po:      ["Purchaser", "Supervisor", "Factory In-charge", "Admin"],
   cancel_po:       ["Purchaser", "Admin"],

@@ -1,7 +1,7 @@
 // pages/PurchaseOrders.jsx — Tailwind version
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiError } from "../lib/api";
-import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, curMoney, fmtDate } from "../components/ui";
+import { Btn, Badge, Modal, ConfirmDialog, Field, Input, Select, EmptyRow, curMoney, fmtDate } from "../components/ui";
 import { Table, Td, usePaged, Pagination } from "../components/Table";
 import { exportPoPdf } from "../lib/poPdf";
 import { hasGst, gstAmount, grossAmount, gstRatePct } from "../lib/gst";
@@ -21,8 +21,8 @@ const AwaitingPricingTag = ({ received }) => (
     className={`rounded px-2 py-0.5 text-[11px] font-bold ${
       received ? "bg-[#FEF3C7] text-[#B45309]" : "bg-[#EEF2FF] text-[#4F46E5]"}`}
     title={received
-      ? "Goods received — entering the unit prices will close this PO."
-      : "Raised before the supplier quoted — enter the unit prices on the PO to set its value."}>
+      ? "Goods received. Enter the unit prices and submit them for QS approval, then close the PO."
+      : "Raised before the supplier quoted — enter the unit prices on the PO and submit for QS approval."}>
     {received ? "Received · needs pricing" : "Awaiting pricing"}
   </span>
 );
@@ -40,6 +40,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
 
   const isAdmin = user.role === "Admin";
   const canManage = !!perms.generate_po || isAdmin;
+  const canQsApprove = !!perms.qs_approve || isAdmin;   // QS approval Gate 2 (price)
   const canReceive = !!perms.receive_po || isAdmin;
   const canTrack = !!perms.set_delivery || isAdmin;
   const canCancel = !!perms.cancel_po || isAdmin;
@@ -162,7 +163,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
 
       {view && (
         <POView po={view} canManage={canManage} canReceive={canReceive} canTrack={canTrack} canCancel={canCancel}
-          canSeePrice={canSeePrice} canSeeAmount={canSeeAmount}
+          canQsApprove={canQsApprove} canSeePrice={canSeePrice} canSeeAmount={canSeeAmount}
           busy={busy} setBusy={setBusy} notify={notify}
           onChanged={(fresh) => { setView(fresh); refresh(); }}
           onClose={() => setView(null)}
@@ -199,7 +200,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
   );
 }
 
-function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, canSeeAmount, busy, setBusy, notify, onChanged, onClose, onOpenReceive }) {
+function POView({ po, canManage, canReceive, canTrack, canCancel, canQsApprove, canSeePrice, canSeeAmount, busy, setBusy, notify, onChanged, onClose, onOpenReceive }) {
   const [d, setD] = useState({
     delivery_method: po.delivery_method ?? "",
     delivery_address: po.delivery_address ?? "",
@@ -243,8 +244,14 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
 
   const meta = [["Status", <span className="inline-flex flex-wrap items-center gap-1.5">
       <Badge status={po.status} />{awaitingPrice && po.status === "OPEN" && <AwaitingPricingTag received={receivedPendingPrice} />}
-    </span>], ["Supplier", po.supplier_name], ["Type", po.supplier_type],
-    ["Job", po.job_no || "—"], ["From PR", po.pr_no || "—"], ["Currency", po.currency || "SGD"],
+    </span>],
+    // Gate 2 (enhancement #3): the price-approval track, independent of Status above.
+    ...(po.po_type !== "STOCK" ? [["Price approval", <Badge status={po.price_status} />]] : []),
+    ["Supplier", po.supplier_name], ["Type", po.supplier_type],
+    ["Job", po.job_no || "—"], ["From PR", po.pr_no || "—"],
+    // Carried from the originating PR at generation; POs raised before this
+    // (and Excel imports, which have no PR) have none and show "—".
+    ["Location", po.location || "—"], ["Currency", po.currency || "SGD"],
     ["Prepared by", po.prepared_by || "—"],
     ["PO date", fmtDate(po.po_date)], ["Received", fmtDate(po.goods_received_date) || "—"]];
 
@@ -333,18 +340,18 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
 
       {canPrice && (
         <div className="mb-4 flex items-center justify-end gap-2.5">
-          {awaitingPrice && (
-            <span className={`mr-auto text-[12px] ${receivedPendingPrice ? "font-semibold text-[#B45309]" : "text-[#6B7280]"}`}>
-              {receivedPendingPrice
-                ? "Goods received — saving the unit prices will close this PO."
-                : "This PO was raised without prices. Enter the supplier's unit prices above to set its value."}
-            </span>
-          )}
+          <span className="mr-auto text-[12px] text-[#6B7280]">
+            {po.price_status === "PENDING_QS_PRICE"
+              ? "Price submitted — awaiting QS approval. Editing any price re-submits it."
+              : po.price_status === "PRICE_APPROVED"
+              ? "Price approved by QS. Editing a price will send it back for approval."
+              : "Enter the supplier's unit prices above, then submit them for QS approval."}
+          </span>
           <Btn disabled={busy || !pricesDirty}
             onClick={() => act(
               () => api.setPOPrices(po.po_no, po.items.map((it) => ({ id: it.id, unit_price: Number(prices[it.id] || 0) }))),
-              "Prices saved"
-            )}>{receivedPendingPrice ? "Save prices & close PO" : "Save prices"}</Btn>
+              "Price submitted for QS approval"
+            )}>Submit price for QS approval</Btn>
         </div>
       )}
 
@@ -375,13 +382,13 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
       {/* Delivery Status Tracker — FIC / Supervisor click a stage */}
       <DeliveryTracker po={po} canTrack={canTrack && po.status === "OPEN"} busy={busy}
         canReceive={canReceive && !po.goods_received_date}
-        blockedNote={receivedPendingPrice ? "Goods received. This PO stays open until its unit prices are entered above — saving them closes it." : ""}
+        blockedNote=""
         onReceive={onOpenReceive}
         onSet={(stage) => act(() => api.setDeliveryStage(po.po_no, stage), stage ? "Delivery stage updated" : "Stage cleared")} />
 
       <PhotoGallery photos={po.receive_photos || []} />
 
-      <div className="mt-5 flex justify-end gap-2.5">
+      <div className="mt-5 flex flex-wrap justify-end gap-2.5">
         <Btn variant="soft" disabled={busy} onClick={() => exportPoPdf(po, { showPrice: canSeePrice })}>⬇ PDF</Btn>
         {canManage && po.status === "OPEN" && (
           <Btn variant="soft" disabled={busy} onClick={() => act(() => api.updatePO(po.po_no, d), "Saved")}>Save details</Btn>
@@ -391,9 +398,27 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canSeePrice, c
         )}
         {canReceive && po.status === "OPEN" && !po.goods_received_date && (
           <Btn variant="success" disabled={busy} onClick={onOpenReceive}
-            title={awaitingPrice ? "Records the goods as received — the PO stays open until its prices are entered" : ""}>
-            {awaitingPrice ? "✅ Receive goods" : "✅ Receive goods (close)"}
+            title={po.po_type === "STOCK" ? "" : "Records the goods as delivered — the PO closes separately once the price is QS-approved"}>
+            {po.po_type === "STOCK" ? "✅ Receive goods (close)" : "✅ Receive goods"}
           </Btn>
+        )}
+        {/* Gate 2 (enhancement #3): QS approves / sends back the price on the PO. */}
+        {canQsApprove && po.status === "OPEN" && po.price_status === "PENDING_QS_PRICE" && (
+          <>
+            <Btn variant="warning" disabled={busy} onClick={() => {
+              const reason = window.prompt("Reason for sending the price back to the Purchaser:") || "";
+              act(() => api.qsSendBackPrice(po.po_no, reason), "Price sent back");
+            }}>Send price back</Btn>
+            <Btn disabled={busy} onClick={() => act(() => api.qsApprovePrice(po.po_no), "Price approved")}>QS Approve Price</Btn>
+          </>
+        )}
+        {/* Explicit Close (enhancement #3): needs FIC Delivered AND price QS-approved. */}
+        {canManage && po.status === "OPEN" && po.po_type !== "STOCK" && (
+          <Btn variant="success"
+            disabled={busy || !po.goods_received_date || po.price_status !== "PRICE_APPROVED"}
+            title={!po.goods_received_date ? "The goods must be received (FIC) before the PO can be closed"
+              : po.price_status !== "PRICE_APPROVED" ? "The price must be QS-approved before the PO can be closed" : ""}
+            onClick={() => act(() => api.closePO(po.po_no, ""), "PO closed")}>Close PO</Btn>
         )}
       </div>
       </>)}
@@ -424,6 +449,7 @@ function DeliveryTracker({ po, canTrack, canReceive, blockedNote = "", onReceive
   const current    = po.delivery_stage;
   const currentIdx = stages.findIndex((s) => s.key === current);
   const isOpen     = po.status === "OPEN";
+  const [pending, setPending] = useState(null); // stage awaiting confirmation
 
   return (
     <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
@@ -449,8 +475,9 @@ function DeliveryTracker({ po, canTrack, canReceive, blockedNote = "", onReceive
             : canTrack && !busy && isFuture;
           const handleClick = () => {
             if (!clickable) return;
+            // The final stage opens the Receive-goods modal, which confirms on its own.
             if (isFinal) onReceive();
-            else onSet(s.key);
+            else setPending(s);
           };
 
           const base = "rounded-xl border p-3 text-center transition-all";
@@ -497,6 +524,16 @@ function DeliveryTracker({ po, canTrack, canReceive, blockedNote = "", onReceive
         <div className="mt-2 text-center text-[11px] text-[#9CA3AF]">
           Click a future stage to advance · the final stage opens “Receive goods” · completed stages are locked
         </div>
+      )}
+
+      {pending && (
+        <ConfirmDialog
+          title={`Advance to “${pending.label}”?`}
+          body={<>Delivery stages move forward only. Once set, this <b className="font-bold text-[#374151]">cannot be undone</b>. Continue?</>}
+          confirmLabel="Yes, advance"
+          onCancel={() => setPending(null)}
+          onConfirm={() => { const key = pending.key; setPending(null); onSet(key); }}
+        />
       )}
     </div>
   );

@@ -15,14 +15,20 @@ router.use(protect);
 
 const PREFIX = "inventory-photos";
 
-// Buffer uploads in memory, then stream them to Spaces from the handler — so the
-// upload only happens once the parent record has been validated.
+// Upload rules — kept in sync with the Add/Edit Item forms on the frontend.
+// An explicit allowlist rather than image/*: it keeps out SVG (which can carry
+// script and is served inline by the /view route below) and HEIC (which uploads
+// fine from iPhones but no browser can render in an <img>).
+const MAX_FILE_BYTES  = 15 * 1024 * 1024;
+const MAX_FILES       = 5;
+const ALLOWED_MIME    = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) return cb(null, true);
-    cb(new Error("Only image files are allowed"));
+    if (ALLOWED_MIME.includes(file.mimetype)) return cb(null, true);
+    cb(new Error("Only JPG, PNG, WebP or PDF files are allowed"));
   },
 });
 
@@ -31,7 +37,7 @@ const fail = (res, code, error)       => res.status(code).json({ success: false,
 const decodeName = (n) => { try { return Buffer.from(n, "latin1").toString("utf8"); } catch { return n; } };
 
 // Upload photos for an inventory item
-router.post("/:id/photos", upload.array("photos", 30), async (req, res) => {
+router.post("/:id/photos", upload.array("photos", MAX_FILES), async (req, res) => {
   const files = req.files || [];
   if (!files.length) return fail(res, 400, "No photos received");
   if (!spaces.isConfigured()) return fail(res, 503, "File storage is not configured on the server yet");
@@ -39,6 +45,20 @@ router.post("/:id/photos", upload.array("photos", 30), async (req, res) => {
   try {
     const { rows } = await db.query("SELECT id FROM inventory WHERE id = $1", [req.params.id]);
     if (!rows[0]) return fail(res, 404, "Inventory item not found");
+
+    // MAX_FILES is a per-item cap, not per-request: multer's `files` limit only
+    // bounds a single upload, so without this an item could accumulate more
+    // across repeated visits to the Edit modal.
+    const { rows: [{ count }] } = await db.query(
+      "SELECT COUNT(*)::int AS count FROM inventory_item_photos WHERE inventory_id = $1", [rows[0].id]
+    );
+    if (count + files.length > MAX_FILES) {
+      const room = MAX_FILES - count;
+      return fail(res, 400, room <= 0
+        ? `This item already has the maximum of ${MAX_FILES} files. Remove one before adding another.`
+        : `This item already has ${count} file(s) — you can add ${room} more (max ${MAX_FILES} per item).`);
+    }
+
     const saved = [];
     for (const f of files) {
       const orig = decodeName(f.originalname);
@@ -106,8 +126,11 @@ router.get("/photos/:photoId/view", async (req, res) => {
 
 // Multer error handler
 router.use((err, _req, res, _next) => {
-  if (err instanceof multer.MulterError)
-    return fail(res, 400, err.code === "LIMIT_FILE_SIZE" ? "File too large (max 15 MB each)" : err.message);
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE")  return fail(res, 400, `File too large (max ${MAX_FILE_BYTES / 1024 / 1024} MB each)`);
+    if (err.code === "LIMIT_FILE_COUNT") return fail(res, 400, `Too many files (max ${MAX_FILES} per item)`);
+    return fail(res, 400, err.message);
+  }
   fail(res, 400, err.message || "Upload failed");
 });
 

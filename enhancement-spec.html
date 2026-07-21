@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InventoryOpz — Enhancement Specifications (FSD + TSD)</title>
+<style>
+  :root {
+    --accent:#6366F1; --accent-strong:#4F46E5; --accent-soft:#EEF2FF;
+    --ink:#1E1B4B; --body:#3A3A4A; --muted:#6B7280; --faint:#9CA3AF;
+    --border:#E6E6F0; --line:#F0F0F6; --rule:#DDDDEA;
+    --surface:#FFFFFF; --panel:#F7F7FB; --panel-2:#F8F9FF; --page:#EFEFF5;
+    --code-bg:#F4F4FB; --code-ink:#4338CA;
+    --good:#059669; --good-soft:#ECFDF5; --good-bd:#B7E9CF;
+    --warn:#B45309; --warn-soft:#FEF6E7; --warn-bd:#F3D9A4;
+    --high:#BE123C; --high-soft:#FEF2F4; --high-bd:#F5C2CC;
+    --shadow:0 1px 2px rgba(30,27,75,.05), 0 10px 30px rgba(30,27,75,.07);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --accent:#8B8DF7; --accent-strong:#A5A7FA; --accent-soft:#20203A;
+      --ink:#ECECF8; --body:#C3C4D4; --muted:#9698AC; --faint:#6E7088;
+      --border:#2B2B40; --line:#232338; --rule:#33334C;
+      --surface:#161628; --panel:#131324; --panel-2:#15152E; --page:#0D0D1A;
+      --code-bg:#1C1C34; --code-ink:#B7B9FB;
+      --good:#34D399; --good-soft:#122A20; --good-bd:#1F5240;
+      --warn:#FBBF24; --warn-soft:#2A2210; --warn-bd:#544318;
+      --high:#FB7185; --high-soft:#2C1720; --high-bd:#5A2634;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 14px 34px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="light"]{
+    --accent:#6366F1; --accent-strong:#4F46E5; --accent-soft:#EEF2FF;
+    --ink:#1E1B4B; --body:#3A3A4A; --muted:#6B7280; --faint:#9CA3AF;
+    --border:#E6E6F0; --line:#F0F0F6; --rule:#DDDDEA;
+    --surface:#FFFFFF; --panel:#F7F7FB; --panel-2:#F8F9FF; --page:#EFEFF5;
+    --code-bg:#F4F4FB; --code-ink:#4338CA;
+    --good:#059669; --good-soft:#ECFDF5; --good-bd:#B7E9CF;
+    --warn:#B45309; --warn-soft:#FEF6E7; --warn-bd:#F3D9A4;
+    --high:#BE123C; --high-soft:#FEF2F4; --high-bd:#F5C2CC;
+    --shadow:0 1px 2px rgba(30,27,75,.05), 0 10px 30px rgba(30,27,75,.07);
+  }
+  :root[data-theme="dark"]{
+    --accent:#8B8DF7; --accent-strong:#A5A7FA; --accent-soft:#20203A;
+    --ink:#ECECF8; --body:#C3C4D4; --muted:#9698AC; --faint:#6E7088;
+    --border:#2B2B40; --line:#232338; --rule:#33334C;
+    --surface:#161628; --panel:#131324; --panel-2:#15152E; --page:#0D0D1A;
+    --code-bg:#1C1C34; --code-ink:#B7B9FB;
+    --good:#34D399; --good-soft:#122A20; --good-bd:#1F5240;
+    --warn:#FBBF24; --warn-soft:#2A2210; --warn-bd:#544318;
+    --high:#FB7185; --high-soft:#2C1720; --high-bd:#5A2634;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 14px 34px rgba(0,0,0,.5);
+  }
+
+  *{ box-sizing:border-box; }
+  html{ scroll-behavior:smooth; }
+  body{
+    margin:0; background:var(--page); color:var(--body);
+    font-family:-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"DM Sans",sans-serif;
+    font-size:15.5px; line-height:1.62; -webkit-font-smoothing:antialiased;
+  }
+  .mono{ font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace; }
+  code{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.86em; background:var(--code-bg); color:var(--code-ink); padding:1.5px 6px; border-radius:5px; }
+
+  /* layout */
+  .shell{ max-width:1000px; margin:0 auto; padding:0 22px 100px; }
+  nav.top{
+    position:sticky; top:0; z-index:20; background:color-mix(in srgb, var(--page) 88%, transparent);
+    backdrop-filter:blur(8px); border-bottom:1px solid var(--border); margin-bottom:34px;
+  }
+  nav.top .row{ max-width:1000px; margin:0 auto; padding:11px 22px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  nav.top .brand{ font-weight:800; color:var(--ink); font-size:14px; letter-spacing:-.01em; margin-right:auto; }
+  nav.top a{ color:var(--muted); text-decoration:none; font-size:12.5px; font-weight:600; padding:4px 2px; border-bottom:2px solid transparent; }
+  nav.top a:hover{ color:var(--accent); }
+
+  /* cover */
+  .cover{ padding:52px 0 30px; border-bottom:1px solid var(--rule); }
+  .eyebrow{ text-transform:uppercase; letter-spacing:.16em; font-size:11.5px; font-weight:700; color:var(--accent); margin:0 0 14px; }
+  h1{ color:var(--ink); font-size:clamp(28px,4vw,40px); line-height:1.08; font-weight:800; letter-spacing:-.025em; margin:0 0 12px; text-wrap:balance; }
+  .lede{ font-size:17px; color:var(--muted); max-width:64ch; margin:0; }
+  .metagrid{ margin-top:26px; display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px 26px; }
+  .metagrid .k{ font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--faint); font-weight:700; }
+  .metagrid .v{ font-size:14px; color:var(--ink); font-weight:600; margin-top:2px; }
+
+  h2.part{ font-size:13px; text-transform:uppercase; letter-spacing:.14em; color:var(--accent); font-weight:800; margin:56px 0 6px; padding-top:20px; }
+  .part-title{ font-size:26px; font-weight:800; color:var(--ink); letter-spacing:-.02em; margin:0 0 6px; }
+  .part-sub{ color:var(--muted); font-size:14.5px; margin:0 0 26px; }
+
+  section.feat{ scroll-margin-top:70px; margin:30px 0; background:var(--surface); border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow); overflow:hidden; }
+  .feat-head{ display:flex; align-items:flex-start; gap:16px; padding:20px 24px; border-bottom:1px solid var(--line); background:linear-gradient(0deg,transparent,var(--panel-2)); }
+  .fnum{ flex:none; width:40px; height:40px; border-radius:11px; background:var(--accent); color:#fff; font-weight:800; font-size:18px; display:grid; place-items:center; box-shadow:0 4px 12px color-mix(in srgb,var(--accent) 40%,transparent); }
+  .feat-head h3{ margin:0; font-size:19px; color:var(--ink); font-weight:800; letter-spacing:-.015em; }
+  .feat-head .oneline{ margin:3px 0 0; font-size:13.5px; color:var(--muted); }
+  .feat-body{ padding:8px 24px 24px; }
+
+  .lbl{ font-size:11px; text-transform:uppercase; letter-spacing:.09em; font-weight:800; color:var(--accent); margin:22px 0 8px; display:flex; align-items:center; gap:8px; }
+  .lbl::before{ content:""; width:14px; height:2px; background:var(--accent); border-radius:2px; }
+  p{ margin:9px 0; }
+  ul,ol{ margin:9px 0; padding-left:22px; }
+  li{ margin:5px 0; }
+
+  .pillrow{ display:flex; gap:8px; flex-wrap:wrap; margin-top:4px; }
+  .pill{ font-size:11.5px; font-weight:700; padding:3px 11px; border-radius:999px; border:1px solid var(--border); color:var(--muted); background:var(--panel); }
+  .pill.role{ color:var(--accent-strong); background:var(--accent-soft); border-color:transparent; }
+
+  .tag{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:800; letter-spacing:.02em; padding:3px 9px; border-radius:6px; }
+  .t-low{ color:var(--good); background:var(--good-soft); border:1px solid var(--good-bd); }
+  .t-med{ color:var(--warn); background:var(--warn-soft); border:1px solid var(--warn-bd); }
+  .t-high{ color:var(--high); background:var(--high-soft); border:1px solid var(--high-bd); }
+  .t-new{ color:var(--accent-strong); background:var(--accent-soft); border:1px solid transparent; }
+  .t-live{ color:#fff; background:var(--good); border:1px solid var(--good); }
+  .feat.done .fnum{ background:var(--good); box-shadow:0 4px 12px color-mix(in srgb,var(--good) 40%,transparent); font-size:15px; }
+  .badge-live{ margin-left:auto; align-self:center; display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:800; letter-spacing:.03em; text-transform:uppercase; padding:4px 11px; border-radius:999px; color:#fff; background:var(--good); white-space:nowrap; }
+
+  table.spec{ width:100%; border-collapse:collapse; margin:10px 0; font-size:13.5px; }
+  table.spec th, table.spec td{ text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.spec th{ font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); font-weight:800; background:var(--panel); }
+  table.spec td.k{ font-weight:700; color:var(--ink); white-space:nowrap; }
+  .scroll{ overflow-x:auto; border:1px solid var(--border); border-radius:10px; }
+  .scroll table.spec{ margin:0; }
+  .scroll table.spec th:first-child, .scroll table.spec td:first-child{ padding-left:14px; }
+
+  /* callouts */
+  .note{ border-radius:11px; padding:13px 15px 13px 16px; margin:16px 0; font-size:13.5px; border:1px solid var(--border); border-left:3px solid var(--accent); background:var(--accent-soft); }
+  .note.warn{ border-left-color:var(--warn); background:var(--warn-soft); }
+  .note.q{ border-left-color:var(--high); background:var(--high-soft); }
+  .note .h{ font-weight:800; color:var(--ink); font-size:12px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+
+  .ac{ list-style:none; padding:0; margin:8px 0; }
+  .ac li{ position:relative; padding-left:26px; margin:7px 0; font-size:14px; }
+  .ac li::before{ content:"\2713"; position:absolute; left:0; top:0; color:var(--good); font-weight:800; }
+
+  .steps{ counter-reset:s; list-style:none; padding:0; margin:10px 0; }
+  .steps li{ counter-increment:s; position:relative; padding:6px 0 6px 34px; font-size:14px; border-bottom:1px dashed var(--line); }
+  .steps li:last-child{ border-bottom:none; }
+  .steps li::before{ content:counter(s); position:absolute; left:0; top:5px; width:22px; height:22px; background:var(--accent-soft); color:var(--accent-strong); border-radius:50%; font-size:11.5px; font-weight:800; display:grid; place-items:center; }
+
+  /* wireframe mockups */
+  .wire{ border:1.5px dashed var(--rule); border-radius:12px; background:repeating-linear-gradient(45deg,transparent,transparent 9px,color-mix(in srgb,var(--panel) 60%,transparent) 9px,color-mix(in srgb,var(--panel) 60%,transparent) 10px); padding:0; margin:14px 0 6px; overflow:hidden; }
+  .wire-cap{ font-size:11px; font-weight:700; color:var(--faint); text-transform:uppercase; letter-spacing:.06em; padding:8px 12px; border-bottom:1px dashed var(--rule); background:var(--panel); display:flex; justify-content:space-between; align-items:center; }
+  .wire-cap .wtag{ color:var(--accent); }
+  .wire-body{ padding:16px; background:var(--surface); }
+  .mock{ font-family:-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .mock .mrow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .mbtn{ display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; padding:7px 13px; border-radius:9px; border:1px solid var(--accent); color:var(--accent); background:var(--surface); }
+  .mbtn.solid{ background:var(--accent); color:#fff; }
+  .mbtn.dis{ border-color:var(--border); color:var(--faint); background:var(--panel); }
+  .mbtn.danger{ border-color:var(--high); color:var(--high); }
+  .mchip{ font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; }
+  .mchip.amber{ background:var(--warn-soft); color:var(--warn); border:1px solid var(--warn-bd); }
+  .mchip.green{ background:var(--good-soft); color:var(--good); border:1px solid var(--good-bd); }
+  .mchip.grey{ background:var(--panel); color:var(--muted); border:1px solid var(--border); }
+  .minput{ border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:12.5px; color:var(--muted); background:var(--panel); }
+  .mcard{ border:1px solid var(--border); border-radius:10px; padding:12px; background:var(--surface); }
+  .mdialog{ border:1px solid var(--border); border-radius:12px; padding:16px; background:var(--surface); box-shadow:var(--shadow); max-width:420px; }
+  .mdialog .title{ font-weight:800; color:var(--ink); font-size:14.5px; margin-bottom:6px; }
+  .mdialog .msg{ font-size:12.5px; color:var(--muted); margin-bottom:14px; }
+  .mtable{ width:100%; border-collapse:collapse; font-size:12px; }
+  .mtable th,.mtable td{ border:1px solid var(--border); padding:6px 8px; text-align:left; }
+  .mtable th{ background:var(--panel); color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; }
+  .dashed-cell{ color:var(--faint); font-style:italic; }
+  .arrow{ color:var(--accent); font-weight:800; padding:0 2px; }
+
+  .divider{ height:1px; background:var(--rule); margin:8px 0 0; }
+  footer{ margin-top:50px; padding-top:22px; border-top:1px solid var(--rule); color:var(--faint); font-size:12.5px; }
+
+  @media (max-width:640px){
+    .feat-body,.feat-head{ padding-left:16px; padding-right:16px; }
+    body{ font-size:15px; }
+  }
+  @media print{
+    nav.top{ display:none; } body{ background:#fff; } section.feat{ box-shadow:none; break-inside:avoid; }
+  }
+  @media (prefers-reduced-motion:reduce){ html{ scroll-behavior:auto; } }
+</style>
+</head>
+<body>
+
+
+<nav class="top">
+  <div class="row">
+    <span class="brand">InventoryOpz · Enhancement Spec</span>
+    <a href="#summary">Summary</a>
+    <a href="#fsd">Part I · FSD</a>
+    <a href="#tsd">Part II · TSD</a>
+    <a href="#rollup">Effort</a>
+  </div>
+</nav>
+
+<div class="shell">
+
+  <header class="cover">
+    <p class="eyebrow">Functional &amp; Technical Specification</p>
+    <h1>Procurement &amp; Inventory — Client Enhancement Package</h1>
+    <p class="lede">Nine client-requested enhancements to the Bond Build <strong>InventoryOpz</strong> platform, specified for approval and scheduling — plus the already-delivered <strong>Request for Quotation</strong> feature, documented here for reference. Each item is described functionally (Part I) and technically (Part II), with proposed-UI wireframes.</p>
+    <div class="metagrid">
+      <div><div class="k">Product</div><div class="v">InventoryOpz</div></div>
+      <div><div class="k">Document</div><div class="v">FSD + TSD (combined)</div></div>
+      <div><div class="k">Version</div><div class="v">1.2 — Draft</div></div>
+      <div><div class="k">Date</div><div class="v">21 Jul 2026</div></div>
+      <div><div class="k">Status</div><div class="v">For client review</div></div>
+      <div><div class="k">Scope</div><div class="v">9 proposed · 1 delivered</div></div>
+    </div>
+  </header>
+
+  <!-- ── SUMMARY ── -->
+  <h2 class="part" id="summary">At a glance</h2>
+  <p class="part-title">Enhancement summary</p>
+  <p class="part-sub">Complexity reflects build + test effort. "Existing infra" notes what the platform already provides, which several of these build on rather than create from scratch.</p>
+
+  <div class="scroll">
+    <table class="spec">
+      <thead><tr><th>#</th><th>Enhancement</th><th>Type</th><th>Complexity</th><th>Existing infrastructure it leverages</th></tr></thead>
+      <tbody>
+        <tr style="background:var(--good-soft)"><td class="k">R</td><td><strong>Request for Quotation</strong> — quote suppliers before raising a Buy PO</td><td><span class="tag t-new">Workflow</span></td><td><span class="tag t-live">Delivered</span></td><td>Live in production. Baseline for #3, #5 and #7.</td></tr>
+        <tr><td class="k">1</td><td>Delivery-stage confirmation alert</td><td><span class="tag t-new">UX guard</span></td><td><span class="tag t-low">Low</span></td><td>Backward moves are already blocked server-side; adds a confirm step only.</td></tr>
+        <tr><td class="k">2</td><td>Photo attachment on "Add Item" (Inventory)</td><td><span class="tag t-new">Form</span></td><td><span class="tag t-low">Low</span></td><td>Photo storage + routes already exist and are used by "Edit Item".</td></tr>
+        <tr><td class="k">3</td><td>QS approval — sourcing &amp; price gates</td><td><span class="tag t-new">Workflow</span></td><td><span class="tag t-high">High</span></td><td>"QS" role already exists (currently view-only); adds two approval gates — sourcing, then price — parallel to FIC delivery.</td></tr>
+        <tr><td class="k">4</td><td>Purchase Order price editing (OPEN PO)</td><td><span class="tag t-new">Feature</span></td><td><span class="tag t-med">Medium</span></td><td>PO detail view + audit trail exist; the unit price is immutable after generation.</td></tr>
+        <tr><td class="k">5</td><td>Multiple suppliers per PR item (1, 1a, 1b, 1c)</td><td><span class="tag t-new">Data model</span></td><td><span class="tag t-high">High</span></td><td>PR rows already group by line; extends grouping to supplier sub-lines.</td></tr>
+        <tr><td class="k">6</td><td>Location field on the PO</td><td><span class="tag t-new">Field</span></td><td><span class="tag t-low">Low</span></td><td>PR already captures <code>location</code>; carry it onto the PO + PDF.</td></tr>
+        <tr><td class="k">7</td><td>Supplier price-comparison table (Purchaser)</td><td><span class="tag t-new">View</span></td><td><span class="tag t-med">Medium</span></td><td>Consumes the RFQ / multi-supplier data (ties to #5).</td></tr>
+        <tr><td class="k">8</td><td>GST 9% on the PO</td><td><span class="tag t-new">Finance</span></td><td><span class="tag t-med">Medium</span></td><td>No tax fields exist today; adds subtotal → GST → total.</td></tr>
+        <tr><td class="k">9</td><td>Save PR as Draft (Drafter)</td><td><span class="tag t-new">Workflow</span></td><td><span class="tag t-low">Low</span></td><td>PR form, status field and edit flow already exist; adds a <code>DRAFT</code> status + a second save button.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <div class="h">How to read this document</div>
+    Wireframes show <em>proposed</em> UI and are illustrative, not final pixels. Final screenshots will be captured from the implemented build during UAT. Current-state reference screenshots of the existing procurement flow are available in the project's <code>manual-screenshots/</code> folder.
+  </div>
+
+  <!-- ────────────────── PART I — FSD ────────────────── -->
+  <h2 class="part" id="fsd">Part I</h2>
+  <p class="part-title">Functional Specification</p>
+  <p class="part-sub">What each enhancement does, who uses it, and how success is measured.</p>
+
+  <!-- FSD R — delivered -->
+  <section class="feat done" id="fsd-rfq">
+    <div class="feat-head"><div class="fnum">&#10003;</div><div><h3>Request for Quotation (RFQ)</h3><p class="oneline">Capture a supplier quotation before a Buy PO can be raised.</p></div><span class="badge-live">&#10003; Delivered · Live</span></div>
+    <div class="feat-body">
+      <div class="note"><div class="h">Status</div>Built and deployed to production (branch <code>main</code> → DigitalOcean). Documented here because enhancements <strong>#3, #5 and #7</strong> extend it.</div>
+
+      <div class="lbl">Objective</div>
+      <p>Ensure every Buy PO is backed by a supplier quotation. The Purchaser requests a quote from each supplier, sends them a formatted RFQ document, enters the returned prices, and only then generates the PO.</p>
+
+      <div class="lbl">Actors</div>
+      <div class="pillrow"><span class="pill role">Purchaser</span><span class="pill role">Admin</span></div>
+
+      <div class="lbl">Delivered behaviour</div>
+      <ol class="steps">
+        <li>In the approved PR's assign panel, buy items are grouped <strong>by supplier</strong>.</li>
+        <li>Each supplier group offers <strong>Request Quote</strong> with <strong>Export to Excel</strong> and <strong>Export to PDF</strong> — an RFQ document on the Bond Building letterhead with the price columns left <strong>blank</strong> for the supplier to fill.</li>
+        <li>A <strong>"Request all quotes"</strong> button handles multi-supplier PRs in one click (one document per supplier).</li>
+        <li>Requesting stamps that supplier's lines; the group shows <strong>&#10003; Quote requested</strong> / <strong>&#10007; Not requested</strong>.</li>
+        <li><strong>Generate Buy PO is mandatory-gated</strong> — locked until every buy supplier has a quotation requested; the tooltip names the first pending supplier.</li>
+        <li>The Purchaser enters the returned prices, then generates the PO(s) — one per supplier, as before.</li>
+      </ol>
+
+      <div class="wire">
+        <div class="wire-cap"><span>Delivered — RFQ panel in the PR assign view</span><span class="wtag">shipped</span></div>
+        <div class="wire-body mock">
+          <div class="mcard">
+            <div style="font-weight:800;color:var(--ink);font-size:13px;margin-bottom:10px">📋 Request for Quotation</div>
+            <div class="mrow" style="justify-content:space-between; border:1px solid var(--border); border-radius:9px; padding:8px 10px; margin-bottom:6px">
+              <div><div style="font-weight:700;color:var(--ink);font-size:12.5px">Guangzhou Alu Profiles</div><div style="font-size:11px;color:var(--faint)">2 items · SGD</div></div>
+              <span class="mchip green">&#10003; Quote requested</span>
+              <span class="mbtn" style="padding:4px 9px">⬇ Excel</span><span class="mbtn" style="padding:4px 9px">⬇ PDF</span>
+            </div>
+            <div class="mrow" style="justify-content:space-between; border:1px solid var(--border); border-radius:9px; padding:8px 10px">
+              <div><div style="font-weight:700;color:var(--ink);font-size:12.5px">Sim Lim Hardware</div><div style="font-size:11px;color:var(--faint)">1 item · SGD</div></div>
+              <span class="mchip amber">&#10007; Not requested</span>
+              <span class="mbtn" style="padding:4px 9px">⬇ Excel</span><span class="mbtn" style="padding:4px 9px">⬇ PDF</span><span class="mbtn solid" style="padding:4px 9px">Request Quote</span>
+            </div>
+            <div class="mrow" style="justify-content:flex-end; margin-top:10px"><span class="mbtn dis">🧾 Generate Buy PO</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lbl">Delivered acceptance criteria</div>
+      <ul class="ac">
+        <li>Per-supplier RFQ documents export to Excel and PDF with blank price columns.</li>
+        <li>Requesting a quote marks the supplier and persists across refresh.</li>
+        <li>Generate Buy PO stays locked until every supplier is quoted.</li>
+        <li>Changing a supplier after quoting re-requires a quote for the new supplier.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FSD 1 -->
+  <section class="feat" id="fsd-1">
+    <div class="feat-head"><div class="fnum">1</div><div><h3>Delivery-stage confirmation alert</h3><p class="oneline">Prevent accidental, irreversible advancement of a PO's delivery/collection stage.</p></div></div>
+    <div class="feat-body">
+      <div class="lbl">Objective</div>
+      <p>On the Purchase Order tracker, stages move <strong>forward only</strong> — once a stage is set it cannot be undone. A single mis-click currently commits the change with no warning. This enhancement adds a confirmation prompt before any stage is advanced.</p>
+
+      <div class="lbl">Actors</div>
+      <div class="pillrow"><span class="pill role">Factory In-charge</span><span class="pill role">Site Supervisor</span><span class="pill role">Admin</span></div>
+
+      <div class="lbl">Current behaviour</div>
+      <p>Clicking a future stage in the Delivery/Collection Status Tracker immediately records it. Completed stages lock; there is no "undo". No confirmation is shown.</p>
+
+      <div class="lbl">Proposed behaviour</div>
+      <ul>
+        <li>Clicking a not-yet-reached stage opens a confirmation dialog naming the target stage.</li>
+        <li>The dialog states clearly that the change <strong>cannot be reversed</strong>.</li>
+        <li><strong>Confirm</strong> advances the stage (existing behaviour); <strong>Cancel</strong> makes no change.</li>
+        <li>The final stage ("Received/Collected") continues to route through the existing <em>Receive goods</em> flow, unchanged.</li>
+      </ul>
+
+      <div class="wire">
+        <div class="wire-cap"><span>Proposed — confirmation dialog</span><span class="wtag">wireframe</span></div>
+        <div class="wire-body mock">
+          <div class="mrow" style="gap:14px">
+            <div class="mcard" style="flex:1; min-width:200px">
+              <div style="font-size:12px; color:var(--muted); margin-bottom:8px">🚚 Delivery Status Tracker</div>
+              <div class="mrow">
+                <span class="mchip green">&#10003; With Vendor</span>
+                <span class="arrow">›</span>
+                <span class="mchip amber">In Transit</span>
+                <span class="arrow">›</span>
+                <span class="mbtn" style="padding:5px 10px">Arrived at Hub · click</span>
+              </div>
+            </div>
+            <div class="mdialog">
+              <div class="title">Advance to "Arrived at Hub"?</div>
+              <div class="msg">Delivery stages move forward only. Once set, this <strong>cannot be undone</strong>. Continue?</div>
+              <div class="mrow" style="justify-content:flex-end">
+                <span class="mbtn">Cancel</span><span class="mbtn solid">Yes, advance</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lbl">Acceptance criteria</div>
+      <ul class="ac">
+        <li>Advancing any intermediate stage shows a confirm dialog naming the target stage before the change is saved.</li>
+        <li>Cancelling leaves the stage unchanged; confirming advances exactly one stage.</li>
+        <li>The warning text explicitly says the action cannot be reversed.</li>
+        <li>Behaviour of completed (locked) stages and the final Receive-goods flow is unchanged.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FSD 2 -->
+  <section class="feat" id="fsd-2">
+    <div class="feat-head"><div class="fnum">2</div><div><h3>Photo attachment on the "Add Item" form (Inventory)</h3><p class="oneline">Let users attach item photos at creation time, not only when editing later.</p></div></div>
+    <div class="feat-body">
+      <div class="lbl">Objective</div>
+      <p>Inventory items can already hold photos, but only the <em>Edit Item</em> screen exposes photo upload. Users must create an item, save it, reopen it, and only then add photos. This enhancement brings the same photo picker into the <strong>Add Item</strong> form so photos can be attached during creation.</p>
+
+      <div class="lbl">Actors</div>
+      <div class="pillrow"><span class="pill role">Purchaser</span><span class="pill role">Factory In-charge</span><span class="pill role">Admin</span></div>
+
+      <div class="lbl">Current behaviour</div>
+      <p>The Add Item modal captures item fields (code, profile, dimensions, quantity, etc.) but has <strong>no photo field</strong>. Photos are added afterwards via Edit Item, which already supports multi-photo upload, preview and delete.</p>
+
+      <div class="lbl">Proposed behaviour</div>
+      <ul>
+        <li>Add Item gains a photo area matching Edit Item: click-or-drag, multi-file, thumbnail previews, remove-before-save.</li>
+        <li>On <strong>Save</strong>, the item is created first, then the selected photos upload to the new item.</li>
+        <li>If photos fail to upload (e.g. storage unavailable), the item is still created and the user is told to add photos from Edit.</li>
+        <li>Accepted types and size limits match the existing Edit Item uploader.</li>
+      </ul>
+
+      <div class="wire">
+        <div class="wire-cap"><span>Proposed — Add Item with photo area</span><span class="wtag">wireframe</span></div>
+        <div class="wire-body mock">
+          <div class="mcard" style="max-width:440px">
+            <div style="font-weight:800; color:var(--ink); font-size:13px; margin-bottom:10px">Add Inventory Item</div>
+            <div class="mrow" style="margin-bottom:8px"><span class="minput" style="flex:1">Profile code</span><span class="minput" style="flex:1">Profile name</span></div>
+            <div class="mrow" style="margin-bottom:10px"><span class="minput" style="flex:1">Quantity</span><span class="minput" style="flex:1">Unit price</span></div>
+            <div style="border:1.5px dashed var(--accent); border-radius:9px; padding:14px; text-align:center; color:var(--muted); font-size:12px; background:var(--accent-soft)">📷 Click or drag photos here <span style="color:var(--faint)">· multiple images</span></div>
+            <div class="mrow" style="margin-top:8px">
+              <span style="width:44px;height:44px;border-radius:7px;background:var(--panel);border:1px solid var(--border);display:grid;place-items:center;font-size:16px">🖼️</span>
+              <span style="width:44px;height:44px;border-radius:7px;background:var(--panel);border:1px solid var(--border);display:grid;place-items:center;font-size:16px">🖼️</span>
+              <span class="mbtn" style="margin-left:auto" >Cancel</span><span class="mbtn solid">Save item</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lbl">Acceptance criteria</div>
+      <ul class="ac">
+        <li>Add Item shows a photo picker with previews and per-photo remove before saving.</li>
+        <li>Saving creates the item and uploads the chosen photos to it; they appear on the item afterwards.</li>
+        <li>Item creation still succeeds if the photo upload fails, with a clear message.</li>
+        <li>File types/sizes are validated identically to Edit Item.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FSD 3 -->
+  <section class="feat" id="fsd-3">
+    <div class="feat-head"><div class="fnum">3</div><div><h3>QS approval — sourcing &amp; price gates</h3><p class="oneline">A QS signs off the buy in two steps — the sourcing before the PO, then the price on the PO — running in parallel with, and independent of, factory delivery.</p></div></div>
+    <div class="feat-body">
+      <div class="lbl">Objective</div>
+      <p>Give the <strong>Quantity Surveyor (QS)</strong> control of the buy through two checkpoints: <strong>Gate 1</strong> approves <em>who</em> we buy from (sourcing) before the PO is generated, and <strong>Gate 2</strong> approves <em>how much</em> we pay (price) on the PO. The QS / price track is <strong>standalone</strong> — it never blocks, and is never blocked by, the factory (FIC) delivery track. This changes the <strong>Purchaser's flow only</strong>; no other role's flow changes.</p>
+
+      <div class="lbl">Actors</div>
+      <div class="pillrow"><span class="pill role">Purchaser</span><span class="pill role">QS</span><span class="pill role">Admin</span></div>
+
+      <div class="lbl">Current behaviour</div>
+      <p>The Purchaser assigns a supplier to each buy line and clicks <strong>Generate Buy PO</strong> directly. The QS role exists but is view-only — it has no approval action. There is no QS sign-off before or after a PO is raised.</p>
+
+      <div class="lbl">The two gates</div>
+      <ul>
+        <li><strong>Gate 1 — sourcing</strong> (before the PO): QS approves the items, suppliers and quantities. If the Purchaser has <em>already</em> entered prices, Gate 1 approves the <strong>sourcing + price together</strong> — no Gate 2 unless the price is later edited.</li>
+        <li><strong>Gate 2 — price</strong> (on the PO): whenever the Purchaser enters or edits a price on the PO, it goes back to the QS for a price approval. <strong>Every price edit re-triggers Gate 2.</strong></li>
+      </ul>
+
+      <div class="note"><div class="h">PO lifecycle after generation — two parallel tracks</div>
+        The moment the PO is generated (once, after Gate 1) it is <strong>live</strong>: the supplier has the order and the <strong>FIC delivery track starts immediately</strong> and flows on its own. In parallel, the Purchaser can edit the price and get it QS-approved (Gate 2) as many times as needed. The PO therefore carries <strong>two independent statuses</strong>:
+        <ul style="margin:6px 0 0">
+          <li><strong>Delivery status</strong> (FIC): In transit → … → Delivered — the existing flow, unchanged.</li>
+          <li><strong>Price status</strong> (Purchaser / QS): Awaiting pricing → Pending QS price approval → Price approved.</li>
+        </ul>
+        Neither track waits on the other. They meet only at <strong>Close</strong>: the Purchaser can Close the PO <strong>only when both</strong> (a) FIC has marked it <strong>Delivered</strong> and (b) the latest price is <strong>QS-approved</strong> (nothing pending). Close freezes the PO.
+      </div>
+
+      <div class="wire">
+        <div class="wire-cap"><span>Purchaser flow — the two gates around a live PO</span><span class="wtag">option B</span></div>
+        <div class="wire-body mock">
+          <div class="mrow" style="gap:6px; flex-wrap:wrap; align-items:center">
+            <span class="mchip grey">APPROVED</span><span class="arrow">›</span>
+            <span class="mchip amber">PENDING QS APPROVAL</span><span class="arrow">›</span>
+            <span class="mchip green">QS APPROVED</span><span class="arrow">›</span>
+            <span class="mchip grey">PO LIVE</span>
+          </div>
+          <div style="font-size:11.5px;color:var(--muted);margin:9px 0">…then, on the live PO, in parallel:</div>
+          <div class="mrow" style="gap:14px; align-items:flex-start; flex-wrap:wrap">
+            <div class="mcard" style="flex:1; min-width:220px">
+              <div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Price track · Purchaser + QS</div>
+              <div class="mrow" style="gap:6px;flex-wrap:wrap;align-items:center">
+                <span class="mchip grey">Awaiting pricing</span><span class="arrow">›</span>
+                <span class="mchip amber">Pending QS price approval</span><span class="arrow">›</span>
+                <span class="mchip green">Price approved</span>
+              </div>
+              <div style="font-size:11px;color:var(--faint);margin-top:6px">Every price edit returns here.</div>
+            </div>
+            <div class="mcard" style="flex:1; min-width:220px">
+              <div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Delivery track · FIC (unchanged)</div>
+              <div class="mrow" style="gap:6px;flex-wrap:wrap;align-items:center">
+                <span class="mchip amber">In transit</span><span class="arrow">›</span>
+                <span class="mchip green">Delivered</span>
+              </div>
+              <div style="font-size:11px;color:var(--faint);margin-top:6px">Starts at generation; independent.</div>
+            </div>
+          </div>
+          <div class="mrow" style="justify-content:center;margin-top:10px"><span class="mchip grey">CLOSED — needs Delivered <b>and</b> Price approved</span></div>
+        </div>
+      </div>
+
+      <div class="lbl">Proposed behaviour (Purchaser flow)</div>
+      <ol class="steps">
+        <li><b>Manager</b> approves the PR → <code>APPROVED</code> (unchanged).</li>
+        <li><b>Purchaser</b> assigns suppliers and requests quotes (RFQ). Price is optional here — leave it blank or enter it now. Clicks <strong>Submit for QS approval</strong> → <code>PENDING QS APPROVAL</code>; Generate Buy PO locks.</li>
+        <li><b>QS · Gate 1</b> reviews the sourcing (and the price, if one was entered) → <strong>QS Approve</strong> → <code>QS APPROVED</code>, Generate Buy PO unlocks. <em>(or <strong>Send back</strong> with a reason → <code>APPROVED</code>.)</em></li>
+        <li><b>Purchaser</b> clicks <strong>Generate Buy PO</strong> → the PO goes <strong>live</strong>. FIC delivery starts immediately, in parallel.</li>
+        <li><b>Purchaser</b> enters or edits the unit price on the PO and clicks <strong>Submit price for QS approval</strong> → price status <code>PENDING QS PRICE APPROVAL</code>. <em>(Skipped if the price was already approved at Gate 1 and not edited.)</em></li>
+        <li><b>QS · Gate 2</b> reviews the price → <strong>QS Approve Price</strong> → price status <code>PRICE APPROVED</code>. <em>Every later price edit returns to this gate.</em></li>
+        <li><b>Purchaser</b> clicks <strong>Close</strong> once FIC has marked <strong>Delivered</strong> and the latest price is <strong>QS-approved</strong> → <code>CLOSED</code> (frozen).</li>
+      </ol>
+
+      <div class="note"><div class="h">QS button label</div>The QS uses one Approve button whose label reflects what's on screen: <strong>QS Approve</strong> when there is no price to approve (sourcing only), <strong>QS Approve Price</strong> once a price is present (Gate 1 with a price, or any Gate 2). Base the switch on the PO / stage (or "every buy line has a price"), and record the gate in history as <code>QS_APPROVE_SOURCING</code> vs <code>QS_APPROVE_PRICE</code> so the trail is unambiguous.</div>
+
+      <div class="note q">
+        <div class="h">Open question for client — still to confirm</div>
+        <ul style="margin:4px 0 0">
+          <li><strong>Approval granularity:</strong> does QS approve <strong>per PR</strong> (the whole PR in one action) or <strong>per supplier</strong> (approve some, send others back individually)? <em>This decides whether approval state lives on the PR / PO or on each supplier line — see TSD&nbsp;#3.</em></li>
+          <li>Can QS <strong>reject outright</strong>, or only send back to the Purchaser? <em>(Assumed: send-back only.)</em></li>
+        </ul>
+      </div>
+
+      <div class="lbl">Acceptance criteria</div>
+      <ul class="ac">
+        <li>Submitting a PR moves it to <code>PENDING QS APPROVAL</code> and locks Generate Buy PO; the price may be blank or filled at submit.</li>
+        <li>Gate 1: QS approves sourcing (plus the price, if one was entered) → <code>QS APPROVED</code> and Generate Buy PO unlocks. A price approved at Gate 1 needs no further approval unless edited.</li>
+        <li>Generating the PO makes it live and starts the FIC delivery track immediately; the QS / price track and the FIC track never block each other.</li>
+        <li>Entering or editing a price on the PO sets price status to <code>PENDING QS PRICE APPROVAL</code>; QS approve → <code>PRICE APPROVED</code>. Every price edit re-triggers this.</li>
+        <li>Close is allowed only when FIC = <strong>Delivered</strong> and the latest price is <strong>QS-approved</strong>; closing freezes the PO.</li>
+        <li>QS approval covers the buy side only; the stock portion still goes to the FIC independently. All submit / approve / send-back / close events appear in history.</li>
+        <li>No other role's flow changes.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FSD 4 (merges former #4 PO editing + #9 price-edit policy) -->
+  <section class="feat" id="fsd-4">
+    <div class="feat-head"><div class="fnum">4</div><div><h3>Purchase Order price editing</h3><p class="oneline">Correct a mis-keyed unit price on an OPEN PO — a controlled, audited amendment.</p></div></div>
+    <div class="feat-body">
+      <div class="note"><div class="h">Scope</div>This item is <strong>price editing only</strong>. Descriptions, quantities and the set of lines stay fixed after generation; only the <strong>unit price</strong> can be corrected. (Former enhancements #4 "PO editing" and #9 "Edit PO price after generation" are combined here.)</div>
+
+      <div class="lbl">Objective</div>
+      <p>Today a PO's values are fixed once generated — only delivery details and lead-times can be edited, so a mis-keyed price forces cancelling and re-creating the PO. This enhancement lets an authorised user correct the <strong>unit price</strong> on a PO that is still in <strong>OPEN</strong> status, recalculating the total, as a tracked amendment with a full audit trail.</p>
+
+      <div class="lbl">Actors</div>
+      <div class="pillrow"><span class="pill role">Purchaser</span><span class="pill role">Admin</span></div>
+
+      <div class="lbl">Current behaviour</div>
+      <p>PO detail supports editing delivery method/address, required date and shipment tracking. Line prices and the amount are read-only after generation. Corrections require cancelling and re-creating the PO.</p>
+
+      <div class="lbl">Proposed behaviour</div>
+      <ul>
+        <li>An <strong>Edit price</strong> mode on an OPEN PO makes each line's <strong>unit price</strong> editable. Description, quantity and the set of lines stay read-only.</li>
+        <li>The PO <strong>amount recalculates</strong> from quantity × edited price on save.</li>
+        <li><strong>Tracked amendment</strong> — every price change is written to PO history (before → after), not a silent overwrite, with prices redacted for roles lacking price access.</li>
+        <li>If <strong>#3 (QS approval)</strong> is adopted, a price change <strong>re-triggers QS approval</strong>.</li>
+        <li>For a change after the supplier already holds the PO, issue a <strong>PO revision</strong> (Rev A → Rev B) rather than editing in place.</li>
+        <li>Editing is blocked once the PO is <strong>closed/received</strong> or <strong>cancelled</strong>.</li>
+      </ul>
+
+      <div class="wire">
+        <div class="wire-cap"><span>Proposed — editable unit price (qty locked)</span><span class="wtag">wireframe</span></div>
+        <div class="wire-body mock">
+          <div class="mcard">
+            <div style="font-weight:800;color:var(--ink);font-size:13px;margin-bottom:10px">Purchase Order · JN431-PR106-S018 <span class="mchip green" style="margin-left:6px">OPEN · price editable</span></div>
+            <table class="mtable">
+              <tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th></tr>
+              <tr><td>Aluminium profile 100×50</td><td>120</td><td><span class="minput" style="padding:3px 6px">42.00</span></td><td>5,040.00</td></tr>
+              <tr><td>EPDM gasket 8mm</td><td>600</td><td><span class="minput" style="padding:3px 6px">1.20</span></td><td>720.00</td></tr>
+            </table>
+            <div class="mrow" style="justify-content:flex-end; margin-top:10px">
+              <span style="font-weight:800;color:var(--ink)">Total: S$ 5,760.00 <span class="mbtn solid" style="margin-left:8px">Save price changes</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note q">
+        <div class="h">Open question for client</div>
+        <ul style="margin:4px 0 0"><li>Should price editing be allowed any time while OPEN, or only before the PO is sent / before the first delivery stage is set?</li></ul>
+      </div>
+
+      <div class="lbl">Acceptance criteria</div>
+      <ul class="ac">
+        <li>An OPEN PO can enter price-edit mode; only the unit price is editable (description, qty and the line set are fixed).</li>
+        <li>Saving recalculates and stores the PO amount from quantity × edited price.</li>
+        <li>Every price change is recorded in PO history before → after (price-redacted where required).</li>
+        <li>If QS approval (#3) is live, a price edit clears QS approval and re-requires it before the PO proceeds.</li>
+        <li>Closed, received or cancelled POs cannot be edited.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FSD 5 -->
+  <section class="feat" id="fsd-5">
+    <div class="feat-head"><div class="fnum">5</div><div><h3>Multiple suppliers per PR item (1, 1a, 1b, 1c)</h3><p class="oneline">Let one requested item be routed to several suppliers, each for a different processing purpose.</p></div></div>
+    <div class="feat-body">
+      <div class="lbl">Objective</div>
+      <p>Allow a single PR item to be sent to <strong>multiple suppliers</strong>, shown as sub-lines under the parent item — item&nbsp;1 with children 1a, 1b, 1c. In this business the same physical item is routed to different suppliers for <strong>different purposes</strong> (e.g. powder coating, polishing, anodising); each sub-line carries its own purpose, supplier, quantity and price, and each becomes its own PO.</p>
+
+      <div class="lbl">Actors</div>
+      <div class="pillrow"><span class="pill role">Drafter</span><span class="pill role">Purchaser</span><span class="pill role">Admin</span></div>
+
+      <div class="lbl">Current behaviour</div>
+      <p>Each PR buy line maps to exactly one supplier. To involve a second supplier the item must be duplicated as a separate line. PR rows already group visually by line number (a stock/buy split shares one line), but there is no supplier sub-line concept.</p>
+
+      <div class="lbl">Proposed behaviour</div>
+      <ul>
+        <li>Under an item, the user can <strong>"+ Add supplier / purpose"</strong> to create sub-lines labelled 1a, 1b, 1c…</li>
+        <li>Each sub-line inherits the main item's description and carries its own <strong>purpose</strong>, supplier, quantity, remark and price, and can be quoted (RFQ) independently.</li>
+        <li>PO generation groups sub-lines by supplier as today — each supplier's sub-lines become that supplier's PO; the purpose is folded into the PO line description.</li>
+        <li>Sub-line labels (1a/1b/1c) appear consistently in the PR view, RFQ documents and PO references.</li>
+      </ul>
+
+      <div class="wire">
+        <div class="wire-cap"><span>Proposed — item 1 with supplier sub-lines</span><span class="wtag">wireframe</span></div>
+        <div class="wire-body mock">
+          <div class="mcard">
+            <table class="mtable">
+              <tr><th>Line</th><th>Description</th><th>Purpose</th><th>Supplier</th><th>Qty</th><th>Price</th></tr>
+              <tr><td><strong>1</strong></td><td>Aluminium profile 100×50</td><td class="dashed-cell">main item</td><td>Guangzhou Alu</td><td>300</td><td>S$ 42.00</td></tr>
+              <tr><td>1a</td><td style="color:var(--muted)">↳ same item</td><td>Powder coating</td><td>Lian Bee Metal</td><td>300</td><td>S$ 6.00</td></tr>
+              <tr><td>1b</td><td style="color:var(--muted)">↳ same item</td><td>Polishing</td><td>Pestkare</td><td>300</td><td>S$ 3.50</td></tr>
+              <tr><td>1c</td><td style="color:var(--muted)">↳ same item</td><td>Anodising</td><td>Foshan Metals</td><td>300</td><td>S$ 4.20</td></tr>
+            </table>
+            <div class="mrow" style="margin-top:10px"><span class="mbtn" style="padding:5px 10px">+ Add supplier / purpose (1d)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note"><div class="h">Confirmed model</div>Each sub-line is the <strong>same item sent to a different supplier for a different purpose</strong> — not competing quotes and not a quantity split. Because each purpose uses a different supplier, the existing "one PO per supplier" grouping already yields exactly one PO per purpose. Sub-line quantity defaults to the parent's and is editable; the RFQ quote gate applies to every sub-line.</div>
+
+      <div class="lbl">Acceptance criteria</div>
+      <ul class="ac">
+        <li>An item can hold multiple supplier sub-lines labelled 1a/1b/1c… added and removed in the PR editor.</li>
+        <li>Each sub-line has its own purpose, supplier, quantity, remark and price, and can be quoted independently.</li>
+        <li>Sub-line labels and purposes render consistently in PR view, RFQ documents and PO references.</li>
+        <li>PO generation produces one PO per supplier from the relevant sub-lines.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FSD 6 -->
+  <section class="feat" id="fsd-6">
+    <div class="feat-head"><div class="fnum">6</div><div><h3>Location field on the Purchase Order</h3><p class="oneline">Show the delivery/site location on the PO, carried from the originating PR.</p></div></div>
+    <div class="feat-body">
+      <div class="lbl">Objective</div>
+      <p>The Purchase Request already captures a <strong>Location</strong>, but it is not shown on the resulting Purchase Order. This enhancement carries the PR's location onto the PO and displays it in the PO detail view and PDF, so suppliers and staff see where goods are needed.</p>
+
+      <div class="lbl">Actors</div>
+      <div class="pillrow"><span class="pill role">Purchaser</span><span class="pill role">Site Supervisor</span><span class="pill role">Factory In-charge</span></div>
+
+      <div class="lbl">Current behaviour</div>
+      <p>The PO detail modal shows Status, Supplier, Type, Job, From PR, Currency, Prepared by, PO date, Received — but <strong>no Location</strong>. Location lives only on the PR.</p>
+
+      <div class="lbl">Proposed behaviour</div>
+      <ul>
+        <li>At PO generation, copy the PR's <code>location</code> onto the PO.</li>
+        <li>Display <strong>Location</strong> in the PO detail header (alongside Job / From PR) and on the PO PDF.</li>
+        <li>Editable by the Purchaser on an OPEN PO (optional — align with #4).</li>
+      </ul>
+
+      <div class="wire">
+        <div class="wire-cap"><span>Proposed — Location in PO header</span><span class="wtag">wireframe</span></div>
+        <div class="wire-body mock">
+          <div class="mrow" style="gap:24px; flex-wrap:wrap">
+            <div><div style="font-size:10px;color:var(--faint);text-transform:uppercase">Job</div><div style="font-weight:700;color:var(--ink)">JN444</div></div>
+            <div><div style="font-size:10px;color:var(--faint);text-transform:uppercase">From PR</div><div style="font-weight:700;color:var(--ink)">JN444/PR-001</div></div>
+            <div style="border:1.5px dashed var(--accent);border-radius:8px;padding:2px 10px"><div style="font-size:10px;color:var(--accent);text-transform:uppercase">Location · new</div><div style="font-weight:700;color:var(--ink)">Tuas Site — Block C</div></div>
+            <div><div style="font-size:10px;color:var(--faint);text-transform:uppercase">Currency</div><div style="font-weight:700;color:var(--ink)">SGD</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lbl">Acceptance criteria</div>
+      <ul class="ac">
+        <li>New POs carry the location from their PR.</li>
+        <li>Location appears in the PO detail view and on the PO PDF.</li>
+        <li>Existing POs without a location show "—" gracefully.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FSD 7 -->
+  <section class="feat" id="fsd-7">
+    <div class="feat-head"><div class="fnum">7</div><div><h3>Supplier price-comparison table (Purchaser)</h3><p class="oneline">Side-by-side view of each supplier's quoted price per item, to choose the best.</p></div></div>
+    <div class="feat-body">
+      <div class="lbl">Objective</div>
+      <p>Give the Purchaser a comparison table showing, for each item, the price offered by each supplier — so the best price (and lead time) can be selected before the PO is generated. This is the decision surface for the RFQ / multi-supplier flow.</p>
+
+      <div class="lbl">Actors</div>
+      <div class="pillrow"><span class="pill role">Purchaser</span><span class="pill role">QS</span><span class="pill role">Admin</span></div>
+
+      <div class="lbl">Current behaviour</div>
+      <p>Prices are entered per supplier line individually; there is no consolidated view comparing suppliers for the same item. Comparison is done manually / off-system.</p>
+
+      <div class="lbl">Proposed behaviour</div>
+      <ul>
+        <li>A comparison matrix: <strong>rows = items</strong>, <strong>columns = suppliers</strong>, cells = quoted unit price (and optionally lead time).</li>
+        <li>The lowest price per row is highlighted; the Purchaser can mark the chosen supplier per item.</li>
+        <li>Selection feeds PO generation — only chosen supplier/price becomes a PO line.</li>
+      </ul>
+
+      <div class="wire">
+        <div class="wire-cap"><span>Proposed — comparison matrix</span><span class="wtag">wireframe</span></div>
+        <div class="wire-body mock">
+          <table class="mtable">
+            <tr><th>Item</th><th>Guangzhou Alu</th><th>Sim Lim</th><th>Foshan Metals</th><th>Choose</th></tr>
+            <tr><td>Alu 100×50</td><td><span class="mchip green">S$ 41.20 ▾ best</span></td><td>S$ 44.50</td><td>S$ 42.00</td><td><span class="mbtn" style="padding:3px 9px">Guangzhou ▾</span></td></tr>
+            <tr><td>EPDM gasket 8mm</td><td>S$ 1.35</td><td><span class="mchip green">S$ 1.15 ▾ best</span></td><td>S$ 1.20</td><td><span class="mbtn" style="padding:3px 9px">Sim Lim ▾</span></td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="note"><div class="h">Dependency</div>This is the natural front-end for <strong>#5 (multiple suppliers per item)</strong> in "compare quotes" mode and the RFQ feature. Its usefulness depends on being able to hold multiple supplier prices per item, so scope it together with #5.</div>
+
+      <div class="lbl">Acceptance criteria</div>
+      <ul class="ac">
+        <li>For an item quoted by multiple suppliers, all supplier prices show side by side.</li>
+        <li>The lowest price per item is visually flagged.</li>
+        <li>The Purchaser can select the winning supplier per item, and that choice drives PO generation.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FSD 8 -->
+  <section class="feat" id="fsd-8">
+    <div class="feat-head"><div class="fnum">8</div><div><h3>GST 9% on the Purchase Order</h3><p class="oneline">Show subtotal, 9% GST and gross total on the PO and its PDF.</p></div></div>
+    <div class="feat-body">
+      <div class="lbl">Objective</div>
+      <p>Purchase Orders currently show only a single total (the sum of line amounts). This enhancement adds Singapore <strong>GST at 9%</strong>, breaking the PO value into <strong>Subtotal → GST (9%) → Total</strong> in the detail view and PDF.</p>
+
+      <div class="lbl">Actors</div>
+      <div class="pillrow"><span class="pill role">Purchaser</span><span class="pill role">QS</span><span class="pill role">Manager</span></div>
+
+      <div class="lbl">Current behaviour</div>
+      <p>The PO stores and displays a single <code>amount</code> (net of tax). No GST line exists on screen or on the PDF.</p>
+
+      <div class="lbl">Proposed behaviour</div>
+      <ul>
+        <li>PO totals show three lines: <strong>Subtotal</strong>, <strong>GST @ 9%</strong>, <strong>Total (incl. GST)</strong>.</li>
+        <li>GST rate is configurable (default 9%) to survive future rate changes.</li>
+        <li>Applied on the PO detail, the PO PDF, and (optionally) the RFQ document.</li>
+      </ul>
+
+      <div class="wire">
+        <div class="wire-cap"><span>Proposed — GST breakdown</span><span class="wtag">wireframe</span></div>
+        <div class="wire-body mock">
+          <div class="mcard" style="max-width:320px; margin-left:auto">
+            <div class="mrow" style="justify-content:space-between"><span style="color:var(--muted)">Subtotal</span><span>S$ 600.00</span></div>
+            <div class="mrow" style="justify-content:space-between"><span style="color:var(--muted)">GST @ 9%</span><span>S$ 54.00</span></div>
+            <div class="divider" style="margin:8px 0"></div>
+            <div class="mrow" style="justify-content:space-between; font-weight:800; color:var(--ink)"><span>Total (incl. GST)</span><span>S$ 654.00</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note q">
+        <div class="h">Open questions for client</div>
+        <ul style="margin:4px 0 0">
+          <li>Does GST apply to <strong>all</strong> POs, or only <strong>local (SGD) suppliers</strong>? Overseas/import suppliers are often zero-rated on the PO.</li>
+          <li>Should dashboards/exports report PO value as <strong>net</strong> (current) or <strong>gross incl. GST</strong>? (Affects reconciliation.)</li>
+        </ul>
+      </div>
+
+      <div class="lbl">Acceptance criteria</div>
+      <ul class="ac">
+        <li>PO detail and PDF show Subtotal, GST @ 9%, and Total incl. GST.</li>
+        <li>GST is computed from the subtotal at the configured rate.</li>
+        <li>Existing single-total behaviour is preserved for any zero-rated case per the client's answer above.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FSD 9 (Save PR as Draft) -->
+  <section class="feat" id="fsd-9">
+    <div class="feat-head"><div class="fnum">9</div><div><h3>Save Purchase Request as Draft</h3><p class="oneline">Let a Drafter save an unfinished PR and come back to it, without submitting for approval.</p></div></div>
+    <div class="feat-body">
+      <div class="lbl">Objective</div>
+      <p>Today the PR form can only be <strong>submitted</strong> — there is no way to save a half-finished request. This enhancement adds a <strong>Save as Draft</strong> action so a Drafter can capture work in progress in a new <code>DRAFT</code> state and finish it later. A draft is not sent to the Manager and appears in no approval queue until the Drafter clicks <strong>Submit</strong>.</p>
+
+      <div class="lbl">Actors</div>
+      <div class="pillrow"><span class="pill role">Drafter</span><span class="pill role">Admin</span></div>
+
+      <div class="lbl">Current behaviour</div>
+      <p>The PR form has a single <strong>Submit</strong> action that immediately moves the PR to <code>PENDING</code> for Manager approval. Closing the form without submitting loses everything entered.</p>
+
+      <div class="lbl">Proposed behaviour</div>
+      <ul>
+        <li>The PR form offers <strong>Save as Draft</strong> alongside <strong>Submit</strong>.</li>
+        <li>A draft stores all entered details — items, supplier sub-lines (1a/1b/1c), attachments — in a <code>DRAFT</code> status without notifying anyone.</li>
+        <li>Drafts are listed only for their creator (and Admin) under a <strong>Drafts</strong> filter, and can be reopened, edited or deleted.</li>
+        <li>Drafts never appear in the Manager's approval queue or other roles' views.</li>
+        <li><strong>Submit</strong> on a draft moves it to <code>PENDING</code> — the normal flow from there is unchanged.</li>
+      </ul>
+
+      <div class="wire">
+        <div class="wire-cap"><span>Proposed — Save as Draft on the PR form</span><span class="wtag">wireframe</span></div>
+        <div class="wire-body mock">
+          <div class="mcard">
+            <div style="font-weight:800;color:var(--ink);font-size:13px;margin-bottom:10px">Raise Purchase Request · JN9999 <span class="mchip grey" style="margin-left:6px">DRAFT</span></div>
+            <div class="mrow" style="margin-bottom:10px"><span class="minput" style="flex:1">Item 1 — L-Angle 25×75×2.8mm</span><span class="minput" style="width:70px">100</span></div>
+            <div class="mrow" style="justify-content:flex-end">
+              <span class="mbtn">Cancel</span>
+              <span class="mbtn">💾 Save as Draft</span>
+              <span class="mbtn solid">Submit for approval</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lbl">Acceptance criteria</div>
+      <ul class="ac">
+        <li>The PR form has both <strong>Save as Draft</strong> and <strong>Submit</strong>.</li>
+        <li>A draft persists all fields and can be reopened, edited and deleted by its creator.</li>
+        <li>Drafts stay out of the approval queue and are hidden from other roles.</li>
+        <li>Submitting a draft moves it to <code>PENDING</code>; nothing else in the flow changes.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ────────────────── PART II — TSD ────────────────── -->
+  <h2 class="part" id="tsd">Part II</h2>
+  <p class="part-title">Technical Specification</p>
+  <p class="part-sub">Implementation detail per enhancement — data model, APIs, files, permissions and effort. Paths are relative to the repository root.</p>
+
+  <!-- TSD R — delivered -->
+  <section class="feat done" id="tsd-rfq">
+    <div class="feat-head"><div class="fnum">&#10003;</div><div><h3>Request for Quotation (RFQ)</h3><p class="oneline">As built — schema, endpoints, documents and UI.</p></div><span class="badge-live">&#10003; Delivered · Live</span></div>
+    <div class="feat-body">
+      <div class="scroll"><table class="spec">
+        <tr><td class="k">Data model</td><td><code>pr_items.quote_requested_at TIMESTAMPTZ</code> (nullable) — stamped when a supplier's RFQ is requested; <code>NULL</code> = not requested. Idempotent migration + startup apply (<code>index.js</code>). Live on the DO production DB.</td></tr>
+        <tr><td class="k">API</td><td><code>POST /purchase-requests/:prNo/request-quote</code> — body <code>{ supplier_id }</code> or <code>{ all:true }</code>; guard <code>assign_supplier</code>; stamps lines + writes a <code>REQUEST_QUOTE</code> audit row. <code>POST /:prNo/generate-pos</code> rejects any buy line still un-quoted. <code>PUT /:prNo/items</code> clears the stamp when supplier/currency changes.</td></tr>
+        <tr><td class="k">Documents</td><td><code>frontend/src/lib/rfqDoc.js</code> — <code>exportRfqPdf</code> / <code>exportRfqExcel</code>, one per supplier, on the Bond Building letterhead with blank Unit&nbsp;Price / Total columns (mirrors <code>poPdf.js</code> + the ExcelJS pattern).</td></tr>
+        <tr><td class="k">Files</td><td>Backend: <code>routes/purchaseRequests.js</code>, <code>index.js</code>. Frontend: <code>pages/PurchaseRequests.jsx</code> (<code>RfqPanel</code>), <code>lib/rfqDoc.js</code>, <code>lib/api.js</code> (<code>requestQuote</code>), <code>components/AuditTrail.jsx</code> (label).</td></tr>
+        <tr><td class="k">Permissions</td><td>Reuses <code>assign_supplier</code> / <code>generate_po</code> — <strong>no new permission</strong>. STOCK lines unaffected.</td></tr>
+        <tr><td class="k">Delivery</td><td>Commits <code>9e00d3d</code> (feature) + <code>87bc26b</code> (assignItems parameter-type fix). Deployed to <code>main</code> (DO) and <code>dev</code>.</td></tr>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- TSD 1 -->
+  <section class="feat" id="tsd-1">
+    <div class="feat-head"><div class="fnum">1</div><div><h3>Delivery-stage confirmation alert</h3><p class="oneline">Front-end only · no schema or API change.</p></div></div>
+    <div class="feat-body">
+      <div class="scroll"><table class="spec">
+        <tr><td class="k">Data model</td><td>None. Backward-move prevention already exists in <code>PUT /purchase-orders/:poNo/delivery-stage</code> (rejects non-forward stages).</td></tr>
+        <tr><td class="k">API</td><td>No change. Confirmation is a client-side guard before the existing call.</td></tr>
+        <tr><td class="k">Files</td><td><code>frontend/src/pages/PurchaseOrders.jsx</code> — the <code>DeliveryTracker</code> component's <code>handleClick</code>. Wrap <code>onSet(stage)</code> in a confirm dialog (reuse the app <code>Modal</code>, or <code>window.confirm</code> as a minimal first cut).</td></tr>
+        <tr><td class="k">Permissions</td><td>Unchanged (<code>set_delivery</code>).</td></tr>
+        <tr><td class="k">Effort</td><td><span class="tag t-low">Low</span> — ~0.5 day incl. test.</td></tr>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- TSD 2 -->
+  <section class="feat" id="tsd-2">
+    <div class="feat-head"><div class="fnum">2</div><div><h3>Photo attachment on "Add Item"</h3><p class="oneline">Reuses the existing inventory-photos backend; front-end wiring only.</p></div></div>
+    <div class="feat-body">
+      <div class="scroll"><table class="spec">
+        <tr><td class="k">Data model</td><td>None. <code>inventory_item_photos</code> table already exists.</td></tr>
+        <tr><td class="k">API</td><td>Reuse existing: <code>POST /inventory/:id/photos</code> (multipart, Spaces-backed), <code>GET /inventory/:id/photos</code>, <code>DELETE /inventory/photos/:photoId</code>. No new endpoint.</td></tr>
+        <tr><td class="k">Files</td><td><code>frontend/src/pages/StockPage.jsx</code> — the <em>Add Item</em> modal. Lift the photo picker/preview logic already present in the <em>Edit Item</em> modal into a shared piece; on submit, create the item, then POST photos to the returned id (create-then-upload, mirroring the PR create flow).</td></tr>
+        <tr><td class="k">Dependency</td><td>DigitalOcean Spaces env vars must be set in the target environment (<code>SPACES_*</code>) — same requirement as all uploads.</td></tr>
+        <tr><td class="k">Permissions</td><td>Whoever can add inventory items (Purchaser/FIC/Admin).</td></tr>
+        <tr><td class="k">Effort</td><td><span class="tag t-low">Low</span> — ~1 day incl. test.</td></tr>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- TSD 3 -->
+  <section class="feat" id="tsd-3">
+    <div class="feat-head"><div class="fnum">3</div><div><h3>QS approval — sourcing &amp; price gates</h3><p class="oneline">Option B — Gate 1 PR statuses + Gate 2 PO price-status, one QS permission, endpoints, notifications; two independent PO tracks.</p></div></div>
+    <div class="feat-body">
+      <div class="scroll"><table class="spec">
+        <tr><td class="k">Model</td><td><strong>Option B (status + queue)</strong> — formal approval statuses, not hidden flags, so the QS gets a real queue (mirrors Manager approval). Two gates: <strong>Gate 1</strong> on the PR (sourcing), <strong>Gate 2</strong> on the PO (price).</td></tr>
+        <tr><td class="k">Data model — Gate 1 (PR)</td><td>Add statuses <code>PENDING_QS_APPROVAL</code> and <code>QS_APPROVED</code> to the <code>purchase_requests.status</code> CHECK, plus <code>qs_approved_by</code>, <code>qs_approved_at</code>, <code>qs_sent_back_reason</code>. <em>Granularity is the open question:</em> per-PR → state on <code>purchase_requests</code>; per-supplier → also nullable <code>pr_items.qs_approved_at</code> and derive from lines.</td></tr>
+        <tr><td class="k">Data model — Gate 2 (PO)</td><td>Add a <strong>separate price-approval status</strong> on <code>purchase_orders</code>, e.g. <code>price_status</code> ∈ <code>AWAITING_PRICING | PENDING_QS_PRICE | PRICE_APPROVED</code>, plus <code>price_approved_by</code>/<code>price_approved_at</code>. This is <strong>independent of the existing delivery status</strong> — the two never gate each other. Editing any line price resets <code>price_status</code> to <code>PENDING_QS_PRICE</code>. All idempotent <code>ADD COLUMN IF NOT EXISTS</code> / CHECK migrations + startup apply.</td></tr>
+        <tr><td class="k">Permissions</td><td>One new action <code>qs_approve</code> in <code>pr_po_permissions</code> (covers both gates); default <code>["QS","Admin"]</code>. Add to <code>ROLE_DEFAULTS</code>/<code>COLS</code> and the Role Permissions matrix UI.</td></tr>
+        <tr><td class="k">API — Gate 1</td><td><code>POST /purchase-requests/:prNo/submit-for-qs</code> (<code>APPROVED</code> → <code>PENDING_QS_APPROVAL</code>), <code>POST /:prNo/qs-approve</code> (→ <code>QS_APPROVED</code>; if a price is present, also stamp it approved), <code>POST /:prNo/qs-send-back</code> (→ <code>APPROVED</code> + reason). Gate <code>POST /:prNo/generate-pos</code> on <code>QS_APPROVED</code>. Guard: <code>qs_approve</code>.</td></tr>
+        <tr><td class="k">API — Gate 2</td><td>Extend <code>PUT /purchase-orders/:poNo/prices</code> (OPEN only) to set prices and flip <code>price_status = PENDING_QS_PRICE</code>. <code>POST /:poNo/qs-approve-price</code> (→ <code>PRICE_APPROVED</code>), <code>POST /:poNo/qs-send-back-price</code>. <code>POST /:poNo/close</code> guarded to require <strong>delivery = Delivered AND <code>price_status = PRICE_APPROVED</code></strong>. Audit events <code>QS_APPROVE_SOURCING</code> / <code>QS_APPROVE_PRICE</code> in <code>po_approvals</code> / <code>pr_approvals</code>.</td></tr>
+        <tr><td class="k">Independence</td><td>The price track (<code>price_status</code>) and the FIC delivery track are <strong>separate columns</strong>; no transition on one is a precondition for the other. Delivery begins at PO generation and proceeds regardless of price approval. Only <code>close</code> checks both.</td></tr>
+        <tr><td class="k">Queue &amp; UI</td><td>Gate 1 queue = PR list filtered to <code>PENDING_QS_APPROVAL</code>; Gate 2 queue = PO list filtered to <code>price_status = PENDING_QS_PRICE</code> — both for the QS role (reuse existing status-filtered lists). Single QS Approve button, label <code>QS Approve</code> / <code>QS Approve Price</code> by stage. Purchaser sees locked Generate PO (Gate 1) and a Close button gated on the two conditions.</td></tr>
+        <tr><td class="k">Notifications</td><td>Reuse <code>utils/notifyEvent.js</code> + email: notify QS when a PR (Gate 1) or a PO price (Gate 2) enters the queue; notify the Purchaser on approve / send-back.</td></tr>
+        <tr><td class="k">Files</td><td>Backend: <code>routes/purchaseRequests.js</code> (Gate 1), <code>routes/purchaseOrders.js</code> (Gate 2 + close guard), <code>routes/prPoPermissions.js</code>, <code>index.js</code> (migrations + CHECKs), <code>utils/notifyEvent.js</code>. Frontend: <code>pages/PurchaseRequests.jsx</code> (submit + Gate 1 queue/gate), <code>pages/PurchaseOrders.jsx</code> (price entry/edit, Gate 2 review, two status badges, Close button), <code>components/RolePermissions.jsx</code>, <code>components/AuditTrail.jsx</code>, <code>components/ui.jsx</code> (badge colours).</td></tr>
+        <tr><td class="k">Interactions</td><td>Ties into #4 (price editing): the PO price-edit path <em>is</em> the Gate 2 trigger. Delivery (FIC) is untouched (#1 tracker). Only the Purchaser's flow changes.</td></tr>
+        <tr><td class="k">Effort</td><td><span class="tag t-high">High</span> — ~5–7 days incl. two gates, the independent PO price-status, close guard, queues, notifications, permissions and test. Final shape depends on the per-PR vs per-supplier decision (open).</td></tr>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- TSD 4 (merges former #4 + #9) -->
+  <section class="feat" id="tsd-4">
+    <div class="feat-head"><div class="fnum">4</div><div><h3>Purchase Order price editing</h3><p class="oneline">Extend the price-fill endpoint with an OPEN-PO price amendment + audit.</p></div></div>
+    <div class="feat-body">
+      <div class="scroll"><table class="spec">
+        <tr><td class="k">Scope</td><td><strong>Price only.</strong> Edits <code>po_items.unit_price</code> and recomputes <code>purchase_orders.amount</code>. Description, quantity and the set of lines are not editable, so there is no add/remove-line logic.</td></tr>
+        <tr><td class="k">Data model</td><td>None new. Uses existing <code>po_approvals.details</code> (JSONB) for the before/after audit.</td></tr>
+        <tr><td class="k">API</td><td>Extend the existing price-fill path <code>PUT /purchase-orders/:poNo/prices</code> (OPEN + BUY only): update line unit prices in a transaction, recompute amount, write a <code>PO_PRICE_EDIT</code> audit row with redactable price detail. Reject unless <code>status = 'OPEN'</code>. If #3 is adopted, clear QS approval on any change. (<code>PUT /:poNo</code> stays delivery/tracking-only.)</td></tr>
+        <tr><td class="k">Files</td><td>Backend: <code>routes/purchaseOrders.js</code>, <code>utils/auditTrail.js</code> (redact price fields). Frontend: <code>pages/PurchaseOrders.jsx</code> (<code>POView</code> — editable unit-price cells, live total), <code>lib/api.js</code> (<code>updatePOPrices</code>), <code>components/AuditTrail.jsx</code> (PO_PRICE_EDIT label).</td></tr>
+        <tr><td class="k">Constraints</td><td>OPEN-only; STOCK POs excluded. Post-send changes go through a PO revision (policy), not an in-place edit.</td></tr>
+        <tr><td class="k">Permissions</td><td><code>generate_po</code> (or a dedicated <code>edit_po_price</code> if edit rights differ from creation).</td></tr>
+        <tr><td class="k">Effort</td><td><span class="tag t-med">Medium</span> — ~1.5–2 days incl. audit + test (narrower than full line editing; a price-fill endpoint already exists to extend).</td></tr>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- TSD 5 -->
+  <section class="feat" id="tsd-5">
+    <div class="feat-head"><div class="fnum">5</div><div><h3>Multiple suppliers per PR item (1, 1a, 1b, 1c)</h3><p class="oneline">PR line-model extension — sub-lines share a line_no, differ by suffix + purpose.</p></div></div>
+    <div class="feat-body">
+      <div class="scroll"><table class="spec">
+        <tr><td class="k">Data model</td><td>Extend <code>pr_items</code> with <code>line_suffix TEXT DEFAULT ''</code> (<code>''</code> = main item, <code>'a'</code>/<code>'b'</code>/<code>'c'</code>… = sub-lines) and <code>purpose TEXT</code> (free-text process label); the display label is <code>line_no + line_suffix</code>. Sub-lines share the parent's <code>line_no</code> + <code>item_uid</code> and each is a buy row with its own supplier / qty / remark / price. Idempotent <code>ADD COLUMN IF NOT EXISTS</code> migration + startup apply. Backward compatible: existing rows are <code>line_suffix = ''</code>.</td></tr>
+        <tr><td class="k">API</td><td><code>routes/purchaseRequests.js</code>: create/update persist <code>line_suffix</code> + <code>purpose</code> and accept multiple buy rows per <code>line_no</code>; <code>getPR</code> orders by <code>line_no, line_suffix, id</code>. <code>assign_supplier</code> and RFQ (<code>request-quote</code>) already key on the row's supplier and so work per sub-line. <code>generate-pos</code> already groups by <code>supplier_id|currency</code> → one PO per supplier; the purpose is folded into the PO line description.</td></tr>
+        <tr><td class="k">Files</td><td>Backend: <code>routes/purchaseRequests.js</code> (create/update/getPR/generate-pos), <code>index.js</code> (migration), <code>db_schema.sql</code>. Frontend: <code>pages/PurchaseRequests.jsx</code> — <code>flattenItems</code>/<code>groupItemsForEdit</code> to emit/read sub-lines, the PR form ("+ Add supplier / purpose" with purpose/supplier/qty/remark per sub-line), the PR view (render 1a/1b/1c + purpose), and the RFQ panel description; <code>lib/rfqDoc.js</code> labels.</td></tr>
+        <tr><td class="k">Risk</td><td>Touches the PR data model that reservation, RFQ and PO generation all read; regression-test the full PR→PO flow. Mitigated by keeping sub-lines as ordinary buy rows, so the assign panel, RFQ grouping and PO generation flow through unchanged.</td></tr>
+        <tr><td class="k">Permissions</td><td>Unchanged (<code>raise_pr</code>, <code>assign_supplier</code>, <code>generate_po</code>).</td></tr>
+        <tr><td class="k">Effort</td><td><span class="tag t-high">High</span> — ~3–5 days (lower than a compare/award build, since sub-lines reuse the existing buy-row rails).</td></tr>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- TSD 6 -->
+  <section class="feat" id="tsd-6">
+    <div class="feat-head"><div class="fnum">6</div><div><h3>Location field on the PO</h3><p class="oneline">One column + propagation from PR; view &amp; PDF.</p></div></div>
+    <div class="feat-body">
+      <div class="scroll"><table class="spec">
+        <tr><td class="k">Data model</td><td>Add <code>purchase_orders.location TEXT</code> (nullable). Idempotent <code>ADD COLUMN IF NOT EXISTS</code> + startup apply. (<code>source_location</code> already exists for stock POs and is separate.)</td></tr>
+        <tr><td class="k">API</td><td>In <code>generate-pos</code>, copy <code>pr.location</code> into the PO insert. Include <code>location</code> in <code>getPO</code> output (already <code>SELECT *</code>). Allow update via the PO edit path (#4).</td></tr>
+        <tr><td class="k">Files</td><td>Backend: <code>routes/purchaseRequests.js</code> (generate-pos insert), <code>index.js</code> (migration). Frontend: <code>pages/PurchaseOrders.jsx</code> (<code>POView</code> meta grid), <code>lib/poPdf.js</code> (render location in the PROJECT/info block).</td></tr>
+        <tr><td class="k">Permissions</td><td>Unchanged.</td></tr>
+        <tr><td class="k">Effort</td><td><span class="tag t-low">Low</span> — ~0.5–1 day.</td></tr>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- TSD 7 -->
+  <section class="feat" id="tsd-7">
+    <div class="feat-head"><div class="fnum">7</div><div><h3>Supplier price-comparison table</h3><p class="oneline">Mostly a front-end view over multi-supplier data; couple with #5.</p></div></div>
+    <div class="feat-body">
+      <div class="scroll"><table class="spec">
+        <tr><td class="k">Data model</td><td>None of its own — reads the per-supplier prices produced by #5 (<code>pr_items</code> sub-lines) and the RFQ quotes. A "chosen supplier" marker is a <code>selected</code>/<code>award_status</code> flag if "compare" mode is later added.</td></tr>
+        <tr><td class="k">API</td><td>Reuse <code>GET /purchase-requests/:prNo</code> (returns items with supplier + price). Selecting a winner reuses the <code>assign_supplier</code> update. No new endpoint strictly required.</td></tr>
+        <tr><td class="k">Files</td><td>Frontend: <code>pages/PurchaseRequests.jsx</code> — a new comparison-matrix component in the assign panel (pivot items × suppliers, highlight min, select winner). Ties into the RFQ panel already added.</td></tr>
+        <tr><td class="k">Dependency</td><td><strong>Requires #5</strong> (multiple suppliers per item) to have anything to compare. Build after / with #5.</td></tr>
+        <tr><td class="k">Effort</td><td><span class="tag t-med">Medium</span> — ~2 days on top of #5.</td></tr>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- TSD 8 -->
+  <section class="feat" id="tsd-8">
+    <div class="feat-head"><div class="fnum">8</div><div><h3>GST 9% on the PO</h3><p class="oneline">Rate field + subtotal/GST/total in view, PDF and generation.</p></div></div>
+    <div class="feat-body">
+      <div class="scroll"><table class="spec">
+        <tr><td class="k">Data model</td><td>Add <code>purchase_orders.gst_rate NUMERIC DEFAULT 9.0</code>. Keep <code>amount</code> as the <strong>net subtotal</strong> (backward-compatible with existing dashboards/exports that sum it); derive <code>gst = amount × gst_rate/100</code> and <code>total = amount + gst</code> at read/render time. (If the client wants gross stored, add <code>gst_amount</code>/<code>total_amount</code> columns instead — see FSD open question.)</td></tr>
+        <tr><td class="k">API</td><td><code>getPO</code> returns <code>gst_rate</code>; compute gst/total in responses or on the client. Optionally allow zero-rating (e.g. non-SGD/overseas → <code>gst_rate = 0</code>) per the client's policy answer.</td></tr>
+        <tr><td class="k">Files</td><td>Backend: <code>routes/purchaseOrders.js</code> / <code>purchaseRequests.js</code> (set default rate at generation), <code>index.js</code> (migration). Frontend: <code>pages/PurchaseOrders.jsx</code> (<code>POView</code> totals block), <code>lib/poPdf.js</code> (Subtotal / GST / Total rows in the table foot), optionally <code>lib/rfqDoc.js</code>.</td></tr>
+        <tr><td class="k">Watch-outs</td><td>Currency: GST label should respect the PO currency symbol. Reconciliation: decide net-vs-gross once and apply consistently across dashboard, exports and finance module.</td></tr>
+        <tr><td class="k">Effort</td><td><span class="tag t-med">Medium</span> — ~2–3 days incl. PDF + test.</td></tr>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- TSD 9 (Save PR as Draft) -->
+  <section class="feat" id="tsd-9">
+    <div class="feat-head"><div class="fnum">9</div><div><h3>Save PR as Draft</h3><p class="oneline">One new status + a second save button; no new tables.</p></div></div>
+    <div class="feat-body">
+      <div class="scroll"><table class="spec">
+        <tr><td class="k">Data model</td><td>Add <code>DRAFT</code> to the <code>purchase_requests.status</code> CHECK set. No new columns. Idempotent CHECK update + startup apply (<code>index.js</code>).</td></tr>
+        <tr><td class="k">API</td><td>Create/patch accept <code>status:'DRAFT'</code> (a draft skips the <code>SUBMIT</code> audit + Manager notification). New/mapped <code>POST /purchase-requests/:prNo/submit</code> moves <code>DRAFT → PENDING</code>. <code>GET /purchase-requests</code> returns <code>DRAFT</code> rows only to their creator (or Admin). <code>DELETE</code> allowed while <code>DRAFT</code>.</td></tr>
+        <tr><td class="k">Files</td><td>Backend: <code>routes/purchaseRequests.js</code> (create/update/list filter, submit), <code>index.js</code> (status CHECK). Frontend: <code>pages/PurchaseRequests.jsx</code> (Save-as-Draft button, Drafts filter tab), <code>components/ui.jsx</code> (DRAFT badge colour), <code>lib/api.js</code> (<code>saveDraft</code> / <code>submitPR</code>).</td></tr>
+        <tr><td class="k">Permissions</td><td>Reuses <code>raise_pr</code>. Draft visibility scoped to creator + Admin — no new permission.</td></tr>
+        <tr><td class="k">Effort</td><td><span class="tag t-low">Low</span> — ~1 day incl. test.</td></tr>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- ── ROLL-UP ── -->
+  <h2 class="part" id="rollup">Planning</h2>
+  <p class="part-title">Effort roll-up &amp; sequencing</p>
+  <p class="part-sub">Indicative engineering effort (build + test, single developer). Suggested order runs quick wins first, heavy workflow items last.</p>
+
+  <div class="scroll">
+    <table class="spec">
+      <thead><tr><th>Order</th><th>Enhancement</th><th>Complexity</th><th>Est. effort</th><th>Blocked by open questions?</th></tr></thead>
+      <tbody>
+        <tr><td class="k">1</td><td>Delivery-stage confirmation alert</td><td><span class="tag t-low">Low</span></td><td>~0.5 day</td><td>No</td></tr>
+        <tr><td class="k">2</td><td>Add-Item photo attachment</td><td><span class="tag t-low">Low</span></td><td>~1 day</td><td>No</td></tr>
+        <tr><td class="k">3</td><td>Save PR as Draft (#9)</td><td><span class="tag t-low">Low</span></td><td>~1 day</td><td>No</td></tr>
+        <tr><td class="k">4</td><td>Location field on the PO (#6)</td><td><span class="tag t-low">Low</span></td><td>~0.5–1 day</td><td>No</td></tr>
+        <tr><td class="k">5</td><td>PO price editing (#4, incl. former #9)</td><td><span class="tag t-med">Medium</span></td><td>~1.5–2 days</td><td>Minor (edit window)</td></tr>
+        <tr><td class="k">6</td><td>GST 9% on the PO (#8)</td><td><span class="tag t-med">Medium</span></td><td>~2–3 days</td><td>Yes — GST scope / net-gross</td></tr>
+        <tr><td class="k">7</td><td>QS approval — sourcing &amp; price gates (#3)</td><td><span class="tag t-high">High</span></td><td>~5–7 days</td><td>Yes — approval granularity</td></tr>
+        <tr><td class="k">8</td><td>Multiple suppliers per item (#5)</td><td><span class="tag t-high">High</span></td><td>~3–5 days</td><td>No — model confirmed</td></tr>
+        <tr><td class="k">9</td><td>Supplier price-comparison table (#7)</td><td><span class="tag t-med">Medium</span></td><td>~2 days (with #5)</td><td>Depends on #5</td></tr>
+      </tbody>
+      <tfoot><tr><td></td><td class="k">Total (indicative)</td><td></td><td class="k">~16.5–22.5 days</td><td></td></tr></tfoot>
+    </table>
+  </div>
+
+  <div class="note warn">
+    <div class="h">Before build — decisions needed</div>
+    Items 5–7 (PO price-edit window, GST scope, QS approval scope) carry the open questions flagged in Part I. Confirming those first prevents rework. Items 1–4 (including Save as Draft) can start immediately.
+  </div>
+
+  <footer>
+    InventoryOpz — Enhancement Specifications (FSD + TSD) · v1.2 Draft · 21 Jul 2026 · Prepared for client review.
+    Wireframes are illustrative of proposed UI; final screenshots to be captured during UAT. File/endpoint references reflect the current codebase at time of writing.
+  </footer>
+</div>
+
+</body>
+</html>

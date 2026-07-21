@@ -37,11 +37,19 @@ const STATUS = {
   AWAITING_PURCHASER: "bg-[#F3F4F6] text-[#6B7280]",
   PENDING_FIC: "bg-[#FEF3C7] text-[#D97706]",
   STOCK_REDUCED: "bg-[#ECFDF5] text-[#059669]",
+  // QS approval (enhancement #3): PR Gate 1 statuses + PO Gate 2 price statuses.
+  PENDING_QS_APPROVAL: "bg-[#FEF3C7] text-[#D97706]",
+  QS_APPROVED: "bg-[#ECFDF5] text-[#059669]",
+  AWAITING_PRICING: "bg-[#F3F4F6] text-[#6B7280]",
+  PENDING_QS_PRICE: "bg-[#FEF3C7] text-[#D97706]",
+  PRICE_APPROVED: "bg-[#ECFDF5] text-[#059669]",
 };
 const LABEL = {
   PENDING: "Pending", APPROVED: "Approved", SEND_BACK: "Sent back", REJECTED: "Rejected",
   PO_RAISED: "PO raised", OPEN: "Open", CLOSED: "Closed", CANCELLED: "Cancelled",
   NONE: "Buy only", AWAITING_PURCHASER: "Awaiting Purchaser", PENDING_FIC: "Awaiting FIC", STOCK_REDUCED: "Stock issued",
+  PENDING_QS_APPROVAL: "Pending QS approval", QS_APPROVED: "QS approved",
+  AWAITING_PRICING: "Awaiting pricing", PENDING_QS_PRICE: "Pending QS price approval", PRICE_APPROVED: "Price approved",
 };
 
 export function Badge({ status }) {
@@ -86,6 +94,30 @@ export function Modal({ title, onClose, children, wide, noBackdropClose }) {
           <button onClick={onClose} aria-label="Close" className="border-none bg-transparent text-lg text-[#9CA3AF] cursor-pointer">✕</button>
         </div>
         <div className="overflow-y-auto px-6 py-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// Compact yes/no dialog — the styled replacement for window.confirm().
+// `body` may be a string or JSX (use <b> to stress the irreversible bit).
+export function ConfirmDialog({ title, body, confirmLabel = "Confirm", cancelLabel = "Cancel", variant = "primary", onConfirm, onCancel }) {
+  useEffect(() => {
+    const h = (e) => e.key === "Escape" && onCancel();
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onCancel]);
+  return (
+    <div className="fixed inset-0 z-[150] grid place-items-center p-6 bg-[#0F0E1A]/45" onMouseDown={onCancel}>
+      <div role="alertdialog" aria-modal="true"
+        className="w-full max-w-[460px] rounded-2xl bg-white px-6 py-5 shadow-[0_20px_60px_rgba(0,0,0,0.25)]"
+        onMouseDown={(e) => e.stopPropagation()}>
+        <h2 className="m-0 text-[17px] font-extrabold text-[#1E1B4B]">{title}</h2>
+        <div className="mt-2 text-[13px] leading-relaxed text-[#6B7280]">{body}</div>
+        <div className="mt-5 flex justify-end gap-2.5">
+          <Btn variant="ghost" className="border-[#E5E7EB]" onClick={onCancel}>{cancelLabel}</Btn>
+          <Btn variant={variant} autoFocus onClick={onConfirm}>{confirmLabel}</Btn>
+        </div>
       </div>
     </div>
   );

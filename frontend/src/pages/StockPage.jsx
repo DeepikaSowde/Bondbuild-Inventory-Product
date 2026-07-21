@@ -19,6 +19,30 @@ import api from "../services/api";
 import ExcelJS from "exceljs";
 import { usePaged, Pagination } from "../components/Table";
 
+// Photo/attachment upload rules — must stay in sync with
+// backend/src/routes/inventoryPhotos.js, which enforces the same limits.
+const MAX_PHOTO_MB    = 15;
+const MAX_PHOTO_BYTES = MAX_PHOTO_MB * 1024 * 1024;
+const MAX_PHOTOS      = 5;
+const ALLOWED_TYPES   = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+const ACCEPT_ATTR     = ".jpg,.jpeg,.png,.webp,.pdf";
+const UPLOAD_HINT     = `JPG, PNG, WebP or PDF · max ${MAX_PHOTO_MB} MB each · up to ${MAX_PHOTOS} files`;
+const isPdf           = (mime) => mime === "application/pdf";
+
+// Screens the picked files against the rules above so the user is told at pick
+// time instead of after the whole form is filled in. Returns kept + reasons.
+function screenFiles(incoming, alreadyCount) {
+  const rejected = [];
+  const accepted = Array.from(incoming).filter((f) => {
+    if (!ALLOWED_TYPES.includes(f.type)) { rejected.push(`${f.name} — only JPG, PNG, WebP or PDF`); return false; }
+    if (f.size > MAX_PHOTO_BYTES)        { rejected.push(`${f.name} — ${(f.size / 1024 / 1024).toFixed(1)} MB, over the ${MAX_PHOTO_MB} MB limit`); return false; }
+    return true;
+  });
+  const kept = accepted.slice(0, Math.max(0, MAX_PHOTOS - alreadyCount));
+  if (accepted.length > kept.length) rejected.push(`only ${MAX_PHOTOS} files can be attached`);
+  return { kept, error: rejected.length ? `Some files were skipped: ${rejected.join("; ")}` : "" };
+}
+
 // Default permissions for each role
 const DEFAULT_PERMISSIONS = {
   Drafter: {
@@ -164,10 +188,44 @@ export default function StockPage() {
   };
   const [newItem, setNewItem] = useState(EMPTY_ITEM);
 
+  // ── Photo state for the Add modal ──
+  // The item doesn't exist yet and the upload endpoint is keyed by item id, so
+  // files are held here and uploaded immediately after the item is created.
+  const [addFiles,    setAddFiles]    = useState([]);
+  const [addPreviews, setAddPreviews] = useState([]);
+  const addPhotoInputRef = useRef();
+
+  const clearAddPhotos = () => {
+    addPreviews.forEach((p) => p.url && URL.revokeObjectURL(p.url));
+    setAddPreviews([]);
+    setAddFiles([]);
+  };
+
   const openAdd = () => {
     setNewItem(EMPTY_ITEM);
     setAddError("");
+    clearAddPhotos();
     setAddOpen(true);
+  };
+
+  const closeAdd = () => { clearAddPhotos(); setAddOpen(false); };
+
+  const handleAddItemPhotos = (incoming) => {
+    const { kept, error } = screenFiles(incoming, addFiles.length);
+    setAddError(error);
+    if (!kept.length) return;
+    setAddFiles((prev) => [...prev, ...kept]);
+    // PDFs get no object URL — the tile renders an icon instead of an <img>.
+    setAddPreviews((prev) => [
+      ...prev,
+      ...kept.map((f) => ({ name: f.name, type: f.type, url: isPdf(f.type) ? null : URL.createObjectURL(f) })),
+    ]);
+  };
+
+  const removeAddPhoto = (idx) => {
+    if (addPreviews[idx]?.url) URL.revokeObjectURL(addPreviews[idx].url);
+    setAddFiles((p)    => p.filter((_, i) => i !== idx));
+    setAddPreviews((p) => p.filter((_, i) => i !== idx));
   };
 
   const handleAddSave = async () => {
@@ -195,7 +253,7 @@ export default function StockPage() {
     try {
       setSaving(true);
       setAddError("");
-      await api.post("/inventory", {
+      const res = await api.post("/inventory", {
         location_code: newItem.location_code.trim(),
         item_code: newItem.item_code.trim(),
         profile_name: newItem.profile_name.trim(),
@@ -205,7 +263,28 @@ export default function StockPage() {
         unit_price: newItem.unit_price,
         remarks: newItem.remarks.trim(),
       });
-      setAddOpen(false);
+
+      // Upload the attachments against the id the create just returned. The item
+      // is already saved at this point, so a failure here must not discard it —
+      // report it and let the user retry from the Edit modal.
+      const newId = res.data?.data?.id;
+      let photoWarning = "";
+      if (addFiles.length) {
+        if (!newId) {
+          photoWarning = "The item was saved but its files could not be attached — add them from Edit.";
+        } else {
+          try {
+            const fd = new FormData();
+            addFiles.forEach((f) => fd.append("photos", f));
+            await api.post(`/inventory/${newId}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+          } catch (err) {
+            photoWarning = `The item was saved, but its files failed to upload (${err.response?.data?.error || "upload error"}). Add them from Edit.`;
+          }
+        }
+      }
+
+      if (photoWarning) { setAddError(photoWarning); await fetchData(); return; }
+      closeAdd();
       await fetchData(); // refresh table so new item shows
     } catch (err) {
       setAddError(
@@ -281,13 +360,19 @@ export default function StockPage() {
   };
 
   const handleAddPhotos = (incoming) => {
-    const arr = Array.from(incoming);
-    setNewFiles((prev) => [...prev, ...arr]);
-    setPreviews((prev) => [...prev, ...arr.map((f) => ({ name: f.name, url: URL.createObjectURL(f) }))]);
+    // Existing photos count towards the cap — the item can hold MAX_PHOTOS total.
+    const { kept, error } = screenFiles(incoming, existingPhotos.length + newFiles.length);
+    setEditError(error);
+    if (!kept.length) return;
+    setNewFiles((prev) => [...prev, ...kept]);
+    setPreviews((prev) => [
+      ...prev,
+      ...kept.map((f) => ({ name: f.name, type: f.type, url: isPdf(f.type) ? null : URL.createObjectURL(f) })),
+    ]);
   };
 
   const removeNewPhoto = (idx) => {
-    URL.revokeObjectURL(previews[idx].url);
+    if (previews[idx]?.url) URL.revokeObjectURL(previews[idx].url);
     setNewFiles((p)    => p.filter((_, i) => i !== idx));
     setPreviews((p) => p.filter((_, i) => i !== idx));
   };
@@ -1218,7 +1303,7 @@ export default function StockPage() {
                 ➕ Add New Item
               </h3>
               <button
-                onClick={() => !saving && setAddOpen(false)}
+                onClick={() => !saving && closeAdd()}
                 style={{
                   background: "transparent",
                   border: "none",
@@ -1343,6 +1428,58 @@ export default function StockPage() {
                       onChange={(e) => set("remarks", e.target.value)}
                       placeholder="Any note (optional)"
                     />
+
+                    {/* ── Photos / documents (optional) ── */}
+                    <label style={lbl}>Photos (optional)</label>
+                    <input ref={addPhotoInputRef} type="file" accept={ACCEPT_ATTR} multiple style={{ display: "none" }}
+                      onChange={(e) => { handleAddItemPhotos(e.target.files); e.target.value = ""; }} />
+
+                    {addFiles.length === 0 ? (
+                      <div
+                        onClick={() => addPhotoInputRef.current?.click()}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => { e.preventDefault(); handleAddItemPhotos(e.dataTransfer.files); }}
+                        style={{ border: "2px dashed #C7D2FE", borderRadius: 10, padding: "20px 0", textAlign: "center", color: "#9CA3AF", cursor: "pointer", background: "#F8F9FF", marginBottom: 14 }}
+                      >
+                        <div style={{ fontSize: 26 }}>📷</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: "#6B7280" }}>Click or drag files here</div>
+                        <div style={{ fontSize: 11, marginTop: 2 }}>{UPLOAD_HINT}</div>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 6 }}>
+                          {addPreviews.map((p, i) => (
+                            <div key={`add-${i}`} title={p.name}
+                              style={{ position: "relative", aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "1px solid #E5E7EB", background: "#F3F4F6" }}>
+                              {p.url ? (
+                                <img src={p.url} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                              ) : (
+                                <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, background: "#FEF2F2" }}>
+                                  <div style={{ fontSize: 20 }}>📄</div>
+                                  <div style={{ fontSize: 8, fontWeight: 700, color: "#B91C1C" }}>PDF</div>
+                                </div>
+                              )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); removeAddPhoto(i); }}
+                                style={{ position: "absolute", top: 3, right: 3, width: 18, height: 18, borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none", color: "#fff", fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                              >✕</button>
+                            </div>
+                          ))}
+
+                          {addFiles.length < MAX_PHOTOS && (
+                            <div
+                              onClick={() => addPhotoInputRef.current?.click()}
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={(e) => { e.preventDefault(); handleAddItemPhotos(e.dataTransfer.files); }}
+                              style={{ aspectRatio: "1", borderRadius: 8, border: "2px dashed #C7D2FE", background: "#F8F9FF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#9CA3AF", fontSize: 24 }}
+                            >+</div>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 14 }}>
+                          {addFiles.length} of {MAX_PHOTOS} attached · {UPLOAD_HINT}
+                        </div>
+                      </>
+                    )}
                   </>
                 );
               })()}
@@ -1359,7 +1496,7 @@ export default function StockPage() {
               }}
             >
               <button
-                onClick={() => !saving && setAddOpen(false)}
+                onClick={() => !saving && closeAdd()}
                 disabled={saving}
                 style={{
                   background: "#F3F4F6",
@@ -1461,19 +1598,23 @@ export default function StockPage() {
                   <span style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                     📷 Photos {(existingPhotos.length + newFiles.length) > 0 && (
                       <span style={{ background: "#6366F1", color: "#fff", borderRadius: 99, padding: "1px 7px", marginLeft: 6, fontSize: 11 }}>
-                        {existingPhotos.length + newFiles.length}
+                        {existingPhotos.length + newFiles.length} / {MAX_PHOTOS}
                       </span>
                     )}
                   </span>
-                  <button
-                    onClick={() => photoInputRef.current?.click()}
-                    style={{ background: "#EEF2FF", border: "1px solid #6366F1", borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 700, color: "#6366F1", cursor: "pointer" }}
-                  >
-                    + Add Photos
-                  </button>
+                  {(existingPhotos.length + newFiles.length) < MAX_PHOTOS ? (
+                    <button
+                      onClick={() => photoInputRef.current?.click()}
+                      style={{ background: "#EEF2FF", border: "1px solid #6366F1", borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 700, color: "#6366F1", cursor: "pointer" }}
+                    >
+                      + Add Photos
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "#9CA3AF" }}>Limit reached — remove one to add another</span>
+                  )}
                 </div>
 
-                <input ref={photoInputRef} type="file" accept="image/*" multiple style={{ display: "none" }}
+                <input ref={photoInputRef} type="file" accept={ACCEPT_ATTR} multiple style={{ display: "none" }}
                   onChange={(e) => { handleAddPhotos(e.target.files); e.target.value = ""; }} />
 
                 {/* Drop zone when empty */}
@@ -1485,8 +1626,8 @@ export default function StockPage() {
                     style={{ border: "2px dashed #C7D2FE", borderRadius: 10, padding: "24px 0", textAlign: "center", color: "#9CA3AF", cursor: "pointer", background: "#F8F9FF" }}
                   >
                     <div style={{ fontSize: 28 }}>📷</div>
-                    <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>Click or drag photos here</div>
-                    <div style={{ fontSize: 11, marginTop: 2 }}>Any number of images (max 15 MB each)</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>Click or drag files here</div>
+                    <div style={{ fontSize: 11, marginTop: 2 }}>{UPLOAD_HINT}</div>
                   </div>
                 )}
 
@@ -1496,10 +1637,15 @@ export default function StockPage() {
                     {/* Existing DB photos */}
                     {existingPhotos.map((p) => (
                       <div key={p.id} style={{ position: "relative", aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "1px solid #E5E7EB", background: "#F3F4F6", cursor: "pointer" }}
-                        onClick={() => blobUrls[p.id] && openLightbox(blobUrls[p.id])}>
-                        {blobUrls[p.id]
-                          ? <img src={blobUrls[p.id]} alt={p.original_name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                          : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, color: "#9CA3AF" }}>⏳</div>
+                        onClick={() => blobUrls[p.id] && (isPdf(p.mime_type) ? window.open(blobUrls[p.id], "_blank", "noopener") : openLightbox(blobUrls[p.id]))}>
+                        {!blobUrls[p.id]
+                          ? <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, color: "#9CA3AF" }}>⏳</div>
+                          : isPdf(p.mime_type)
+                          ? <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, background: "#FEF2F2" }}>
+                              <div style={{ fontSize: 20 }}>📄</div>
+                              <div style={{ fontSize: 8, fontWeight: 700, color: "#B91C1C" }}>PDF</div>
+                            </div>
+                          : <img src={blobUrls[p.id]} alt={p.original_name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         }
                         <button
                           onClick={(e) => { e.stopPropagation(); removeExistingPhoto(p); }}
@@ -1511,8 +1657,14 @@ export default function StockPage() {
                     {/* New (not yet uploaded) photos */}
                     {previews.map((p, i) => (
                       <div key={`new-${i}`} style={{ position: "relative", aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "2px dashed #A5B4FC", background: "#F0F0FF", cursor: "pointer" }}
-                        onClick={() => openLightbox(p.url)}>
-                        <img src={p.url} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        onClick={() => p.url && openLightbox(p.url)}>
+                        {p.url
+                          ? <img src={p.url} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          : <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, background: "#FEF2F2" }}>
+                              <div style={{ fontSize: 20 }}>📄</div>
+                              <div style={{ fontSize: 8, fontWeight: 700, color: "#B91C1C" }}>PDF</div>
+                            </div>
+                        }
                         <button
                           onClick={(e) => { e.stopPropagation(); removeNewPhoto(i); }}
                           style={{ position: "absolute", top: 3, right: 3, width: 18, height: 18, borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none", color: "#fff", fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -1521,13 +1673,15 @@ export default function StockPage() {
                       </div>
                     ))}
 
-                    {/* Add more tile */}
-                    <div
-                      onClick={() => photoInputRef.current?.click()}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => { e.preventDefault(); handleAddPhotos(e.dataTransfer.files); }}
-                      style={{ aspectRatio: "1", borderRadius: 8, border: "2px dashed #C7D2FE", background: "#F8F9FF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#9CA3AF", fontSize: 24 }}
-                    >+</div>
+                    {/* Add more tile — hidden once the per-item cap is reached */}
+                    {(existingPhotos.length + newFiles.length) < MAX_PHOTOS && (
+                      <div
+                        onClick={() => photoInputRef.current?.click()}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => { e.preventDefault(); handleAddPhotos(e.dataTransfer.files); }}
+                        style={{ aspectRatio: "1", borderRadius: 8, border: "2px dashed #C7D2FE", background: "#F8F9FF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#9CA3AF", fontSize: 24 }}
+                      >+</div>
+                    )}
                   </div>
                 )}
               </div>

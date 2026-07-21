@@ -69,7 +69,7 @@ async function getPR(prNo, client = db) {
             inv.unit_price AS inventory_unit_price
      FROM pr_items pi
      LEFT JOIN inventory inv ON inv.id = pi.inventory_id
-     WHERE pi.pr_id = $1 ORDER BY pi.line_no, pi.id`, [rows[0].id]
+     WHERE pi.pr_id = $1 ORDER BY pi.line_no, pi.line_suffix, pi.id`, [rows[0].id]
   );
   // attach PR-level files (best-effort; ignore if table not present yet)
   let attachments = [];
@@ -181,11 +181,11 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
         const lineNo = Number(it.line_no) || line++;
         await c.query(
           `INSERT INTO pr_items
-           (pr_id, line_no, profile_code, description, colour, qty, unit, remarks,
+           (pr_id, line_no, line_suffix, purpose, profile_code, description, colour, qty, unit, remarks,
             stock_qty, inventory_id, stock_location, stock_status, buy_qty,
             supplier_id, supplier_name, supplier_type, unit_price, item_uid, onedrive_url)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
-          [prId, lineNo, it.profile_code, it.description.trim(), it.colour,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+          [prId, lineNo, String(it.line_suffix || ""), it.purpose || null, it.profile_code, it.description.trim(), it.colour,
            Number(it.qty) || 0, it.unit || "pcs", it.remarks, stockQty,
            it.inventory_id || null, it.stock_location,
            stockQty > 0 ? "AWAITING_PURCHASER" : "NONE", Number(it.buy_qty) || 0,
@@ -254,11 +254,11 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
         const lineNo = Number(it.line_no) || line++;
         await c.query(
           `INSERT INTO pr_items
-           (pr_id, line_no, profile_code, description, colour, qty, unit, remarks,
+           (pr_id, line_no, line_suffix, purpose, profile_code, description, colour, qty, unit, remarks,
             stock_qty, inventory_id, stock_location, stock_status, buy_qty,
             supplier_id, supplier_name, supplier_type, unit_price, item_uid, onedrive_url)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
-          [pr.id, lineNo, it.profile_code, it.description.trim(), it.colour,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+          [pr.id, lineNo, String(it.line_suffix || ""), it.purpose || null, it.profile_code, it.description.trim(), it.colour,
            Number(it.qty) || 0, it.unit || "pcs", it.remarks, stockQty,
            it.inventory_id || null, it.stock_location,
            stockQty > 0 ? "AWAITING_PURCHASER" : "NONE", Number(it.buy_qty) || 0,
@@ -376,6 +376,85 @@ router.post("/:prNo/reject", canDo("reject_pr"), async (req, res) => {
   } catch (e) { fail(res, 500, e.message); }
 });
 
+// ============================================================
+// QS approval — GATE 1 (sourcing), enhancement #3
+// The Purchaser submits an APPROVED, sourced PR to the QS. Price is optional here:
+// if every buy line already carries a price, Gate 1 covers the price too, and
+// generate-pos stamps the resulting PO PRICE_APPROVED (no Gate 2 unless edited).
+// This gate is standalone from the FIC/delivery flow.
+// ============================================================
+router.post("/:prNo/submit-for-qs", canDo("assign_supplier"), async (req, res) => {
+  try {
+    const pr = await getPR(req.params.prNo);
+    if (!pr) return fail(res, 404, "PR not found");
+    if (pr.status !== "APPROVED")
+      return fail(res, 409, `Only APPROVED PRs can be submitted for QS approval (current: ${pr.status})`);
+    const buyItems = pr.items.filter((it) => Number(it.buy_qty) > 0);
+    if (!buyItems.length) return fail(res, 400, "No buy-quantity items to send for QS approval");
+    const noSupplier = buyItems.find((it) => !it.supplier_id);
+    if (noSupplier) return fail(res, 400, `Assign a supplier to "${noSupplier.description}" before submitting for QS approval`);
+    await withTransaction(async (c) => {
+      await c.query("UPDATE purchase_requests SET status='PENDING_QS_APPROVAL' WHERE id=$1", [pr.id]);
+      await c.query(
+        "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'SUBMIT_QS','APPROVED','PENDING_QS_APPROVAL',$2,$3,$4)",
+        [pr.id, req.user.name, req.user.role, "Submitted for QS approval"]
+      );
+      await notify(c, ["QS"], `PR pending QS approval: ${pr.pr_no}`,
+        `${pr.project_name || pr.job_no} — review the sourcing and approve.`, "message", pr.pr_no);
+    });
+    ok(res, await getPR(pr.pr_no));
+  } catch (e) { fail(res, 500, e.message); }
+});
+
+// QS approves the sourcing (Gate 1). If a price was entered it is covered too.
+router.post("/:prNo/qs-approve", canDo("qs_approve"), async (req, res) => {
+  try {
+    const pr = await getPR(req.params.prNo);
+    if (!pr) return fail(res, 404, "PR not found");
+    if (pr.status !== "PENDING_QS_APPROVAL")
+      return fail(res, 409, `PR is ${pr.status}; nothing pending QS approval`);
+    const buyItems = pr.items.filter((it) => Number(it.buy_qty) > 0);
+    const pricedAtGate1 = buyItems.length > 0 && buyItems.every((it) => Number(it.unit_price) > 0);
+    await withTransaction(async (c) => {
+      await c.query(
+        "UPDATE purchase_requests SET status='QS_APPROVED', qs_approved_by=$2, qs_approved_at=NOW(), qs_sent_back_reason=NULL WHERE id=$1",
+        [pr.id, req.user.name]
+      );
+      await c.query(
+        "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'QS_APPROVE_SOURCING','PENDING_QS_APPROVAL','QS_APPROVED',$2,$3,$4)",
+        [pr.id, req.user.name, req.user.role, pricedAtGate1 ? "Sourcing + price approved" : "Sourcing approved"]
+      );
+      await notify(c, ["Purchaser"], `QS approved: ${pr.pr_no}`,
+        `Generate the Buy PO for ${pr.project_name || pr.job_no}.`, "success", pr.pr_no);
+    });
+    ok(res, await getPR(pr.pr_no));
+  } catch (e) { fail(res, 500, e.message); }
+});
+
+// QS sends the PR back to the Purchaser (Gate 1).
+router.post("/:prNo/qs-send-back", canDo("qs_approve"), async (req, res) => {
+  try {
+    const pr = await getPR(req.params.prNo);
+    if (!pr) return fail(res, 404, "PR not found");
+    if (pr.status !== "PENDING_QS_APPROVAL")
+      return fail(res, 409, `PR is ${pr.status}; nothing pending QS approval`);
+    const reason = (req.body?.reason || "").trim();
+    await withTransaction(async (c) => {
+      await c.query(
+        "UPDATE purchase_requests SET status='APPROVED', qs_sent_back_reason=$2 WHERE id=$1",
+        [pr.id, reason || null]
+      );
+      await c.query(
+        "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'QS_SEND_BACK','PENDING_QS_APPROVAL','APPROVED',$2,$3,$4)",
+        [pr.id, req.user.name, req.user.role, reason || null]
+      );
+      await notify(c, ["Purchaser"], `QS sent back: ${pr.pr_no}`,
+        reason || "Revise the sourcing and resubmit for QS approval.", "warning", pr.pr_no);
+    });
+    ok(res, await getPR(pr.pr_no));
+  } catch (e) { fail(res, 500, e.message); }
+});
+
 // ── Purchaser assigns supplier + price on the BUY portion ──
 router.put("/:prNo/items", canDo("assign_supplier"), async (req, res) => {
   try {
@@ -481,11 +560,14 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
           const poNo = num.rows[0].po_no;
           const amount = lines.reduce((s, l) => s + Number(l.stock_qty) * Number(l.stock_unit_price), 0);
           const po = await c.query(
+            // NB: `location` here is the stock SOURCE pallet (which bin to pick
+            // from); pr.location is the delivery/site location the goods are for.
             `INSERT INTO purchase_orders
-             (po_no, job_no, pr_id, pr_no, project_name, po_type, source_location,
+             (po_no, job_no, pr_id, pr_no, project_name, po_type, source_location, location,
               supplier_id, supplier_name, supplier_type, requested_by, prepared_by, amount)
-             VALUES ($1,$2,$3,$4,$5,'STOCK',$6, NULL, NULL, 'Local', $7, $8, $9) RETURNING id`,
-            [poNo, pr.job_no, pr.id, pr.pr_no, pr.project_name, location, pr.requested_by, req.user.name, amount]
+             VALUES ($1,$2,$3,$4,$5,'STOCK',$6,$7, NULL, NULL, 'Local', $8, $9, $10) RETURNING id`,
+            [poNo, pr.job_no, pr.id, pr.pr_no, pr.project_name, location, pr.location || null,
+             pr.requested_by, req.user.name, amount]
           );
           let ln = 1;
           for (const l of lines)
@@ -579,7 +661,13 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
-    if (!["APPROVED","PO_RAISED"].includes(pr.status)) return fail(res, 409, `POs come from approved PRs (current: ${pr.status})`);
+    // Gate 1 (enhancement #3): the PR must be QS-approved before a Buy PO can be
+    // generated. PO_RAISED stays allowed so extra POs can be added to a PR that has
+    // already cleared QS.
+    if (!["QS_APPROVED","PO_RAISED"].includes(pr.status))
+      return fail(res, 409, pr.status === "PENDING_QS_APPROVAL"
+        ? "Waiting on QS approval before the PO can be generated"
+        : `Submit this PR for QS approval first (current: ${pr.status})`);
     const buyItems = pr.items.filter((it) => Number(it.buy_qty) > 0);
     if (!buyItems.length) return fail(res, 400, "No buy-quantity items on this PR");
     for (const it of buyItems) {
@@ -617,20 +705,32 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
         const num = await c.query("SELECT next_po_no($1,$2) AS po_no", [pr.job_no, prTail(pr.pr_no)]);
         const poNo = num.rows[0].po_no;
         const amount = g.items.reduce((s, i) => s + Number(i.buy_qty) * Number(i.unit_price || 0), 0);
+        // Gate 1 price carry-over: if every line of this supplier group already had a
+        // price at QS approval, the price was approved together with the sourcing —
+        // the PO starts PRICE_APPROVED (no Gate 2 needed unless the price is later
+        // edited). Otherwise it lands AWAITING_PRICING and Gate 2 handles it.
+        const groupPriced = g.items.every((i) => Number(i.unit_price) > 0);
+        const priceStatus = groupPriced ? "PRICE_APPROVED" : "AWAITING_PRICING";
         const po = await c.query(
           `INSERT INTO purchase_orders
-           (po_no, job_no, pr_id, pr_no, project_name, supplier_id, supplier_name,
-            supplier_type, requested_by, prepared_by, amount, currency)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-          [poNo, pr.job_no, pr.id, pr.pr_no, pr.project_name, g.supplier_id,
-           g.supplier_name, supType, pr.requested_by, req.user.name, amount, g.currency]
+           (po_no, job_no, pr_id, pr_no, project_name, location, supplier_id, supplier_name,
+            supplier_type, requested_by, prepared_by, amount, currency,
+            price_status, price_approved_by, price_approved_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+          [poNo, pr.job_no, pr.id, pr.pr_no, pr.project_name, pr.location || null, g.supplier_id,
+           g.supplier_name, supType, pr.requested_by, req.user.name, amount, g.currency,
+           priceStatus, groupPriced ? pr.qs_approved_by : null, groupPriced ? pr.qs_approved_at : null]
         );
         let line = 1;
-        for (const it of g.items)
+        for (const it of g.items) {
+          // Sub-lines carry the parent's material description plus a process purpose;
+          // fold the purpose into the PO line so the supplier sees what they're doing.
+          const desc = it.purpose ? `${it.description} — ${it.purpose}` : it.description;
           await c.query(
             "INSERT INTO po_items (po_id, line_no, profile_code, description, qty, unit, unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-            [po.rows[0].id, line++, it.profile_code, it.description, Number(it.buy_qty), it.unit, Number(it.unit_price) || 0]
+            [po.rows[0].id, line++, it.profile_code, desc, Number(it.buy_qty), it.unit, Number(it.unit_price) || 0]
           );
+        }
         await c.query(
           "INSERT INTO po_approvals (po_id, action, to_status, actor, actor_role) VALUES ($1,'CREATE','OPEN',$2,$3)",
           [po.rows[0].id, req.user.name, req.user.role]

@@ -44,6 +44,10 @@ export const api = {
   requestQuote: (prNo, { supplierId, all } = {}) =>
     data(axiosClient.post(`/purchase-requests/${enc(prNo)}/request-quote`, all ? { all: true } : { supplier_id: supplierId })),
   generatePOs: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/generate-pos`)),
+  // QS approval — Gate 1 (sourcing, on the PR)
+  submitForQs: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/submit-for-qs`)),
+  qsApprovePr: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/qs-approve`)),
+  qsSendBackPr: (prNo, reason) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/qs-send-back`, { reason })),
 
   // attachments (whole-PR) — upload uses multipart/form-data
   listAttachments: (prNo) => data(axiosClient.get(`/purchase-requests/${enc(prNo)}/attachments`)),
@@ -89,6 +93,10 @@ export const api = {
   updatePO: (poNo, f) => data(axiosClient.put(`/purchase-orders/${enc(poNo)}`, f)),
   // items: [{ id, unit_price }] — prices an "awaiting pricing" PO, or corrects one
   setPOPrices: (poNo, items) => data(axiosClient.put(`/purchase-orders/${enc(poNo)}/prices`, { items })),
+  // QS approval — Gate 2 (price, on the PO) + explicit close
+  qsApprovePrice: (poNo) => data(axiosClient.post(`/purchase-orders/${enc(poNo)}/qs-approve-price`)),
+  qsSendBackPrice: (poNo, reason) => data(axiosClient.post(`/purchase-orders/${enc(poNo)}/qs-send-back-price`, { reason })),
+  closePO: (poNo, notes) => data(axiosClient.post(`/purchase-orders/${enc(poNo)}/close`, { notes })),
   setDeliveryStage: (poNo, stage) => data(axiosClient.put(`/purchase-orders/${enc(poNo)}/delivery-stage`, { stage })),
   receivePO: (poNo, notes) => data(axiosClient.post(`/purchase-orders/${enc(poNo)}/receive`, { notes })),
   cancelPO: (poNo, reason) => data(axiosClient.post(`/purchase-orders/${enc(poNo)}/cancel`, { reason })),
