@@ -25,6 +25,7 @@ export function Btn({ children, variant = "primary", small, className = "", ...p
 }
 
 const STATUS = {
+  DRAFT: "bg-[#F3F4F6] text-[#6B7280]",
   PENDING: "bg-[#FEF3C7] text-[#D97706]",
   APPROVED: "bg-[#ECFDF5] text-[#059669]",
   SEND_BACK: "bg-[#FFF7E6] text-[#92400E]",
@@ -45,6 +46,7 @@ const STATUS = {
   PRICE_APPROVED: "bg-[#ECFDF5] text-[#059669]",
 };
 const LABEL = {
+  DRAFT: "Draft",
   PENDING: "Pending", APPROVED: "Approved", SEND_BACK: "Sent back", REJECTED: "Rejected",
   PO_RAISED: "PO raised", OPEN: "Open", CLOSED: "Closed", CANCELLED: "Cancelled",
   NONE: "Buy only", AWAITING_PURCHASER: "Awaiting Purchaser", PENDING_FIC: "Awaiting FIC", STOCK_REDUCED: "Stock issued",

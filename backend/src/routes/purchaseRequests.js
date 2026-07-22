@@ -7,6 +7,7 @@ const express = require("express");
 const fs = require("fs");
 const crypto = require("crypto");
 const db = require("../config/db");
+const spaces = require("../config/spaces");
 const { protect, roles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
 const { canDo, isAllowed } = require("../utils/canDo");
@@ -122,9 +123,17 @@ async function notify(client, rolesList, title, body, type, refPr = null, refPo 
 router.get("/", async (req, res) => {
   try {
     const { status } = req.query;
-    let sql = "SELECT * FROM purchase_requests";
     const params = [];
-    if (status && status !== "All") { params.push(status); sql += " WHERE status = $1"; }
+    const where = [];
+    if (status && status !== "All") { params.push(status); where.push(`status = $${params.length}`); }
+    // Drafts (enhancement #9) are private WIP: everyone sees non-draft PRs, but only a
+    // draft's creator (or an Admin) sees it — so it never leaks into a Manager's queue.
+    if (req.user.role !== "Admin") {
+      params.push(asUuid(req.user.id));
+      where.push(`(status <> 'DRAFT' OR created_by = $${params.length})`);
+    }
+    let sql = "SELECT * FROM purchase_requests";
+    if (where.length) sql += " WHERE " + where.join(" AND ");
     sql += " ORDER BY created_at DESC, id DESC";
     const { rows } = await db.query(sql, params);
     const withCounts = await Promise.all(rows.map(async (pr) => {
@@ -151,9 +160,13 @@ router.get("/:prNo", async (req, res) => {
 // ── Create (Drafter) ──
 router.post("/", canDo("raise_pr"), async (req, res) => {
   const f = req.body || {};
-  if (!f.job_no || !f.requested_by) return fail(res, 400, "Job No and Requested By are required");
+  // A draft (enhancement #9) is work-in-progress: it only needs a Job No so a
+  // <job>/PR-00x number can be minted. The full checks apply on Submit, not now.
+  const isDraft = f.draft === true || f.status === "DRAFT";
+  if (!f.job_no) return fail(res, 400, "Job No is required");
+  if (!isDraft && !f.requested_by) return fail(res, 400, "Job No and Requested By are required");
   const items = withItemUids((f.items || []).filter((it) => it.description?.trim()));
-  if (!items.length) return fail(res, 400, "At least one item with a description is required");
+  if (!isDraft && !items.length) return fail(res, 400, "At least one item with a description is required");
   const descErr = checkDescLength(items);
   if (descErr) return fail(res, 400, descErr);
   const urlErr = checkItemOneDriveUrls(items);
@@ -166,10 +179,11 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
       const ins = await c.query(
         `INSERT INTO purchase_requests
          (pr_no, job_no, project_name, location, date_required, date_issued, pic, requested_by,
-          checked_by, approved_by, remarks, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+          checked_by, approved_by, remarks, created_by, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
         [prNo, f.job_no, f.project_name, f.location, f.date_required, f.date_issued || null,
-         f.pic, f.requested_by, f.checked_by, f.approved_by, f.remarks, asUuid(req.user.id)]
+         f.pic, f.requested_by, f.checked_by, f.approved_by, f.remarks, asUuid(req.user.id),
+         isDraft ? "DRAFT" : "PENDING"]
       );
       const prId = ins.rows[0].id;
       let line = 1;
@@ -193,22 +207,26 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
            it.item_uid, validateOneDriveUrl(it.onedrive_url).value]
         );
       }
-      // Audit the AUTHENTICATED user, not the free-text "Requested By" field —
-      // the latter is client-supplied and would make the trail spoofable.
-      await c.query(
-        "INSERT INTO pr_approvals (pr_id, action, to_status, actor, actor_role) VALUES ($1,'SUBMIT','PENDING',$2,$3)",
-        [prId, req.user.name, req.user.role]
-      );
-      // Drafter gets an acknowledgement; every Manager gets the call to approve.
-      audience = events.prSubmitted({
-        actor: req.user, prNo,
-        projectLabel: f.project_name || f.job_no,
-        requestedBy: f.requested_by,
-      });
-      await notifyInApp(c, audience, { refPr: prNo });
+      // A draft enters no workflow yet — no SUBMIT audit row, no Manager alert.
+      // Both happen later, on Submit (POST /:prNo/submit). A live PR does them now.
+      if (!isDraft) {
+        // Audit the AUTHENTICATED user, not the free-text "Requested By" field —
+        // the latter is client-supplied and would make the trail spoofable.
+        await c.query(
+          "INSERT INTO pr_approvals (pr_id, action, to_status, actor, actor_role) VALUES ($1,'SUBMIT','PENDING',$2,$3)",
+          [prId, req.user.name, req.user.role]
+        );
+        // Drafter gets an acknowledgement; every Manager gets the call to approve.
+        audience = events.prSubmitted({
+          actor: req.user, prNo,
+          projectLabel: f.project_name || f.job_no,
+          requestedBy: f.requested_by,
+        });
+        await notifyInApp(c, audience, { refPr: prNo });
+      }
       return prNo;
     });
-    mailAudiences(audience, { refPr: prNo });   // after commit, non-blocking
+    if (audience) mailAudiences(audience, { refPr: prNo });   // after commit, non-blocking (drafts notify no one)
     res.status(201).json({ success: true, data: await getPR(prNo) });
   } catch (e) {
     fail(res, e.code === "23503" ? 400 : 500,
@@ -216,12 +234,12 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
   }
 });
 
-// ── Edit / resubmit (Drafter; only PENDING or SEND_BACK) ──
+// ── Edit / resubmit (Drafter; DRAFT, PENDING or SEND_BACK) ──
 router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
-    if (!["PENDING", "SEND_BACK"].includes(pr.status))
+    if (!["DRAFT", "PENDING", "SEND_BACK"].includes(pr.status))
       return fail(res, 409, `PR is ${pr.status} and can no longer be edited`);
     const f = req.body || {};
     // Job No is locked after creation: pr_no encodes the job (<job>/PR-001), so
@@ -280,7 +298,9 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
       );
       strandedFiles = orphans.rows.map((r) => r.file_path);
       // Audit the edit itself (what changed), separate from any resubmission.
-      if (editDetails) {
+      // A DRAFT hasn't entered the workflow, so its edits aren't audited — the trail
+      // starts at Submit.
+      if (editDetails && pr.status !== "DRAFT") {
         await c.query(
           "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, details) VALUES ($1,'EDIT',$2,$2,$3,$4,$5)",
           [pr.id, pr.status, req.user.name, req.user.role, JSON.stringify(editDetails)]
@@ -302,6 +322,63 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
     // Committed — the rows are gone for good, so the files can go too.
     strandedFiles.forEach((p) => fs.unlink(p, () => {}));
     ok(res, await getPR(pr.pr_no));
+  } catch (e) { fail(res, 500, e.message); }
+});
+
+// ── Submit a draft (enhancement #9): DRAFT → PENDING ──
+// This is the step create() skips for a draft — it writes the SUBMIT audit row and
+// puts the PR in front of the Managers. The checks relaxed at draft-save time are
+// enforced here, on the way into the queue.
+router.post("/:prNo/submit", canDo("raise_pr"), async (req, res) => {
+  let audience;
+  try {
+    const pr = await getPR(req.params.prNo);
+    if (!pr) return fail(res, 404, "PR not found");
+    if (pr.status !== "DRAFT") return fail(res, 409, `Only draft PRs can be submitted (current: ${pr.status})`);
+    if (req.user.role !== "Admin" && asUuid(req.user.id) !== pr.created_by)
+      return fail(res, 403, "You can only submit your own drafts");
+    if (!pr.requested_by) return fail(res, 400, "Requested By is required before submitting");
+    if (!pr.items.length) return fail(res, 400, "Add at least one item before submitting");
+    await withTransaction(async (c) => {
+      await c.query("UPDATE purchase_requests SET status='PENDING' WHERE id = $1", [pr.id]);
+      await c.query(
+        "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role) VALUES ($1,'SUBMIT','DRAFT','PENDING',$2,$3)",
+        [pr.id, req.user.name, req.user.role]
+      );
+      audience = events.prSubmitted({
+        actor: req.user, prNo: pr.pr_no,
+        projectLabel: pr.project_name || pr.job_no,
+        requestedBy: pr.requested_by,
+      });
+      await notifyInApp(c, audience, { refPr: pr.pr_no });
+    });
+    if (audience) mailAudiences(audience, { refPr: pr.pr_no });
+    ok(res, await getPR(pr.pr_no));
+  } catch (e) { fail(res, 500, e.message); }
+});
+
+// ── Delete a draft (enhancement #9) ──
+// Only a DRAFT can be deleted, and only by its creator (or an Admin) — a PR that has
+// entered the workflow is immutable history. The row delete cascades to items,
+// approvals and attachment rows (FK ON DELETE CASCADE); the stored attachment objects
+// are cleaned up best-effort afterwards (an orphaned object is not a failure).
+router.delete("/:prNo", canDo("raise_pr"), async (req, res) => {
+  try {
+    const pr = await getPR(req.params.prNo);
+    if (!pr) return fail(res, 404, "PR not found");
+    if (pr.status !== "DRAFT") return fail(res, 409, "Only draft PRs can be deleted");
+    if (req.user.role !== "Admin" && asUuid(req.user.id) !== pr.created_by)
+      return fail(res, 403, "You can only delete your own drafts");
+    const paths = [];
+    for (const t of ["pr_attachments", "pr_item_attachments"]) {
+      try {
+        const r = await db.query(`SELECT file_path FROM ${t} WHERE pr_id = $1`, [pr.id]);
+        paths.push(...r.rows.map((x) => x.file_path).filter(Boolean));
+      } catch { /* table optional */ }
+    }
+    await db.query("DELETE FROM purchase_requests WHERE id = $1", [pr.id]);
+    for (const p of paths) { try { await spaces.deleteObject(p); } catch { /* orphan, ignore */ } }
+    ok(res, { deleted: pr.pr_no });
   } catch (e) { fail(res, 500, e.message); }
 });
 

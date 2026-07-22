@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS purchase_requests (
   approved_by      TEXT,
   remarks          TEXT,
   status           TEXT   NOT NULL DEFAULT 'PENDING'
-                   CHECK (status IN ('PENDING','APPROVED','SEND_BACK','REJECTED','PENDING_QS_APPROVAL','QS_APPROVED','PO_RAISED')),
+                   CHECK (status IN ('DRAFT','PENDING','APPROVED','SEND_BACK','REJECTED','PENDING_QS_APPROVAL','QS_APPROVED','PO_RAISED')),
   -- QS approval Gate 1 (sourcing): who/when signed off, and the send-back reason.
   qs_approved_by      TEXT,
   qs_approved_at      TIMESTAMPTZ,

@@ -170,7 +170,7 @@ db.query(`
   DO $$ BEGIN
     ALTER TABLE purchase_requests DROP CONSTRAINT IF EXISTS purchase_requests_status_check;
     ALTER TABLE purchase_requests ADD CONSTRAINT purchase_requests_status_check
-      CHECK (status IN ('PENDING','APPROVED','SEND_BACK','REJECTED','PENDING_QS_APPROVAL','QS_APPROVED','PO_RAISED'));
+      CHECK (status IN ('DRAFT','PENDING','APPROVED','SEND_BACK','REJECTED','PENDING_QS_APPROVAL','QS_APPROVED','PO_RAISED'));
   END $$;
 `).catch((err) => console.error("purchase_requests QS status CHECK migration:", err.message));
 db.query(`ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS qs_approved_by TEXT`)

@@ -223,7 +223,7 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
     ? ["APPROVED", "PENDING_QS_APPROVAL", "QS_APPROVED", "PO_RAISED"]
     : role === "QS"
     ? ["PENDING_QS_APPROVAL", "QS_APPROVED", "All"]
-    : ["All", "PENDING", "APPROVED", "PENDING_QS_APPROVAL", "QS_APPROVED", "SEND_BACK", "PO_RAISED", "REJECTED"];
+    : ["All", ...(perms.raise_pr || isAdmin ? ["DRAFT"] : []), "PENDING", "APPROVED", "PENDING_QS_APPROVAL", "QS_APPROVED", "SEND_BACK", "PO_RAISED", "REJECTED"];
   const canCreate = !!perms.raise_pr || isAdmin;
   const canApprove = !!perms.approve_pr || !!perms.reject_pr || isAdmin;
   const canPurchase = !!perms.assign_supplier || !!perms.generate_po || !!perms.send_to_fic || isAdmin;
@@ -257,7 +257,7 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
     usePaged(filtered, `${filter}|${search}|${fJob}|${fProject}|${fPrNo}`);
 
   const fieldCls = "rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-[13px] text-[#374151] outline-none focus:border-[#6366F1] max-w-[190px]";
-  const STATUS_LABEL = { All: "All statuses", APPROVED: "Approved", PENDING: "Pending", SEND_BACK: "Sent back", PO_RAISED: "PO raised", REJECTED: "Rejected" };
+  const STATUS_LABEL = { All: "All statuses", DRAFT: "Drafts", APPROVED: "Approved", PENDING: "Pending", SEND_BACK: "Sent back", PO_RAISED: "PO raised", REJECTED: "Rejected" };
   const defaultStatus = role === "Purchaser" ? "APPROVED" : role === "QS" ? "PENDING_QS_APPROVAL" : "All";
   const anyFilter = search || fJob || fProject || fPrNo || filter !== defaultStatus;
   const clearFilters = () => { setSearch(""); setFJob(""); setFProject(""); setFPrNo(""); setFilter(defaultStatus); };
@@ -659,7 +659,10 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
       if (editPR) {
         await api.updatePR(editPR.pr_no, { ...payload, resubmit: editPR.status === "SEND_BACK" });
         const { failed } = await uploadHeldItemFiles(editPR.pr_no);
+        // A draft is promoted to PENDING here — this is its Submit-for-approval path.
+        if (editPR.status === "DRAFT") await api.submitPR(editPR.pr_no);
         if (failed.length) notify(`${editPR.pr_no} updated, but ${failed.length} item file(s) failed: ${failed[0]}`, "warning");
+        else if (editPR.status === "DRAFT") notify(`${editPR.pr_no} submitted for approval`);
         else notify(`${editPR.pr_no} updated${editPR.status === "SEND_BACK" ? " and resubmitted" : ""}`);
       }
       else {
@@ -680,6 +683,29 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
           notify(`${pr.pr_no} created — pending approval`);
         }
       }
+      onSaved();
+    } catch (e) { notify(apiError(e), "error"); } finally { setBusy(false); }
+  };
+
+  // enhancement #9 — Save as Draft. A draft only needs a valid Job No (to mint the
+  // <job>/PR-00x number); everything else can be finished later before Submit. New
+  // drafts create with draft:true; editing an existing draft just re-saves it (the
+  // edit endpoint keeps a DRAFT a DRAFT).
+  const saveDraft = async () => {
+    if (!jobValid) return notify("Job No must contain at least one letter or number", "error");
+    if (form.items.some((it) => Number(it.qty) < 0)) return notify("Quantity cannot be negative", "error");
+    const badLink = form.items.find((it) => it.description.trim() && !isOneDriveUrl(it.onedrive_url));
+    if (badLink) return notify(`"${badLink.description.trim()}" has a link that isn't an https OneDrive or SharePoint URL`, "error");
+    setBusy(true);
+    try {
+      try { await api.poProject(form.job_no.trim()); }
+      catch { await api.addPoProject({ job_no: form.job_no.trim(), project_name: form.project_name || form.job_no, location: form.location }); }
+      const payload = { ...form, items: flattenItems(form.items.filter((it) => it.description.trim())) };
+      const prNo = editPR ? editPR.pr_no : (await api.createPR({ ...payload, draft: true })).pr_no;
+      if (editPR) await api.updatePR(editPR.pr_no, payload);
+      await uploadHeldItemFiles(prNo);
+      if (heldFiles.length) { try { await api.uploadAttachments(prNo, heldFiles); } catch { /* re-add from the reopened draft */ } }
+      notify(`${prNo} saved as draft`);
       onSaved();
     } catch (e) { notify(apiError(e), "error"); } finally { setBusy(false); }
   };
@@ -1163,7 +1189,12 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
 
       <div className="mt-5 flex justify-end gap-2.5">
         <Btn variant="soft" onClick={guardedClose}>Cancel</Btn>
-        <Btn onClick={submit} disabled={busy || !jobValid}>{editPR ? "Save" : "Submit request"}</Btn>
+        {(!editPR || editPR.status === "DRAFT") && (
+          <Btn variant="soft" onClick={saveDraft} disabled={busy || !jobValid}>💾 Save as Draft</Btn>
+        )}
+        <Btn onClick={submit} disabled={busy || !jobValid}>
+          {!editPR ? "Submit request" : editPR.status === "DRAFT" ? "Submit for approval" : "Save"}
+        </Btn>
       </div>
     </Modal>
   );
@@ -1436,6 +1467,20 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
         )}
         {/* Edit & resubmit is the drafter's action — hide it from approvers (Manager/Admin) */}
         {canCreate && !pApprove && !pReject && pr.status === "SEND_BACK" && <Btn onClick={onEdit} disabled={busy}>Edit &amp; resubmit</Btn>}
+        {/* Draft (enhancement #9): the creator can edit, submit for approval, or discard it */}
+        {canCreate && pr.status === "DRAFT" && (
+          <>
+            <Btn variant="danger" disabled={busy} onClick={async () => {
+              if (!window.confirm(`Delete draft ${pr.pr_no}? This cannot be undone.`)) return;
+              setBusy(true);
+              try { await api.deletePR(pr.pr_no); notify(`Draft ${pr.pr_no} deleted`); onChanged(null); }
+              catch (e) { notify(apiError(e), "error"); } finally { setBusy(false); }
+            }}>Delete draft</Btn>
+            <Btn variant="soft" onClick={onEdit} disabled={busy}>Edit</Btn>
+            <Btn variant="success" disabled={busy}
+              onClick={() => act(() => api.submitPR(pr.pr_no), `${pr.pr_no} submitted for approval`)}>Submit for approval</Btn>
+          </>
+        )}
         {/* A sent-back PR is with the drafter; approvers just wait for the resubmission */}
         {(pApprove || pReject) && pr.status === "SEND_BACK" && (
           <span className="self-center text-[12.5px] text-[#6B7280]">Awaiting drafter’s resubmission</span>

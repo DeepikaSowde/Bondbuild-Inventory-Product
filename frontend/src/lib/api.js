@@ -48,6 +48,10 @@ export const api = {
   submitForQs: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/submit-for-qs`)),
   qsApprovePr: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/qs-approve`)),
   qsSendBackPr: (prNo, reason) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/qs-send-back`, { reason })),
+  // Save PR as Draft (enhancement #9): drafts save via createPR/updatePR with draft:true;
+  // submit promotes DRAFT → PENDING, delete discards a draft.
+  submitPR: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/submit`)),
+  deletePR: (prNo) => data(axiosClient.delete(`/purchase-requests/${enc(prNo)}`)),
 
   // attachments (whole-PR) — upload uses multipart/form-data
   listAttachments: (prNo) => data(axiosClient.get(`/purchase-requests/${enc(prNo)}/attachments`)),
