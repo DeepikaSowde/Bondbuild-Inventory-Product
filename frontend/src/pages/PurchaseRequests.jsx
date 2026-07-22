@@ -1501,7 +1501,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
               {showSendFic && (
                 <Btn variant="warning" disabled={busy} onClick={() => {
                   if (buyPending && !window.confirm("Stock will be sent to the Factory In-charge and the Stock PO created.\n\nYou still have buy items — remember to click \"Generate Buy PO\" as well.\n\nContinue?")) return;
-                  act(async () => { await saveAssign(); await api.sendToFic(pr.pr_no); }, "Stock info sent to Factory In-charge — Stock PO created");
+                  act(async () => { if (canEditBuy) await saveAssign(); await api.sendToFic(pr.pr_no); }, "Stock info sent to Factory In-charge — Stock PO created");
                 }}>Send stock to FIC</Btn>
               )}
               {showGenerate && (
@@ -1515,7 +1515,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                     // is raised "awaiting pricing" and the prices go in on the PO screen.
                     if (!allBuyHavePrice && !window.confirm("Some buy items have no unit price.\n\nThe PO will be created awaiting pricing — enter the prices later on the Purchase Orders screen.\n\nContinue?")) return;
                     act(async () => {
-                      await saveAssign();
+                      if (canEditBuy) await saveAssign();
                       const r = await api.generatePOs(pr.pr_no);
                       notify(`${r.created_pos.length} Buy PO(s) created: ${r.created_pos.join(", ")}`, "success");
                     });
