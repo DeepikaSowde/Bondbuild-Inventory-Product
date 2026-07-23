@@ -247,6 +247,76 @@ db.query(`
 `).catch((err) => console.error("alert_ledger migration:", err.message));
 
 // ============================================================
+// Startup: heal stale stock_movements writers.
+//  Older databases still carry versions of these two objects that INSERT into a
+//  column named `quantity`, which was long ago renamed to `quantity_moved`. That
+//  makes "confirm goods received" on a STOCK PO fail with
+//  'column "quantity" of relation "stock_movements" does not exist' — the receive
+//  runs fn_fic_reduce_stock, whose UPDATE inventory fires the log_stock_movement
+//  trigger, and either object can be the stale one. Re-create BOTH with the
+//  correct column so the fix applies whichever was out of date.
+// ============================================================
+db.query(`
+  CREATE OR REPLACE FUNCTION log_stock_movement() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+  BEGIN
+      IF TG_OP = 'UPDATE' AND NEW.quantity_in_stock != OLD.quantity_in_stock THEN
+          INSERT INTO stock_movements (
+              inventory_id, item_code, movement_type, quantity_moved,
+              stock_before, stock_after, moved_by, reason, movement_date
+          ) VALUES (
+              NEW.id,
+              NEW.item_code,
+              CASE WHEN NEW.quantity_in_stock > OLD.quantity_in_stock THEN 'IN' ELSE 'OUT' END,
+              ABS(NEW.quantity_in_stock - OLD.quantity_in_stock),
+              OLD.quantity_in_stock,
+              NEW.quantity_in_stock,
+              'system',
+              'Inventory update',
+              CURRENT_TIMESTAMP
+          );
+      END IF;
+      RETURN NEW;
+  END;
+  $$;
+`).catch((err) => console.error("log_stock_movement quantity_moved migration:", err.message));
+
+db.query(`
+  CREATE OR REPLACE FUNCTION fn_fic_reduce_stock(p_item_id INTEGER, p_actor TEXT)
+  RETURNS INTEGER LANGUAGE plpgsql AS $$
+  DECLARE
+    v_item    pr_items%ROWTYPE;
+    v_inv     inventory%ROWTYPE;
+    v_move_id INTEGER;
+  BEGIN
+    SELECT * INTO v_item FROM pr_items WHERE id = p_item_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'PR item not found'; END IF;
+    IF v_item.stock_status = 'STOCK_REDUCED' THEN RAISE EXCEPTION 'Stock already reduced for this item'; END IF;
+    IF v_item.stock_qty <= 0 THEN RAISE EXCEPTION 'No from-stock quantity on this item'; END IF;
+
+    SELECT * INTO v_inv FROM inventory WHERE id = v_item.inventory_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Inventory item not found'; END IF;
+    IF v_inv.quantity_in_stock < v_item.stock_qty THEN
+      RAISE EXCEPTION 'Not enough stock — available: %, needed: %', v_inv.quantity_in_stock, v_item.stock_qty;
+    END IF;
+
+    UPDATE inventory SET quantity_in_stock = quantity_in_stock - v_item.stock_qty WHERE id = v_inv.id;
+    UPDATE pr_items SET stock_status = 'STOCK_REDUCED' WHERE id = p_item_id;
+
+    INSERT INTO stock_movements (inventory_id, item_code, movement_type, quantity_moved,
+                                 reference_type, reference_number, notes, moved_by,
+                                 stock_before, stock_after)
+    VALUES (v_inv.id, v_inv.item_code, 'OUT', v_item.stock_qty,
+            'PR', (SELECT pr_no FROM purchase_requests WHERE id = v_item.pr_id),
+            'Issued to project by ' || p_actor, p_actor,
+            v_inv.quantity_in_stock, v_inv.quantity_in_stock - v_item.stock_qty)
+    RETURNING id INTO v_move_id;
+
+    RETURN v_move_id;
+  END; $$;
+`).catch((err) => console.error("fn_fic_reduce_stock quantity_moved migration:", err.message));
+
+// ============================================================
 // Health Check Endpoint
 // ============================================================
 app.get("/api/health", async (req, res) => {
