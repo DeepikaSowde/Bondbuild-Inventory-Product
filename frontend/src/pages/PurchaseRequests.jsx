@@ -16,15 +16,16 @@ const CURRENCIES = ["SGD", "EUR", "USD", "CNY", "JPY", "INR", "MYR"];
 const emptyItem = () => ({
   profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
   remarks: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
-  unit_price: "", allocations: [], services: [],
+  unit_price: "", allocations: [], stages: [],
 });
 
-// A blank supplier sub-line (1a/1b/1c): the same item sent to another supplier for a
-// different purpose. qty defaults to the parent's on add; supplier/price are the
-// Purchaser's to assign, mirroring how the main buy line works.
-const emptyService = () => ({
-  purpose: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
-  qty: "", unit_price: "", currency: "SGD", remarks: "",
+// A blank processing stage (1a → 1b → 1c): the next step this item flows through,
+// done by a supplier. `track` is which source chain it belongs to ('S' = stock,
+// 'B' = buy, '' = a single untagged chain). Qty is NOT stored here — it is carried
+// forward from the item's source quantity for that track (see trackQtyOf).
+const emptyStage = (track = "") => ({
+  track, process: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
+  unit_price: "", currency: "SGD", remarks: "",
 });
 
 // Format a native date input value (YYYY-MM-DD) into the project-wide
@@ -60,6 +61,19 @@ const stockLabelOf = (s) =>
 const stockSumOf = (it) => (it.allocations || []).reduce((s, a) => s + (Number(a.stock_qty) || 0), 0);
 const buyQtyOf = (it) => Math.max(0, (Number(it.qty) || 0) - stockSumOf(it));
 
+// Quantity that flows into a processing stage on a given track. The full source
+// quantity carries forward unchanged (no split at a stage): the stock track carries
+// the reserved stock qty, the buy track the bought qty, and a single untagged chain
+// carries whichever source exists (falling back to the item's total qty).
+const trackQtyOf = (it, track) => {
+  if (track === "S") return stockSumOf(it);
+  if (track === "B") return buyQtyOf(it);
+  return stockSumOf(it) + buyQtyOf(it) || Number(it.qty) || 0;
+};
+// Which source tracks a split item runs. Both stock and buy present → two tagged
+// chains ('S','B'); otherwise a single untagged chain ('').
+const tracksOf = (it) => (stockSumOf(it) > 0 && buyQtyOf(it) > 0 ? ["S", "B"] : [""]);
+
 // ── Per-item attachments + OneDrive link ──
 // Attachments key on item_uid, NOT line_no: flattenItems() numbers lines positionally,
 // so deleting item 2 renumbers item 3 into its place and its files would follow the
@@ -92,7 +106,7 @@ function flattenItems(visualItems) {
   visualItems.forEach((it, idx) => {
     const line_no = idx + 1;
     const base = {
-      line_no, line_suffix: "", purpose: null,
+      line_no, line_suffix: "", purpose: null, source_track: "",
       profile_code: it.profile_code || "", description: it.description.trim(),
       colour: it.colour || "", unit: it.unit || "pcs", remarks: it.remarks || "",
       // every flat row of one visual item carries the same uid, exactly as it carries
@@ -125,26 +139,36 @@ function flattenItems(visualItems) {
         supplier_type: it.supplier_type || "Local", unit_price: 0,
       });
     }
-    // Supplier sub-lines (1a/1b/1c): the same item routed to another supplier for a
-    // different purpose. Each is a buy row sharing the parent's line_no, distinguished
-    // by line_suffix, carrying its own purpose / supplier / qty / price. Empty rows
-    // (no purpose, no supplier, no qty) are dropped so a stray blank sub-line is lost.
-    (it.services || []).forEach((s, sIdx) => {
-      const purpose = (s.purpose || "").trim();
-      const sQty = Number(s.qty) || 0;
-      if (!purpose && !s.supplier_id && sQty <= 0) return;
-      out.push({
-        ...base,
-        line_suffix: subLabel(sIdx),
-        purpose: purpose || null,
-        // a sub-line describes the SAME item (description/colour/profile carried through)
-        // but keeps its OWN remark — not the parent's.
-        remarks: s.remarks || "",
-        qty: sQty, stock_qty: 0, inventory_id: null, stock_location: "", buy_qty: sQty,
-        supplier_id: s.supplier_id || null, supplier_name: s.supplier_name || null,
-        supplier_type: s.supplier_type || "Local", unit_price: Number(s.unit_price) || 0,
-      });
+    // Processing stages (1a → 1b → 1c): the item flows through an ordered chain of
+    // stages, each a buy row sharing the parent's line_no, distinguished by
+    // line_suffix + source_track. Stock ('S') and buy ('B') tracks run independently;
+    // a single-source item uses one untagged chain (''). Qty carries forward from the
+    // track's source quantity (no per-stage qty). Blank stages (no process, no
+    // supplier) are dropped so a stray empty stage is lost. Suffixes a/b/c are
+    // assigned per track so each chain is a clean 1a → 1b → 1c.
+    const stagesByTrack = { S: [], B: [], "": [] };
+    (it.stages || []).forEach((s) => {
+      const process = (s.process || "").trim();
+      if (!process && !s.supplier_id) return;
+      (stagesByTrack[s.track] ?? stagesByTrack[""]).push({ ...s, process });
     });
+    for (const track of ["", "S", "B"]) {
+      const carried = trackQtyOf(it, track);
+      stagesByTrack[track].forEach((s, sIdx) => {
+        out.push({
+          ...base,
+          line_suffix: subLabel(sIdx),
+          source_track: track,
+          purpose: s.process || null,
+          // a stage describes the SAME item (description/colour/profile carried
+          // through) but keeps its OWN remark — not the parent's.
+          remarks: s.remarks || "",
+          qty: carried, stock_qty: 0, inventory_id: null, stock_location: "", buy_qty: carried,
+          supplier_id: s.supplier_id || null, supplier_name: s.supplier_name || null,
+          supplier_type: s.supplier_type || "Local", unit_price: Number(s.unit_price) || 0,
+        });
+      });
+    }
   });
   return out;
 }
@@ -173,15 +197,16 @@ function groupItemsForEdit(rawItems) {
         stock_qty: String(Number(r.stock_qty) || 0),
       }));
     const buyRow = mainRows.find((r) => Number(r.buy_qty) > 0);
-    // total = the main item's own portions (services are separate purposes, not part
+    // total = the main item's own portions (stages carry qty forward, not part
     // of the item's requested quantity), added up across split/legacy rows.
     const total = mainRows.reduce(
       (s, r) => s + Math.max(0, Number(r.stock_qty) || 0) + Math.max(0, Number(r.buy_qty) || 0), 0);
-    // Sub-lines, in suffix order (getPR already sorts by line_suffix).
-    const services = subRows.map((r) => ({
-      purpose: r.purpose || "", supplier_id: r.supplier_id || "", supplier_name: r.supplier_name || "",
+    // Processing stages, in (track, suffix) order (getPR sorts by source_track then
+    // line_suffix). Each keeps its track tag so the editor rebuilds the two chains.
+    const stages = subRows.map((r) => ({
+      track: r.source_track || "",
+      process: r.purpose || "", supplier_id: r.supplier_id || "", supplier_name: r.supplier_name || "",
       supplier_type: r.supplier_type || "Local", remarks: r.remarks || "",
-      qty: r.buy_qty != null ? String(Number(r.buy_qty) || 0) : "",
       unit_price: r.unit_price ?? "", currency: r.currency || "SGD",
       quote_requested_at: r.quote_requested_at || null,
     }));
@@ -190,7 +215,7 @@ function groupItemsForEdit(rawItems) {
       qty: total ? String(total) : (base.qty ?? ""), unit: base.unit || "pcs", remarks: base.remarks || "",
       supplier_id: buyRow?.supplier_id || "", supplier_name: buyRow?.supplier_name || "",
       supplier_type: (buyRow || base).supplier_type || "Local", unit_price: buyRow?.unit_price || "",
-      allocations, services,
+      allocations, stages,
       // PRs raised before the item_uid migration have none; mint one so the item can
       // take attachments from here on
       item_uid: base.item_uid || newItemUid(),
@@ -371,7 +396,7 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
   const blankItem = () => ({
     profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
     remarks: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
-    unit_price: "", allocations: [], services: [], item_uid: newItemUid(), onedrive_url: "",
+    unit_price: "", allocations: [], stages: [], item_uid: newItemUid(), onedrive_url: "",
   });
   const [form, setForm] = useState(() => editPR ? {
     job_no: editPR.job_no, project_name: editPR.project_name || "", location: editPR.location || "",
@@ -410,26 +435,26 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
       return { ...it, [key]: val };
     }),
   }));
-  // Supplier sub-lines (1a/1b/1c) on item i — same shape as the main buy line, so the
-  // Drafter assigns a supplier here and the Purchaser can reassign it later.
-  const addService = (i) => setForm((f) => ({
+  // Processing stages (1a → 1b → 1c) on item i, each belonging to a source track.
+  // Append a stage to a track's chain; the Drafter assigns the supplier here and the
+  // Purchaser can reassign later. `s` is the stage's index within it.stages.
+  const addStage = (i, track) => setForm((f) => ({
     ...f,
     items: f.items.map((it, x) =>
       x === i
-        ? { ...it, services: [...(it.services || []), { ...emptyService(), qty: it.qty || "" }] }
+        ? { ...it, stages: [...(it.stages || []), emptyStage(track)] }
         : it),
   }));
-  const removeService = (i, s) => setForm((f) => ({
+  const removeStage = (i, s) => setForm((f) => ({
     ...f,
     items: f.items.map((it, x) =>
-      x === i ? { ...it, services: (it.services || []).filter((_, y) => y !== s) } : it),
+      x === i ? { ...it, stages: (it.stages || []).filter((_, y) => y !== s) } : it),
   }));
-  const setService = (i, s, key, val) => setForm((f) => ({
+  const setStage = (i, s, key, val) => setForm((f) => ({
     ...f,
     items: f.items.map((it, x) => {
       if (x !== i) return it;
-      if (key === "qty" && val !== "" && (isNaN(Number(val)) || Number(val) < 0)) return it;
-      return { ...it, services: (it.services || []).map((sv, y) => (y === s ? { ...sv, [key]: val } : sv)) };
+      return { ...it, stages: (it.stages || []).map((sv, y) => (y === s ? { ...sv, [key]: val } : sv)) };
     }),
   }));
   const removeItem = (i) => {
@@ -879,67 +904,80 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
                 <input className={inp} value={it.remarks || ""} maxLength={200} onChange={(e) => setItem(i, "remarks", e.target.value)} placeholder="e.g. URGENT, Preference (P&M)" />
               </div>
 
-              {/* Supplier sub-lines (1a/1b/1c): the SAME item routed to another supplier
-                  for a different purpose (powder coating, polishing…). Each is its own
-                  buy line — assign a supplier here; the Purchaser can reassign later. */}
+              {/* Processing stages (1 → 1a → 1b → 1c): the item flows through an ordered
+                  chain of stages (fabrication → powder coating → anodising…), each done
+                  by a supplier and each becoming its own Buy PO. A line split part-stock /
+                  part-buy runs one independent chain per source track (Stock / Buy);
+                  otherwise a single untagged chain. Qty carries forward from the item. */}
               <div className="px-3 pb-2">
-                {(it.services || []).length > 0 && (
-                  <div className="mt-1 rounded-lg border border-[#E5E7EB] bg-[#F5F6FF] p-2">
-                    <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#6366F1]">
-                      Also send this item to
-                    </div>
-                    <div className="grid gap-2">
-                      {(it.services || []).map((sv, s) => (
-                        <div key={s} className="rounded-lg border border-[#E5E7EB] bg-white p-2">
-                          <div className="grid grid-cols-[38px_1fr_1fr_76px_28px] items-end gap-2">
-                            <div className="flex h-9 items-center justify-center rounded-lg border border-[#C7D2FE] bg-[#EEF2FF] text-[12px] font-extrabold text-[#6366F1]">
-                              {i + 1}{subLabel(s)}
-                            </div>
-                            <div>
-                              <label className={lbl}>Purpose</label>
-                              <input className={inp} value={sv.purpose} maxLength={120}
-                                onChange={(e) => setService(i, s, "purpose", e.target.value)}
-                                placeholder="e.g. Powder coating" />
-                            </div>
-                            <div>
-                              <label className={lbl}>Supplier</label>
-                              <select className={inp} value={sv.supplier_id}
-                                onChange={(e) => {
-                                  const sup = suppliers.find((x) => String(x.id) === e.target.value);
-                                  setService(i, s, "supplier_id", e.target.value);
-                                  setService(i, s, "supplier_name", sup?.name || "");
-                                  if (sup) setService(i, s, "supplier_type", sup.type);
-                                }}>
-                                <option value="">— Select supplier —</option>
-                                {suppliers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                              </select>
-                            </div>
-                            <div>
-                              <label className={lbl}>Qty</label>
-                              <input type="number" min="0" className={inp} value={sv.qty}
-                                onKeyDown={(e) => e.key === "-" && e.preventDefault()}
-                                onChange={(e) => { const v = e.target.value; if (v === "" || Number(v) >= 0) setService(i, s, "qty", v); }}
-                                placeholder="0" />
-                            </div>
-                            <button type="button" title="Remove sub-line"
-                              onClick={() => removeService(i, s)}
-                              className="mb-1 flex h-9 w-7 items-center justify-center rounded-lg border border-[#FCA5A5] text-[13px] text-[#DC2626] hover:bg-[#FEF2F2]">✕</button>
+                {tracksOf(it).map((track) => {
+                  const carried = trackQtyOf(it, track);
+                  const rows = (it.stages || [])
+                    .map((sv, gi) => ({ sv, gi }))
+                    .filter((x) => (x.sv.track || "") === track);
+                  const trackName = track === "S" ? "Stock" : track === "B" ? "Buy" : "";
+                  const tag = track ? `·${track}` : "";
+                  return (
+                    <div key={track || "single"} className="mt-1">
+                      {rows.length > 0 && (
+                        <div className="rounded-lg border border-[#E5E7EB] bg-[#F5F6FF] p-2">
+                          <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#6366F1]">
+                            {trackName ? `${trackName} track — processing stages` : "Processing stages"}
+                            <span className="ml-1 font-semibold text-[#9CA3AF]">· {carried} {it.unit} carried</span>
                           </div>
-                          <div className="mt-1.5 pl-[46px]">
-                            <label className={lbl}>Remark ({(sv.remarks || "").length}/200)</label>
-                            <input className={inp} value={sv.remarks || ""} maxLength={200}
-                              onChange={(e) => setService(i, s, "remarks", e.target.value)}
-                              placeholder="e.g. matte finish, RAL 9005" />
+                          <div className="grid gap-2">
+                            {rows.map(({ sv, gi }, localIdx) => (
+                              <div key={gi} className="rounded-lg border border-[#E5E7EB] bg-white p-2">
+                                <div className="grid grid-cols-[52px_1fr_1fr_64px_28px] items-end gap-2">
+                                  <div className="flex h-9 items-center justify-center rounded-lg border border-[#C7D2FE] bg-[#EEF2FF] text-[12px] font-extrabold text-[#6366F1]">
+                                    {i + 1}{subLabel(localIdx)}{tag}
+                                  </div>
+                                  <div>
+                                    <label className={lbl}>Process</label>
+                                    <input className={inp} value={sv.process} maxLength={120}
+                                      onChange={(e) => setStage(i, gi, "process", e.target.value)}
+                                      placeholder="e.g. Powder coating" />
+                                  </div>
+                                  <div>
+                                    <label className={lbl}>Supplier</label>
+                                    <select className={inp} value={sv.supplier_id}
+                                      onChange={(e) => {
+                                        const sup = suppliers.find((x) => String(x.id) === e.target.value);
+                                        setStage(i, gi, "supplier_id", e.target.value);
+                                        setStage(i, gi, "supplier_name", sup?.name || "");
+                                        if (sup) setStage(i, gi, "supplier_type", sup.type);
+                                      }}>
+                                      <option value="">— Select supplier —</option>
+                                      {suppliers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className={lbl}>Qty</label>
+                                    <input className={`${inp} bg-[#F3F4F6] text-[#6B7280]`} value={carried} readOnly
+                                      title="Carried forward from the item quantity" />
+                                  </div>
+                                  <button type="button" title="Remove stage"
+                                    onClick={() => removeStage(i, gi)}
+                                    className="mb-1 flex h-9 w-7 items-center justify-center rounded-lg border border-[#FCA5A5] text-[13px] text-[#DC2626] hover:bg-[#FEF2F2]">✕</button>
+                                </div>
+                                <div className="mt-1.5 pl-[64px]">
+                                  <label className={lbl}>Remark ({(sv.remarks || "").length}/200)</label>
+                                  <input className={inp} value={sv.remarks || ""} maxLength={200}
+                                    onChange={(e) => setStage(i, gi, "remarks", e.target.value)}
+                                    placeholder="e.g. matte finish, RAL 9005" />
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
-                      ))}
+                      )}
+                      <button type="button" onClick={() => addStage(i, track)}
+                        className="mt-1.5 rounded-lg border border-dashed border-[#C7D2FE] px-2.5 py-1 text-[11px] font-semibold text-[#6366F1] hover:bg-[#EEF2FF]">
+                        + Add next stage{trackName ? ` · ${trackName}` : ""} ({i + 1}{subLabel(rows.length)}{tag})
+                      </button>
                     </div>
-                  </div>
-                )}
-                <button type="button" onClick={() => addService(i)}
-                  className="mt-1.5 rounded-lg border border-dashed border-[#C7D2FE] px-2.5 py-1 text-[11px] font-semibold text-[#6366F1] hover:bg-[#EEF2FF]">
-                  + Add supplier / purpose ({i + 1}{subLabel((it.services || []).length)})
-                </button>
+                  );
+                })}
               </div>
 
               {/* OneDrive link — one per item, host-validated server-side */}
@@ -1335,7 +1373,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                     <td className={td}>
                       {it.line_suffix ? (
                         <>
-                          <span className="mr-1 rounded bg-[#EEF2FF] px-1 font-mono text-[10px] font-bold text-[#6366F1]">{it.line_no}{it.line_suffix}</span>
+                          <span className="mr-1 rounded bg-[#EEF2FF] px-1 font-mono text-[10px] font-bold text-[#6366F1]">{it.line_no}{it.line_suffix}{it.source_track ? `·${it.source_track}` : ""}</span>
                           {it.description}
                           {it.purpose && <span className="text-[10px] font-semibold text-[#6366F1]"> · {it.purpose}</span>}
                         </>
@@ -1607,10 +1645,14 @@ function RfqPanel({ pr, user, items, suppliers, canEditBuy, busy, act, notify })
     pr_no: pr.pr_no, job_no: pr.job_no, project_name: pr.project_name, prepared_by: user.name,
     currency: g.currency,
     supplier: suppliers.find((s) => String(s.id) === String(g.supplier_id)) || { name: g.supplier_name },
-    items: g.items.map((it) => ({
-      description: it.purpose ? `${it.description} — ${it.purpose}` : it.description,
-      colour: it.colour, qty: it.buy_qty, unit: it.unit,
-    })),
+    items: g.items.map((it) => {
+      const stageRef = it.line_suffix
+        ? `${it.line_no}${it.line_suffix}${it.source_track ? "·" + it.source_track : ""}`
+        : "";
+      let description = it.purpose ? `${it.description} — ${it.purpose}` : it.description;
+      if (stageRef) description = `${description} (${stageRef})`;
+      return { description, colour: it.colour, qty: it.buy_qty, unit: it.unit };
+    }),
   });
 
   const exportPdf = (g) => exportRfqPdf(docGroup(g)).catch((e) => notify(apiError(e), "error"));

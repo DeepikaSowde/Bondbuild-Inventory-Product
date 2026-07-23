@@ -70,7 +70,7 @@ async function getPR(prNo, client = db) {
             inv.unit_price AS inventory_unit_price
      FROM pr_items pi
      LEFT JOIN inventory inv ON inv.id = pi.inventory_id
-     WHERE pi.pr_id = $1 ORDER BY pi.line_no, pi.line_suffix, pi.id`, [rows[0].id]
+     WHERE pi.pr_id = $1 ORDER BY pi.line_no, pi.source_track, pi.line_suffix, pi.id`, [rows[0].id]
   );
   // attach PR-level files (best-effort; ignore if table not present yet)
   let attachments = [];
@@ -197,14 +197,14 @@ router.post("/", canDo("raise_pr"), async (req, res) => {
           `INSERT INTO pr_items
            (pr_id, line_no, line_suffix, purpose, profile_code, description, colour, qty, unit, remarks,
             stock_qty, inventory_id, stock_location, stock_status, buy_qty,
-            supplier_id, supplier_name, supplier_type, unit_price, item_uid, onedrive_url)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+            supplier_id, supplier_name, supplier_type, unit_price, item_uid, onedrive_url, source_track)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
           [prId, lineNo, String(it.line_suffix || ""), it.purpose || null, it.profile_code, it.description.trim(), it.colour,
            Number(it.qty) || 0, it.unit || "pcs", it.remarks, stockQty,
            it.inventory_id || null, it.stock_location,
            stockQty > 0 ? "AWAITING_PURCHASER" : "NONE", Number(it.buy_qty) || 0,
            it.supplier_id || null, it.supplier_name || null, it.supplier_type || "Local", Number(it.unit_price) || 0,
-           it.item_uid, validateOneDriveUrl(it.onedrive_url).value]
+           it.item_uid, validateOneDriveUrl(it.onedrive_url).value, String(it.source_track || "")]
         );
       }
       // A draft enters no workflow yet — no SUBMIT audit row, no Manager alert.
@@ -274,14 +274,14 @@ router.put("/:prNo", canDo("raise_pr"), async (req, res) => {
           `INSERT INTO pr_items
            (pr_id, line_no, line_suffix, purpose, profile_code, description, colour, qty, unit, remarks,
             stock_qty, inventory_id, stock_location, stock_status, buy_qty,
-            supplier_id, supplier_name, supplier_type, unit_price, item_uid, onedrive_url)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+            supplier_id, supplier_name, supplier_type, unit_price, item_uid, onedrive_url, source_track)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
           [pr.id, lineNo, String(it.line_suffix || ""), it.purpose || null, it.profile_code, it.description.trim(), it.colour,
            Number(it.qty) || 0, it.unit || "pcs", it.remarks, stockQty,
            it.inventory_id || null, it.stock_location,
            stockQty > 0 ? "AWAITING_PURCHASER" : "NONE", Number(it.buy_qty) || 0,
            it.supplier_id || null, it.supplier_name || null, it.supplier_type || "Local", Number(it.unit_price) || 0,
-           it.item_uid, validateOneDriveUrl(it.onedrive_url).value]
+           it.item_uid, validateOneDriveUrl(it.onedrive_url).value, String(it.source_track || "")]
         );
       }
 
@@ -800,9 +800,15 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
         );
         let line = 1;
         for (const it of g.items) {
-          // Sub-lines carry the parent's material description plus a process purpose;
-          // fold the purpose into the PO line so the supplier sees what they're doing.
-          const desc = it.purpose ? `${it.description} — ${it.purpose}` : it.description;
+          // Processing-stage rows carry the parent's material description plus the
+          // process label (e.g. "Powder coating"); fold it into the PO line so the
+          // supplier sees what they're doing. A stage also gets its chain reference
+          // appended — 1a, or 1a·S / 1a·B when the line runs a stock and a buy track.
+          const stageRef = it.line_suffix
+            ? `${it.line_no}${it.line_suffix}${it.source_track ? "·" + it.source_track : ""}`
+            : "";
+          let desc = it.purpose ? `${it.description} — ${it.purpose}` : it.description;
+          if (stageRef) desc = `${desc} (${stageRef})`;
           await c.query(
             "INSERT INTO po_items (po_id, line_no, profile_code, description, qty, unit, unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7)",
             [po.rows[0].id, line++, it.profile_code, desc, Number(it.buy_qty), it.unit, Number(it.unit_price) || 0]

@@ -217,7 +217,7 @@
         <tr><td class="k">2</td><td>Photo attachment on "Add Item" (Inventory)</td><td><span class="tag t-new">Form</span></td><td><span class="tag t-low">Low</span></td><td>Photo storage + routes already exist and are used by "Edit Item".</td></tr>
         <tr><td class="k">3</td><td>QS approval — sourcing &amp; price gates</td><td><span class="tag t-new">Workflow</span></td><td><span class="tag t-high">High</span></td><td>"QS" role already exists (currently view-only); adds two approval gates — sourcing, then price — parallel to FIC delivery.</td></tr>
         <tr><td class="k">4</td><td>Purchase Order price editing (OPEN PO)</td><td><span class="tag t-new">Feature</span></td><td><span class="tag t-med">Medium</span></td><td>PO detail view + audit trail exist; the unit price is immutable after generation.</td></tr>
-        <tr><td class="k">5</td><td>Multiple suppliers per PR item (1, 1a, 1b, 1c)</td><td><span class="tag t-new">Data model</span></td><td><span class="tag t-high">High</span></td><td>PR rows already group by line; extends grouping to supplier sub-lines.</td></tr>
+        <tr><td class="k">5</td><td>Multi-stage processing chain per PR item (1 → 1a → 1b → 1c)</td><td><span class="tag t-new">Data model</span></td><td><span class="tag t-high">High</span></td><td>PR rows already group by line and split stock/buy; extends into a sequential stage chain, per source track.</td></tr>
         <tr><td class="k">6</td><td>Location field on the PO</td><td><span class="tag t-new">Field</span></td><td><span class="tag t-low">Low</span></td><td>PR already captures <code>location</code>; carry it onto the PO + PDF.</td></tr>
         <tr><td class="k">7</td><td>Supplier price-comparison table (Purchaser)</td><td><span class="tag t-new">View</span></td><td><span class="tag t-med">Medium</span></td><td>Consumes the RFQ / multi-supplier data (ties to #5).</td></tr>
         <tr><td class="k">8</td><td>GST 9% on the PO</td><td><span class="tag t-new">Finance</span></td><td><span class="tag t-med">Medium</span></td><td>No tax fields exist today; adds subtotal → GST → total.</td></tr>
@@ -547,49 +547,55 @@
 
   <!-- FSD 5 -->
   <section class="feat" id="fsd-5">
-    <div class="feat-head"><div class="fnum">5</div><div><h3>Multiple suppliers per PR item (1, 1a, 1b, 1c)</h3><p class="oneline">Let one requested item be routed to several suppliers, each for a different processing purpose.</p></div></div>
+    <div class="feat-head"><div class="fnum">5</div><div><h3>Multi-stage processing chain per PR item (1 → 1a → 1b → 1c)</h3><p class="oneline">Route one item through a sequence of processing stages, each done by a supplier, with the quantity flowing stage to stage.</p></div></div>
     <div class="feat-body">
       <div class="lbl">Objective</div>
-      <p>Allow a single PR item to be sent to <strong>multiple suppliers</strong>, shown as sub-lines under the parent item — item&nbsp;1 with children 1a, 1b, 1c. In this business the same physical item is routed to different suppliers for <strong>different purposes</strong> (e.g. powder coating, polishing, anodising); each sub-line carries its own purpose, supplier, quantity and price, and each becomes its own PO.</p>
+      <p>Let a single PR item flow through a <strong>straight-line chain of processing stages</strong> — item&nbsp;1 → stage 1a → 1b → 1c… — where the <em>output of each stage feeds the next</em>. Each stage is a distinct process (e.g. fabrication, then powder coating, then anodising) performed by <strong>any supplier</strong>, and each stage becomes its own <strong>Buy PO</strong>. This is a sequential <strong>route</strong>, not a set of parallel quotes.</p>
 
       <div class="lbl">Actors</div>
       <div class="pillrow"><span class="pill role">Drafter</span><span class="pill role">Purchaser</span><span class="pill role">Admin</span></div>
 
       <div class="lbl">Current behaviour</div>
-      <p>Each PR buy line maps to exactly one supplier. To involve a second supplier the item must be duplicated as a separate line. PR rows already group visually by line number (a stock/buy split shares one line), but there is no supplier sub-line concept.</p>
+      <p>Each PR buy line maps to exactly one supplier. PR rows already group visually by line number, and a line can already split into a <strong>stock portion and a buy portion</strong>, but there is no notion of a downstream processing stage — the item cannot move on to a next process/supplier.</p>
 
       <div class="lbl">Proposed behaviour</div>
       <ul>
-        <li>Under an item, the user can <strong>"+ Add supplier / purpose"</strong> to create sub-lines labelled 1a, 1b, 1c…</li>
-        <li>Each sub-line inherits the main item's description and carries its own <strong>purpose</strong>, supplier, quantity, remark and price, and can be quoted (RFQ) independently.</li>
-        <li>PO generation groups sub-lines by supplier as today — each supplier's sub-lines become that supplier's PO; the purpose is folded into the PO line description.</li>
-        <li>Sub-line labels (1a/1b/1c) appear consistently in the PR view, RFQ documents and PO references.</li>
+        <li>Under an item, the user can <strong>"+ Add next stage"</strong> to append sub-lines <strong>1a, 1b, 1c…</strong> — a strictly <strong>linear</strong> chain (1a → 1b → 1c), each stage carrying its own <strong>process label</strong>, supplier, remark and price.</li>
+        <li>The <strong>full quantity carries forward</strong> from one stage to the next (no loss/split at a stage) and can be quoted (RFQ) per stage.</li>
+        <li><strong>Two source tracks.</strong> Because a line can be <strong>part-stock, part-buy</strong>, the user decides <em>per source</em> whether it moves on to the next stage — the stock units and the bought units can each run down the chain <strong>in parallel and independently</strong>.</li>
+        <li><strong>Numbering.</strong> The letter is the <em>stage</em> (a = fabrication, b = powder coat, c = anodise). When a line is split, the track is tagged by origin: on screen <strong>"1a — Stock"</strong> / <strong>"1a — Buy"</strong>, and compact <strong>1a·S</strong> / <strong>1a·B</strong> on PO references. With no split, it is simply 1 → 1a → 1b → 1c.</li>
+        <li>A track <strong>just ends</strong> when the user stops adding stages to it — no explicit "final" marker; the two tracks may run to different depths.</li>
+        <li>Every stage is a normal <strong>Buy PO to its supplier</strong> (with a price). The only STOCK record is the origin draw of the stock units from inventory.</li>
       </ul>
 
       <div class="wire">
-        <div class="wire-cap"><span>Proposed — item 1 with supplier sub-lines</span><span class="wtag">wireframe</span></div>
+        <div class="wire-cap"><span>Proposed — item 1 (100 = 50 stock + 50 buy) routed through two parallel chains</span><span class="wtag">wireframe</span></div>
         <div class="wire-body mock">
           <div class="mcard">
             <table class="mtable">
-              <tr><th>Line</th><th>Description</th><th>Purpose</th><th>Supplier</th><th>Qty</th><th>Price</th></tr>
-              <tr><td><strong>1</strong></td><td>Aluminium profile 100×50</td><td class="dashed-cell">main item</td><td>Guangzhou Alu</td><td>300</td><td>S$ 42.00</td></tr>
-              <tr><td>1a</td><td style="color:var(--muted)">↳ same item</td><td>Powder coating</td><td>Lian Bee Metal</td><td>300</td><td>S$ 6.00</td></tr>
-              <tr><td>1b</td><td style="color:var(--muted)">↳ same item</td><td>Polishing</td><td>Pestkare</td><td>300</td><td>S$ 3.50</td></tr>
-              <tr><td>1c</td><td style="color:var(--muted)">↳ same item</td><td>Anodising</td><td>Foshan Metals</td><td>300</td><td>S$ 4.20</td></tr>
+              <tr><th>Line</th><th>Source / stage</th><th>Process</th><th>Supplier</th><th>Qty</th><th>Price</th></tr>
+              <tr><td><strong>1</strong></td><td class="dashed-cell">origin item · 100</td><td class="dashed-cell">50 stock + 50 buy</td><td>Guangzhou Alu <span style="color:var(--faint)">(buy 50)</span></td><td>100</td><td>S$ 42.00</td></tr>
+              <tr style="background:var(--good-soft)"><td>1a — Stock</td><td style="color:var(--muted)">↳ stock track</td><td>Fabrication</td><td>Supplier A</td><td>50</td><td>S$ 6.00</td></tr>
+              <tr style="background:var(--good-soft)"><td>1b — Stock</td><td style="color:var(--muted)">↳ stock track</td><td>Powder coating</td><td>Supplier B</td><td>50</td><td>S$ 3.50</td></tr>
+              <tr style="background:var(--good-soft)"><td>1c — Stock</td><td style="color:var(--muted)">↳ stock track</td><td>Anodising</td><td>Supplier C</td><td>50</td><td>S$ 4.20</td></tr>
+              <tr style="background:var(--accent-soft)"><td>1a — Buy</td><td style="color:var(--muted)">↳ buy track</td><td>Fabrication</td><td>Supplier A</td><td>50</td><td>S$ 6.00</td></tr>
+              <tr style="background:var(--accent-soft)"><td>1b — Buy</td><td style="color:var(--muted)">↳ buy track</td><td>Powder coating</td><td>Supplier B</td><td>50</td><td>S$ 3.50</td></tr>
             </table>
-            <div class="mrow" style="margin-top:10px"><span class="mbtn" style="padding:5px 10px">+ Add supplier / purpose (1d)</span></div>
+            <div class="mrow" style="margin-top:10px"><span class="mbtn" style="padding:5px 10px">+ Add next stage · Stock (1d)</span><span class="mbtn" style="padding:5px 10px">+ Add next stage · Buy (1c)</span></div>
+            <div style="font-size:11px;color:var(--faint);margin-top:8px">Stock track ran to 1c (anodising); the buy track stopped after 1b — it simply has no next stage.</div>
           </div>
         </div>
       </div>
 
-      <div class="note"><div class="h">Confirmed model</div>Each sub-line is the <strong>same item sent to a different supplier for a different purpose</strong> — not competing quotes and not a quantity split. Because each purpose uses a different supplier, the existing "one PO per supplier" grouping already yields exactly one PO per purpose. Sub-line quantity defaults to the parent's and is editable; the RFQ quote gate applies to every sub-line.</div>
+      <div class="note"><div class="h">Confirmed model</div>Sub-lines are a <strong>sequential processing route</strong> (1a → 1b → 1c), <em>not</em> competing quotes and <em>not</em> a quantity split at a stage — the full incoming quantity carries forward. A part-stock/part-buy line yields <strong>two independent tracks</strong> down the same chain; the user chooses per source what advances. Each stage is an ordinary <strong>Buy PO</strong>, so the existing "one PO per supplier" grouping still yields one PO per stage-supplier.</div>
 
       <div class="lbl">Acceptance criteria</div>
       <ul class="ac">
-        <li>An item can hold multiple supplier sub-lines labelled 1a/1b/1c… added and removed in the PR editor.</li>
-        <li>Each sub-line has its own purpose, supplier, quantity, remark and price, and can be quoted independently.</li>
-        <li>Sub-line labels and purposes render consistently in PR view, RFQ documents and PO references.</li>
-        <li>PO generation produces one PO per supplier from the relevant sub-lines.</li>
+        <li>An item can be extended with a strictly linear chain of stages 1a → 1b → 1c…, each with its own process label, supplier, remark and price, added/removed in the PR editor.</li>
+        <li>The full quantity carries forward unchanged from each stage to the next; each stage can be quoted (RFQ) independently.</li>
+        <li>A part-stock/part-buy line produces two independent tracks; the user advances each source separately and either track may end at a different stage.</li>
+        <li>Stage/track labels render consistently — "1a — Stock" / "1a — Buy" on screen, 1a·S / 1a·B on PO references — and single-source lines read as plain 1a/1b/1c.</li>
+        <li>PO generation produces one Buy PO per stage-supplier; the only STOCK record is the origin draw of the stock units.</li>
       </ul>
     </div>
   </section>
@@ -861,15 +867,15 @@
 
   <!-- TSD 5 -->
   <section class="feat" id="tsd-5">
-    <div class="feat-head"><div class="fnum">5</div><div><h3>Multiple suppliers per PR item (1, 1a, 1b, 1c)</h3><p class="oneline">PR line-model extension — sub-lines share a line_no, differ by suffix + purpose.</p></div></div>
+    <div class="feat-head"><div class="fnum">5</div><div><h3>Multi-stage processing chain per PR item (1 → 1a → 1b → 1c)</h3><p class="oneline">PR line-model extension — sequential stage sub-lines, per-source track, qty carried forward.</p></div></div>
     <div class="feat-body">
       <div class="scroll"><table class="spec">
-        <tr><td class="k">Data model</td><td>Extend <code>pr_items</code> with <code>line_suffix TEXT DEFAULT ''</code> (<code>''</code> = main item, <code>'a'</code>/<code>'b'</code>/<code>'c'</code>… = sub-lines) and <code>purpose TEXT</code> (free-text process label); the display label is <code>line_no + line_suffix</code>. Sub-lines share the parent's <code>line_no</code> + <code>item_uid</code> and each is a buy row with its own supplier / qty / remark / price. Idempotent <code>ADD COLUMN IF NOT EXISTS</code> migration + startup apply. Backward compatible: existing rows are <code>line_suffix = ''</code>.</td></tr>
-        <tr><td class="k">API</td><td><code>routes/purchaseRequests.js</code>: create/update persist <code>line_suffix</code> + <code>purpose</code> and accept multiple buy rows per <code>line_no</code>; <code>getPR</code> orders by <code>line_no, line_suffix, id</code>. <code>assign_supplier</code> and RFQ (<code>request-quote</code>) already key on the row's supplier and so work per sub-line. <code>generate-pos</code> already groups by <code>supplier_id|currency</code> → one PO per supplier; the purpose is folded into the PO line description.</td></tr>
-        <tr><td class="k">Files</td><td>Backend: <code>routes/purchaseRequests.js</code> (create/update/getPR/generate-pos), <code>index.js</code> (migration), <code>db_schema.sql</code>. Frontend: <code>pages/PurchaseRequests.jsx</code> — <code>flattenItems</code>/<code>groupItemsForEdit</code> to emit/read sub-lines, the PR form ("+ Add supplier / purpose" with purpose/supplier/qty/remark per sub-line), the PR view (render 1a/1b/1c + purpose), and the RFQ panel description; <code>lib/rfqDoc.js</code> labels.</td></tr>
-        <tr><td class="k">Risk</td><td>Touches the PR data model that reservation, RFQ and PO generation all read; regression-test the full PR→PO flow. Mitigated by keeping sub-lines as ordinary buy rows, so the assign panel, RFQ grouping and PO generation flow through unchanged.</td></tr>
+        <tr><td class="k">Data model</td><td>Extend <code>pr_items</code> with <code>stage_letter TEXT DEFAULT ''</code> (<code>''</code> = origin item, <code>'a'</code>/<code>'b'</code>/<code>'c'</code>… = ordered stages), <code>process TEXT</code> (free-text stage label, e.g. "Powder coating"), and <code>source_track TEXT</code> (<code>'S'</code> = stock, <code>'B'</code> = buy; <code>NULL</code>/<code>''</code> when the line is not split). Display label = <code>line_no + stage_letter</code>, with the track shown as "— Stock/— Buy" on screen and <code>·S/·B</code> on PO refs. Stages share the parent's <code>line_no</code> + <code>item_uid</code>; each is a buy row with its own supplier / qty / remark / price. Qty carries forward (no split at a stage), so a stage's qty equals its track's carried quantity. Idempotent <code>ADD COLUMN IF NOT EXISTS</code> migration + startup apply. Backward compatible: existing rows are <code>stage_letter = ''</code>, <code>source_track = NULL</code>.</td></tr>
+        <tr><td class="k">API</td><td><code>routes/purchaseRequests.js</code>: create/update persist <code>stage_letter</code>, <code>process</code>, <code>source_track</code> and accept an <strong>ordered chain</strong> of buy rows per <code>(line_no, source_track)</code>; validate strict linearity (a/b/c with no gaps) per track. <code>getPR</code> orders by <code>line_no, source_track, stage_letter, id</code>. <code>assign_supplier</code> and RFQ (<code>request-quote</code>) already key on the row's supplier → work per stage. <code>generate-pos</code> already groups by <code>supplier_id|currency</code> → one <strong>Buy PO per stage-supplier</strong>; the process label folds into the PO line description and the stage/track label (<code>1a·S</code>) into the PO reference. Origin stock units remain the sole STOCK record.</td></tr>
+        <tr><td class="k">Files</td><td>Backend: <code>routes/purchaseRequests.js</code> (create/update/getPR/generate-pos + linearity validation), <code>index.js</code> (migration), <code>db_schema.sql</code>. Frontend: <code>pages/PurchaseRequests.jsx</code> — <code>flattenItems</code>/<code>groupItemsForEdit</code> to emit/read stage chains per track, the PR form ("+ Add next stage" per source, with process/supplier/remark per stage; qty auto-carried), the PR view (render 1a/1b/1c with track tags), and the RFQ panel; <code>lib/rfqDoc.js</code> + <code>lib/poPdf.js</code> stage/track labels on references.</td></tr>
+        <tr><td class="k">Risk</td><td>Touches the PR data model that reservation, RFQ and PO generation all read; regression-test the full PR→PO flow, especially the <strong>stock/buy split now spawning two tracks</strong> and qty carry-forward. Mitigated by keeping each stage as an ordinary buy row, so the assign panel, RFQ grouping and PO generation flow through unchanged.</td></tr>
         <tr><td class="k">Permissions</td><td>Unchanged (<code>raise_pr</code>, <code>assign_supplier</code>, <code>generate_po</code>).</td></tr>
-        <tr><td class="k">Effort</td><td><span class="tag t-high">High</span> — ~3–5 days (lower than a compare/award build, since sub-lines reuse the existing buy-row rails).</td></tr>
+        <tr><td class="k">Effort</td><td><span class="tag t-high">High</span> — ~4–6 days (two-track chain + linearity validation + label propagation to RFQ/PO refs; still reuses the existing buy-row rails).</td></tr>
       </table></div>
     </div>
   </section>
@@ -946,10 +952,10 @@
         <tr><td class="k">5</td><td>PO price editing (#4, incl. former #9)</td><td><span class="tag t-med">Medium</span></td><td>~1.5–2 days</td><td>Minor (edit window)</td></tr>
         <tr><td class="k">6</td><td>GST 9% on the PO (#8)</td><td><span class="tag t-med">Medium</span></td><td>~2–3 days</td><td>Yes — GST scope / net-gross</td></tr>
         <tr><td class="k">7</td><td>QS approval — sourcing &amp; price gates (#3)</td><td><span class="tag t-high">High</span></td><td>~5–7 days</td><td>Yes — approval granularity</td></tr>
-        <tr><td class="k">8</td><td>Multiple suppliers per item (#5)</td><td><span class="tag t-high">High</span></td><td>~3–5 days</td><td>No — model confirmed</td></tr>
+        <tr><td class="k">8</td><td>Multi-stage processing chain per item (#5)</td><td><span class="tag t-high">High</span></td><td>~4–6 days</td><td>No — model confirmed</td></tr>
         <tr><td class="k">9</td><td>Supplier price-comparison table (#7)</td><td><span class="tag t-med">Medium</span></td><td>~2 days (with #5)</td><td>Depends on #5</td></tr>
       </tbody>
-      <tfoot><tr><td></td><td class="k">Total (indicative)</td><td></td><td class="k">~16.5–22.5 days</td><td></td></tr></tfoot>
+      <tfoot><tr><td></td><td class="k">Total (indicative)</td><td></td><td class="k">~17.5–23.5 days</td><td></td></tr></tfoot>
     </table>
   </div>
 

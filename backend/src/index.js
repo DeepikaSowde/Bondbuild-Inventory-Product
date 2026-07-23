@@ -151,16 +151,24 @@ db.query(`ALTER TABLE po_approvals ADD COLUMN IF NOT EXISTS details JSONB`)
 db.query(`ALTER TABLE pr_items ADD COLUMN IF NOT EXISTS quote_requested_at TIMESTAMPTZ`)
   .catch((err) => console.error("pr_items.quote_requested_at migration:", err.message));
 
-// Supplier sub-lines (1a/1b/1c): one requested item can be routed to several
-// suppliers, each for a different processing purpose (powder coating, polishing,
-// anodising…). Sub-lines share the parent's line_no and are ordered by line_suffix
-// ('' = the main item, 'a'/'b'/'c'… = each purpose). `purpose` is the free-text
-// process label shown on the sub-line, RFQ and PO. Existing rows are all main
-// items (line_suffix = '', purpose = NULL), so this is fully backward compatible.
+// Processing chain (enhancement #5): one requested item flows through a straight
+// line of processing stages (fabrication → powder coating → anodising…), each done
+// by a supplier and each becoming its own Buy PO. Stages share the parent's line_no
+// and are ordered by line_suffix ('' = the origin item, 'a'/'b'/'c'… = each stage).
+// `purpose` is the free-text process label shown on the stage, RFQ and PO.
+//
+// A line split part-stock / part-buy runs TWO independent chains down the same
+// route; `source_track` tags which one a stage belongs to: 'S' = stock-origin,
+// 'B' = buy-origin, '' = the origin rows and any single-source (untagged) chain.
+// The unique key of a stage is (line_no, source_track, line_suffix). Existing rows
+// are all origin items (line_suffix='', purpose=NULL, source_track=''), so this is
+// fully backward compatible.
 db.query(`ALTER TABLE pr_items ADD COLUMN IF NOT EXISTS line_suffix TEXT NOT NULL DEFAULT ''`)
   .catch((err) => console.error("pr_items.line_suffix migration:", err.message));
 db.query(`ALTER TABLE pr_items ADD COLUMN IF NOT EXISTS purpose TEXT`)
   .catch((err) => console.error("pr_items.purpose migration:", err.message));
+db.query(`ALTER TABLE pr_items ADD COLUMN IF NOT EXISTS source_track TEXT NOT NULL DEFAULT ''`)
+  .catch((err) => console.error("pr_items.source_track migration:", err.message));
 
 // ── QS approval (enhancement #3): two gates ──
 // Gate 1 (PR, sourcing): new PR statuses PENDING_QS_APPROVAL / QS_APPROVED sit
