@@ -156,28 +156,58 @@ export async function exportPrPdf(pr) {
   doc.text(String(pr.pic || ""), rvX, picY, { maxWidth: rvW });
 
   // ── Items table ──
-  // A material can be stored as several rows (one per source pallet + a buy row)
-  // sharing a line_no. Group them back so the requisition prints one line per
-  // material with the total qty and the buy supplier(s).
+  // A material can be stored as several rows sharing a line_no:
+  //   • ORIGIN rows (line_suffix '') — one per source pallet + a buy row — are the
+  //     requested material. Their quantities SUM to the item's requested qty.
+  //   • STAGE rows (line_suffix 'a'/'b'/'c'…, enhancement #5) are downstream
+  //     processing steps (fabrication, powder coating…). They CARRY the quantity
+  //     forward, so they must NOT be added to the item qty — each prints on its own
+  //     row labelled 1a / 1a·S / 1a·B with its process and supplier.
   const order = [];
   const byLine = new Map();
   for (const it of items) {
     const key = it.line_no != null ? `l${it.line_no}` : `id${it.id}`;
-    if (!byLine.has(key)) { byLine.set(key, { ...it, qty: 0, _suppliers: [] }); order.push(key); }
+    if (!byLine.has(key)) { byLine.set(key, { origin: null, qty: 0, suppliers: [], stages: [] }); order.push(key); }
     const g = byLine.get(key);
-    g.qty += Number(it.qty) || 0;
-    if (it.supplier_name && !g._suppliers.includes(it.supplier_name)) g._suppliers.push(it.supplier_name);
+    if (it.line_suffix) {
+      g.stages.push(it);
+    } else {
+      if (!g.origin) g.origin = it;
+      g.qty += Number(it.qty) || 0;
+      if (it.supplier_name && !g.suppliers.includes(it.supplier_name)) g.suppliers.push(it.supplier_name);
+    }
   }
-  const grouped = order.map((k) => byLine.get(k));
-  const body = grouped.map((it, i) => [
-    i + 1,
-    it.description || "",
-    it.colour || "",
-    it.qty || "",
-    it.unit || "",
-    it._suppliers.join(", "),
-    it.remarks || "",
-  ]);
+  const body = [];
+  order.forEach((k, i) => {
+    const g = byLine.get(k);
+    const base = g.origin || g.stages[0] || {};
+    // The requested material line — origin qty only, material (buy) supplier(s).
+    body.push([
+      i + 1,
+      base.description || "",
+      base.colour || "",
+      g.qty || "",
+      base.unit || "",
+      g.suppliers.join(", "),
+      base.remarks || "",
+    ]);
+    // One row per processing stage, in track/suffix order (getPR already sorts).
+    for (const s of g.stages) {
+      const label = `${s.line_no}${s.line_suffix}${s.source_track ? `·${s.source_track}` : ""}`;
+      const desc = s.purpose
+        ? `${s.description || base.description || ""} — ${s.purpose}`
+        : (s.description || base.description || "");
+      body.push([
+        label,
+        desc,
+        s.colour || base.colour || "",
+        Number(s.qty) || "",
+        s.unit || base.unit || "",
+        s.supplier_name || "",
+        s.remarks || "",
+      ]);
+    }
+  });
   // pad with blank ruled rows to resemble the paper form
   const MIN_ROWS = 14;
   for (let i = body.length; i < MIN_ROWS; i++) body.push(["", "", "", "", "", "", ""]);
