@@ -11,7 +11,10 @@ import SupplierDirectory from "./SupplierDirectory";
 
 export default function Procurement() {
   const { user } = useAuth();
-  const [tab, setTab] = useState("pr");
+  // Factory In-charge only works with Purchase Orders — the PR and Supplier
+  // tabs are hidden for them, so default their landing tab to "po".
+  const isFic = user?.role === "Factory In-charge";
+  const [tab, setTab] = useState(isFic ? "po" : "pr");
   const [toasts, setToasts] = useState([]);
   const [perms, setPerms] = useState(null);
 
@@ -62,13 +65,13 @@ export default function Procurement() {
               : "One PO per supplier · self-collect shows supplier address · receiving closes the PO"}
           </p>
         </div>
-        <ProcurementExport />
+        <ProcurementExport includePRs={!isFic} />
       </div>
 
       <div className="mb-[22px] border-b border-[#E5E7EB]">
-        {tabBtn("pr", "Purchase requests")}
+        {!isFic && tabBtn("pr", "Purchase requests")}
         {tabBtn("po", "Purchase orders")}
-        {tabBtn("suppliers", "Supplier")}
+        {!isFic && tabBtn("suppliers", "Supplier")}
       </div>
 
       {tab === "pr" && (

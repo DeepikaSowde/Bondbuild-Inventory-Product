@@ -26,9 +26,14 @@ const dt = (v) => {
 // ISO for filenames only (slashes are illegal in filenames).
 const today = () => new Date().toISOString().slice(0, 10);
 
-// shared: pull both lists from the backend
-async function loadData() {
-  const [prs, pos] = await Promise.all([api.prs("All"), api.pos({})]);
+// shared: pull both lists from the backend. `includePRs` is false for roles with
+// no access to Purchase Requests (Factory In-charge) — they export POs only, and
+// the PR API is fenced off for them server-side, so we must not call it.
+async function loadData(includePRs = true) {
+  const [prs, pos] = await Promise.all([
+    includePRs ? api.prs("All") : Promise.resolve([]),
+    api.pos({}),
+  ]);
   return { prs: prs || [], pos: pos || [] };
 }
 
@@ -54,13 +59,13 @@ const PO_COLS = [
   ["Status", (r) => r.status],
 ];
 
-export default function ProcurementExport() {
+export default function ProcurementExport({ includePRs = true }) {
   const [busy, setBusy] = useState("");
 
   const exportExcel = async () => {
     setBusy("excel");
     try {
-      const { prs, pos } = await loadData();
+      const { prs, pos } = await loadData(includePRs);
       const wb = new ExcelJS.Workbook();
       wb.creator = "InventoryOpz";
       wb.created = new Date();
@@ -125,7 +130,8 @@ export default function ProcurementExport() {
         return ws;
       };
 
-      buildSheet("Purchase Requests", `Purchase Requests (${prs.length})`, PR_COLS, prs);
+      if (includePRs)
+        buildSheet("Purchase Requests", `Purchase Requests (${prs.length})`, PR_COLS, prs);
       buildSheet("Purchase Orders", `Purchase Orders (${pos.length})`, PO_COLS, pos);
 
       // download
@@ -147,7 +153,7 @@ export default function ProcurementExport() {
   const exportPDF = async () => {
     setBusy("pdf");
     try {
-      const { prs, pos } = await loadData();
+      const { prs, pos } = await loadData(includePRs);
       const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
       const pageW = doc.internal.pageSize.getWidth();
 
@@ -160,21 +166,24 @@ export default function ProcurementExport() {
       doc.text(`Generated: ${today()}`, pageW - 40, 56, { align: "right" });
       doc.setTextColor(0);
 
-      // PR table
-      doc.setFontSize(12); doc.setFont(undefined, "bold");
-      doc.text(`Purchase Requests (${prs.length})`, 40, 80);
-      autoTable(doc, {
-        startY: 88,
-        head: [PR_COLS.map(([h]) => h)],
-        body: prs.map((r) => PR_COLS.map(([, f]) => f(r))),
-        styles: { fontSize: 8, cellPadding: 4 },
-        headStyles: { fillColor: [99, 102, 241], textColor: 255 },
-        alternateRowStyles: { fillColor: [245, 245, 255] },
-        margin: { left: 40, right: 40 },
-      });
+      // PR table (omitted for roles without PR access — see loadData)
+      let afterPR = 80;
+      if (includePRs) {
+        doc.setFontSize(12); doc.setFont(undefined, "bold");
+        doc.text(`Purchase Requests (${prs.length})`, 40, 80);
+        autoTable(doc, {
+          startY: 88,
+          head: [PR_COLS.map(([h]) => h)],
+          body: prs.map((r) => PR_COLS.map(([, f]) => f(r))),
+          styles: { fontSize: 8, cellPadding: 4 },
+          headStyles: { fillColor: [99, 102, 241], textColor: 255 },
+          alternateRowStyles: { fillColor: [245, 245, 255] },
+          margin: { left: 40, right: 40 },
+        });
+        afterPR = doc.lastAutoTable.finalY + 24;
+      }
 
-      // PO table (below PR table)
-      const afterPR = doc.lastAutoTable.finalY + 24;
+      // PO table (below PR table, or directly under the header when PRs are omitted)
       doc.setFontSize(12); doc.setFont(undefined, "bold");
       doc.text(`Purchase Orders (${pos.length})`, 40, afterPR);
       autoTable(doc, {

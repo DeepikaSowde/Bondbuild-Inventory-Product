@@ -54,4 +54,17 @@ const roles =
     next();
   };
 
-module.exports = { protect, adminOnly, roles };
+// Inverse of `roles`: allow everyone EXCEPT the listed roles. Used to fence a
+// role out of a whole feature area (e.g. the Factory In-charge has no business in
+// Purchase Requests or the Supplier directory) without having to enumerate every
+// role that IS allowed.
+const denyRoles =
+  (...blockedRoles) =>
+  (req, res, next) => {
+    if (blockedRoles.includes(req.user?.role)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+    next();
+  };
+
+module.exports = { protect, adminOnly, roles, denyRoles };

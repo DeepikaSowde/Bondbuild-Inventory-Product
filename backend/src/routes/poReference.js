@@ -4,7 +4,12 @@
 // Uses your existing db (../config/db) and auth (../middleware/auth).
 const express = require("express");
 const db = require("../config/db");
-const { protect, roles } = require("../middleware/auth");
+const { protect, roles, denyRoles } = require("../middleware/auth");
+
+// The Supplier directory is hidden from the Factory In-charge in the UI; fence the
+// underlying API off too. Only the /suppliers routes below get this — the rest of
+// this router (po-projects, notifications) is reference data the FIC still needs.
+const noFic = denyRoles("Factory In-charge");
 
 const router = express.Router();
 const ok = (res, data, extra = {}) => res.json({ success: true, data, ...extra });
@@ -47,7 +52,7 @@ router.post("/po-projects", protect, roles("Drafter", "Purchaser", "Admin"), asy
 });
 
 // ── Suppliers (PR/PO owns these) ──
-router.get("/suppliers", protect, async (_req, res) => {
+router.get("/suppliers", protect, noFic, async (_req, res) => {
   try {
     const { rows } = await db.query(
       "SELECT * FROM po_suppliers WHERE is_active = TRUE ORDER BY name"
@@ -56,7 +61,7 @@ router.get("/suppliers", protect, async (_req, res) => {
   } catch (e) { fail(res, 500, e.message); }
 });
 
-router.post("/suppliers", protect, async (req, res) => {
+router.post("/suppliers", protect, noFic, async (req, res) => {
   const { name, type, contact_person, phone, email, address, fax } = req.body || {};
   if (!name) return fail(res, 400, "Supplier name is required");
   try {
@@ -71,7 +76,7 @@ router.post("/suppliers", protect, async (req, res) => {
   }
 });
 
-router.put("/suppliers/:id", protect, async (req, res) => {
+router.put("/suppliers/:id", protect, noFic, async (req, res) => {
   const { name, type, contact_person, phone, email, address, fax } = req.body || {};
   if (!name) return fail(res, 400, "Supplier name is required");
   try {
@@ -88,7 +93,7 @@ router.put("/suppliers/:id", protect, async (req, res) => {
   }
 });
 
-router.delete("/suppliers/:id", protect, async (req, res) => {
+router.delete("/suppliers/:id", protect, noFic, async (req, res) => {
   try {
     const { rows } = await db.query(
       "UPDATE po_suppliers SET is_active=FALSE, updated_at=NOW() WHERE id=$1 AND is_active=TRUE RETURNING id",
