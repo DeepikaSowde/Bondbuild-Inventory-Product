@@ -1616,8 +1616,10 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
 // ── Request for Quotation panel ─────────────────────────────────────────────
 // Groups the PR's buy lines by supplier (one RFQ = one supplier). Each group can
 // export a Quotation Request (PDF / Excel, blank price column) and be marked as
-// "requested" — which is the gate that unlocks Generate Buy PO. A supplier line
-// with no supplier assigned yet is listed but can't be quoted.
+// "requested" — which is the gate that unlocks Generate Buy PO. Buy lines with no
+// supplier chosen yet are collected into a single "supplier to be selected" group
+// so an open RFQ can go out before a supplier is picked (the supplier is still
+// required later, at Generate Buy PO).
 function RfqPanel({ pr, user, items, suppliers, canEditBuy, busy, act, notify }) {
   const buyItems = items.filter((it) => Number(it.buy_qty) > 0);
   // Once the Buy PO exists the RFQ step is done — the panel is only for the pre-PO stage.
@@ -1630,9 +1632,17 @@ function RfqPanel({ pr, user, items, suppliers, canEditBuy, busy, act, notify })
     (groups[k] ||= { supplier_id: it.supplier_id, supplier_name: it.supplier_name, currency: it.currency || "SGD", items: [] }).items.push(it);
   }
   const groupList = Object.values(groups);
-  const unassignedCount = buyItems.filter((it) => !it.supplier_id).length;
+  // The not-yet-assigned buy lines become one "TBD" group. supplier_name is left
+  // blank so the RFQ document's supplier block prints empty for the buyer to fill;
+  // `label` drives the on-screen row, `noSupplier` drives the request call.
+  const unassignedItems = buyItems.filter((it) => !it.supplier_id);
+  const unassignedGroup = unassignedItems.length ? {
+    supplier_id: null, supplier_name: "", label: "Supplier to be selected",
+    currency: unassignedItems[0].currency || "SGD", items: unassignedItems, noSupplier: true,
+  } : null;
+  const renderGroups = [...groupList, ...(unassignedGroup ? [unassignedGroup] : [])];
   const isRequested = (g) => g.items.every((it) => it.quote_requested_at);
-  const allRequested = groupList.length > 0 && groupList.every(isRequested);
+  const allRequested = renderGroups.length > 0 && renderGroups.every(isRequested);
 
   // Persist any unsaved supplier/price edits before hitting the server (mirrors the
   // Generate-PO flow), so request-quote sees the assignment the user just made.
@@ -1660,38 +1670,38 @@ function RfqPanel({ pr, user, items, suppliers, canEditBuy, busy, act, notify })
 
   const requestOne = (g) => act(async () => {
     if (canEditBuy) await saveAssign();
-    await api.requestQuote(pr.pr_no, { supplierId: g.supplier_id });
+    await api.requestQuote(pr.pr_no, g.noSupplier ? { noSupplier: true } : { supplierId: g.supplier_id });
     await exportPdf(g); // hand the purchaser the document to send
-  }, `Quotation requested from ${g.supplier_name}`);
+  }, g.noSupplier ? "Quotation requested (supplier to be selected)" : `Quotation requested from ${g.supplier_name}`);
 
   const requestAll = () => act(async () => {
     if (canEditBuy) await saveAssign();
     await api.requestQuote(pr.pr_no, { all: true });
-    for (const g of groupList) await exportPdf(g); // one form per supplier
-  }, `Quotation requested from ${groupList.length} supplier(s)`);
+    for (const g of renderGroups) await exportPdf(g); // one form per group (incl. the TBD group)
+  }, `Quotation requested for ${renderGroups.length} group(s)`);
 
   return (
     <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <span className="text-[14px] font-extrabold text-[#1E1B4B]">📄 Request for Quotation</span>
-        {groupList.length > 1 && (
+        {renderGroups.length > 1 && (
           <Btn variant="soft" small disabled={busy || allRequested} onClick={requestAll}
-            title={allRequested ? "All suppliers already requested" : "Generate every supplier's form and mark all as requested"}>
+            title={allRequested ? "All groups already requested" : "Generate every group's form and mark all as requested"}>
             Request all quotes
           </Btn>
         )}
       </div>
 
-      {groupList.length === 0 ? (
-        <div className="text-[12.5px] text-[#9CA3AF]">Assign a supplier to the buy items above to request quotations.</div>
+      {renderGroups.length === 0 ? (
+        <div className="text-[12.5px] text-[#9CA3AF]">No buy items to request quotations for.</div>
       ) : (
         <div className="grid gap-2">
-          {groupList.map((g) => {
+          {renderGroups.map((g) => {
             const req = isRequested(g);
             return (
-              <div key={g.supplier_id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2">
+              <div key={g.supplier_id ?? "tbd"} className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2">
                 <div className="mr-auto min-w-[180px]">
-                  <div className="text-[13.5px] font-semibold text-[#374151]">{g.supplier_name || "—"}</div>
+                  <div className={`text-[13.5px] font-semibold ${g.noSupplier ? "italic text-[#B45309]" : "text-[#374151]"}`}>{g.supplier_name || g.label || "—"}</div>
                   <div className="text-[11px] text-[#9CA3AF]">{g.items.length} item{g.items.length > 1 ? "s" : ""} · {g.currency}</div>
                 </div>
                 {req
@@ -1700,14 +1710,16 @@ function RfqPanel({ pr, user, items, suppliers, canEditBuy, busy, act, notify })
                 <Btn variant="ghost" small disabled={busy} onClick={() => exportExcel(g)}>⬇ Excel</Btn>
                 <Btn variant="ghost" small disabled={busy} onClick={() => exportPdf(g)}>⬇ PDF</Btn>
                 <Btn variant={req ? "soft" : undefined} small disabled={busy} onClick={() => requestOne(g)}
-                  title={req ? "Re-send / re-export this supplier's quotation request" : "Mark quote requested and download the form to send"}>
+                  title={req ? "Re-send / re-export this quotation request"
+                    : g.noSupplier ? "Send an open RFQ before a supplier is chosen (a supplier is still needed before the PO)"
+                    : "Mark quote requested and download the form to send"}>
                   {req ? "Re-request" : "Request Quote"}
                 </Btn>
               </div>
             );
           })}
-          {unassignedCount > 0 && (
-            <div className="text-[11.5px] text-[#B45309]">{unassignedCount} buy item(s) still need a supplier before you can request a quote or generate the PO.</div>
+          {unassignedItems.length > 0 && (
+            <div className="text-[11.5px] text-[#B45309]">{unassignedItems.length} buy item(s) still need a supplier assigned before the Buy PO can be generated.</div>
           )}
         </div>
       )}

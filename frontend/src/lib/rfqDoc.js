@@ -32,7 +32,7 @@ const fmtDate = (v) => {
 const todayStr = () => fmtDate(new Date());
 // RFQ ref: PR number + a supplier tag, safe for filenames (no slashes).
 const safe = (s) => String(s || "").replace(/[/\\:*?"<>|]+/g, "-").replace(/\s+/g, "_");
-const rfqRef = (g) => `RFQ-${safe(g.pr_no)}-${safe(g.supplier?.name || g.supplier_name || "SUP")}`;
+const rfqRef = (g) => `RFQ-${safe(g.pr_no)}-${safe(g.supplier?.name || g.supplier_name || "TBD")}`;
 
 async function loadImage(path) {
   try {

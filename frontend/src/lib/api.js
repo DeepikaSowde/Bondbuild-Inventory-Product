@@ -40,9 +40,11 @@ export const api = {
   rejectPR: (prNo, type, reason) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/reject`, { type, reason })),
   assignItems: (prNo, items) => data(axiosClient.put(`/purchase-requests/${enc(prNo)}/items`, { items })),
   sendToFic: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/send-to-fic`)),
-  // Request for Quotation: pass { supplierId } for one supplier, or { all: true } for every buy supplier.
-  requestQuote: (prNo, { supplierId, all } = {}) =>
-    data(axiosClient.post(`/purchase-requests/${enc(prNo)}/request-quote`, all ? { all: true } : { supplier_id: supplierId })),
+  // Request for Quotation: { supplierId } for one supplier, { noSupplier: true } for the
+  // not-yet-assigned buy lines, or { all: true } for every buy line.
+  requestQuote: (prNo, { supplierId, all, noSupplier } = {}) =>
+    data(axiosClient.post(`/purchase-requests/${enc(prNo)}/request-quote`,
+      all ? { all: true } : noSupplier ? { noSupplier: true } : { supplier_id: supplierId })),
   generatePOs: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/generate-pos`)),
   // QS approval — Gate 1 (sourcing, on the PR)
   submitForQs: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/submit-for-qs`)),

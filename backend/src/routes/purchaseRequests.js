@@ -8,7 +8,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const db = require("../config/db");
 const spaces = require("../config/spaces");
-const { protect, roles } = require("../middleware/auth");
+const { protect, roles, denyRoles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
 const { canDo, isAllowed } = require("../utils/canDo");
 const { Email } = require("../utils/notifyEmail");
@@ -18,6 +18,10 @@ const { checkItemOneDriveUrls, validateOneDriveUrl } = require("../utils/oneDriv
 
 const router = express.Router();
 router.use(protect);
+// The Factory In-charge role has no part in the PR lifecycle — they only receive
+// STOCK POs (see routes/purchaseOrders.js). The PR tab is hidden for them in the
+// UI; this fences off the whole PR API so it can't be reached directly either.
+router.use(denyRoles("Factory In-charge"));
 
 const ok = (res, data, extra = {}) => res.json({ success: true, data, ...extra });
 const fail = (res, code, error) => res.status(code).json({ success: false, error });
@@ -543,7 +547,10 @@ router.put("/:prNo/items", canDo("assign_supplier"), async (req, res) => {
       for (const it of items) {
         // Changing the supplier (or currency) invalidates any quotation already
         // requested on this line — clear the stamp so the RFQ gate re-triggers for
-        // the new supplier. `supplier_id`/`currency` in the CASE read the row's OLD
+        // the new supplier. EXCEPTION: a line whose OLD supplier is NULL kept its
+        // stamp from an open "supplier to be selected" RFQ; naming the supplier now
+        // must NOT wipe that — the RFQ already went out, so `supplier_id IS NOT NULL`
+        // guards the reset. `supplier_id`/`currency` in the CASE read the row's OLD
         // values; $7/$8 carry the NEW values. They must be SEPARATE params from the
         // SET ($2/$6): reusing one param in both an assignment and a comparison makes
         // Postgres deduce "inconsistent types" for it and the whole statement fails.
@@ -551,7 +558,7 @@ router.put("/:prNo/items", canDo("assign_supplier"), async (req, res) => {
         await c.query(
           `UPDATE pr_items SET supplier_id=$2, supplier_name=$3, unit_price=$4, currency=$6,
              quote_requested_at = CASE
-               WHEN supplier_id IS DISTINCT FROM $7 OR currency IS DISTINCT FROM $8 THEN NULL
+               WHEN (supplier_id IS NOT NULL AND supplier_id IS DISTINCT FROM $7) OR currency IS DISTINCT FROM $8 THEN NULL
                ELSE quote_requested_at END
            WHERE id=$1 AND pr_id=$5`,
           [it.id, it.supplier_id || null, it.supplier_name, Number(it.unit_price) || 0, pr.id, cur, it.supplier_id || null, cur]
@@ -700,21 +707,35 @@ router.post("/:prNo/request-quote", canDo("assign_supplier"), async (req, res) =
     if (!["APPROVED", "PO_RAISED"].includes(pr.status))
       return fail(res, 409, `Quotations can only be requested after approval (current: ${pr.status})`);
 
-    const buyItems = pr.items.filter((it) => Number(it.buy_qty) > 0 && it.supplier_id);
-    if (!buyItems.length) return fail(res, 400, "Assign a supplier to the buy items before requesting a quotation");
+    // A supplier need not be chosen yet — an RFQ can go out to a not-yet-selected
+    // supplier (noSupplier:true stamps the buy lines still awaiting an assignment).
+    // The supplier IS still required later, at Generate Buy PO (gated in generate-pos).
+    const buyItems = pr.items.filter((it) => Number(it.buy_qty) > 0);
+    if (!buyItems.length) return fail(res, 400, "No buy items to request a quotation for");
 
     const all = !!req.body?.all;
+    const noSupplier = !!req.body?.noSupplier;
     const supplierId = req.body?.supplier_id != null ? String(req.body.supplier_id) : null;
-    if (!all && !supplierId) return fail(res, 400, "supplier_id (or all:true) is required");
+    if (!all && !noSupplier && !supplierId) return fail(res, 400, "supplier_id, noSupplier:true, or all:true is required");
 
-    const target = all ? buyItems : buyItems.filter((it) => String(it.supplier_id) === supplierId);
-    if (!target.length) return fail(res, 400, "No buy items found for that supplier");
+    const target = all ? buyItems
+      : noSupplier ? buyItems.filter((it) => !it.supplier_id)
+      : buyItems.filter((it) => String(it.supplier_id) === supplierId);
+    if (!target.length) return fail(res, 400, noSupplier ? "No unassigned buy items to quote" : "No buy items found for that supplier");
 
     const supNames = [...new Set(target.map((it) => it.supplier_name).filter(Boolean))];
+    const noteWho = all ? (supNames.join(", ") || "supplier")
+      : noSupplier ? "a not-yet-selected supplier"
+      : (supNames.join(", ") || "supplier");
     await withTransaction(async (c) => {
       if (all) {
         await c.query(
-          "UPDATE pr_items SET quote_requested_at = NOW() WHERE pr_id = $1 AND buy_qty > 0 AND supplier_id IS NOT NULL",
+          "UPDATE pr_items SET quote_requested_at = NOW() WHERE pr_id = $1 AND buy_qty > 0",
+          [pr.id]
+        );
+      } else if (noSupplier) {
+        await c.query(
+          "UPDATE pr_items SET quote_requested_at = NOW() WHERE pr_id = $1 AND buy_qty > 0 AND supplier_id IS NULL",
           [pr.id]
         );
       } else {
@@ -725,7 +746,7 @@ router.post("/:prNo/request-quote", canDo("assign_supplier"), async (req, res) =
       }
       await c.query(
         "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'REQUEST_QUOTE',$2,$2,$3,$4,$5)",
-        [pr.id, pr.status, req.user.name, req.user.role, `Quotation requested from ${supNames.join(", ") || "supplier"}`]
+        [pr.id, pr.status, req.user.name, req.user.role, `Quotation requested from ${noteWho}`]
       );
     });
     ok(res, await getPR(pr.pr_no));
