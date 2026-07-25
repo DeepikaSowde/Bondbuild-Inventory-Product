@@ -406,7 +406,8 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canQsApprove, 
         {canQsApprove && po.status === "OPEN" && po.price_status === "PENDING_QS_PRICE" && (
           <>
             <Btn variant="warning" disabled={busy} onClick={() => {
-              const reason = window.prompt("Reason for sending the price back to the Purchaser:") || "";
+              const reason = window.prompt("Reason for sending the price back to the Purchaser:");
+              if (reason === null) return; // Cancel pressed — do nothing
               act(() => api.qsSendBackPrice(po.po_no, reason), "Price sent back");
             }}>Send price back</Btn>
             <Btn disabled={busy} onClick={() => act(() => api.qsApprovePrice(po.po_no), "Price approved")}>QS Approve Price</Btn>
