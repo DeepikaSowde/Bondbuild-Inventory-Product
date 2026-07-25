@@ -181,7 +181,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
               const received = await api.receivePO(receiveTarget.po_no, receivedBy);
               notify(received.status === "CLOSED"
                 ? "Goods received — PO closed"
-                : "Goods received — PO stays open until its unit prices are entered",
+                : "Goods received",
                 received.status === "CLOSED" ? "success" : "warning");
               const fresh = await api.po(receiveTarget.po_no);
               setView(fresh);

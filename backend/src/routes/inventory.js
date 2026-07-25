@@ -351,12 +351,9 @@ router.post("/add-stock", async (req, res) => {
       [newQty, newTotal, newStatus, item_id],
     );
 
-    // Log stock movement
-    await pool.query(
-      `INSERT INTO stock_movements (item_id, movement_type, quantity, remarks, created_at)
-       VALUES ($1, 'ADD', $2, $3, NOW())`,
-      [item_id, quantity, remarks || "Stock added"],
-    );
+    // Stock movement is logged automatically by the trg_log_stock_movement
+    // trigger on inventory UPDATE (writes quantity_moved). No manual insert here,
+    // otherwise every add double-logs.
 
     console.log(`✅ Stock added: ${item_id} + ${quantity}`);
 
@@ -426,12 +423,9 @@ router.post("/remove-stock", async (req, res) => {
       [newQty, newTotal, newStatus, item_id],
     );
 
-    // Log stock movement
-    await pool.query(
-      `INSERT INTO stock_movements (item_id, movement_type, quantity, remarks, created_at)
-       VALUES ($1, 'REMOVE', $2, $3, NOW())`,
-      [item_id, quantity, remarks || "Stock removed"],
-    );
+    // Stock movement is logged automatically by the trg_log_stock_movement
+    // trigger on inventory UPDATE (writes quantity_moved). No manual insert here,
+    // otherwise every remove double-logs.
 
     console.log(`✅ Stock removed: ${item_id} - ${quantity}`);
 

@@ -1560,9 +1560,8 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
               )}
               {canEditBuy && <Btn variant="soft" disabled={busy} onClick={() => act(saveAssign, "Saved")}>Save prices</Btn>}
               {showSubmitQs && (
-                <Btn disabled={busy || !allBuyHaveSupplier || !allBuyQuoted}
-                  title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first"
-                    : !allBuyQuoted ? `Request a quotation from ${firstUnquoted?.supplier_name || "every supplier"} before submitting for QS approval` : ""}
+                <Btn disabled={busy || !allBuyHaveSupplier}
+                  title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first" : ""}
                   onClick={() => act(async () => {
                     await saveAssign();
                     await api.submitForQs(pr.pr_no);
