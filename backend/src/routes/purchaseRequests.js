@@ -507,6 +507,10 @@ router.post("/:prNo/qs-approve", canDo("qs_approve"), async (req, res) => {
       );
       await notify(c, ["Purchaser"], `QS approved: ${pr.pr_no}`,
         `Generate the Buy PO for ${pr.project_name || pr.job_no}.`, "success", pr.pr_no);
+      // Also acknowledge to the QS team so whoever submitted/watches the queue
+      // sees the PR is now handled and won't re-open it.
+      await notify(c, ["QS"], `QS approved: ${pr.pr_no}`,
+        `${req.user.name} approved the sourcing for ${pr.project_name || pr.job_no}. It has moved to the Purchaser to raise the Buy PO.`, "success", pr.pr_no);
     });
     ok(res, await getPR(pr.pr_no));
   } catch (e) { fail(res, 500, e.message); }
@@ -531,6 +535,9 @@ router.post("/:prNo/qs-send-back", canDo("qs_approve"), async (req, res) => {
       );
       await notify(c, ["Purchaser"], `QS sent back: ${pr.pr_no}`,
         reason || "Revise the sourcing and resubmit for QS approval.", "warning", pr.pr_no);
+      // Also record the send-back for the QS team's own queue.
+      await notify(c, ["QS"], `QS sent back: ${pr.pr_no}`,
+        `${req.user.name} sent ${pr.project_name || pr.job_no} back to the Purchaser${reason ? `: ${reason}` : "."}`, "warning", pr.pr_no);
     });
     ok(res, await getPR(pr.pr_no));
   } catch (e) { fail(res, 500, e.message); }

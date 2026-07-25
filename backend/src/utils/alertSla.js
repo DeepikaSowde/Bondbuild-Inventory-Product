@@ -4,7 +4,7 @@
 //
 // Fires in-app notifications (po_notifications) — and, when the Microsoft Graph
 // mail channel is switched on (MAIL_ENABLED=true), the SAME content by email —
-// for conditions across the PR → PO → delivery lifecycle: six overdue nags, a
+// for conditions across the PR → PO → delivery lifecycle: seven overdue nags, a
 // repeating "shipment dates not filled" nudge to the Purchaser, and two one-time
 // "Shipment ETD/ETA date reached" reminders to the Factory In-charge & Manager.
 //
@@ -77,6 +77,44 @@ async function rulePrApproval() {
     await insertNotification({ role: "Manager", title, body, type: "warning", refPr: pr.pr_no });
     sendSlaEmail({ toEmails: [drafter?.email, ...(await emailsForRoles(["Manager"]))],
       subject: title, title: "Purchase request awaiting approval", lines: [body], prNo: pr.pr_no });
+    await stampLedger(rule, "PR", pr.id);
+  }
+  return rows.length;
+}
+
+// PR submitted to QS but not yet approved/sent-back. The QS gate is a quick
+// sourcing sign-off, so it nags sooner (3 days) than the Manager gate (7). The
+// wait is measured from the SUBMIT_QS audit row, not the PR's raise date, so a
+// PR bounced back and re-submitted starts a fresh clock.
+async function rulePrQsApproval() {
+  const rule = "PR_QS_APPROVAL_OVERDUE", interval = 3;
+  const { rows } = await db.query(
+    `SELECT p.id, p.pr_no, p.project_name, p.job_no, s.submitted_at
+       FROM purchase_requests p
+       JOIN LATERAL (
+         SELECT MAX(a.created_at) AS submitted_at
+           FROM pr_approvals a
+          WHERE a.pr_id = p.id AND a.action = 'SUBMIT_QS'
+       ) s ON TRUE
+       LEFT JOIN alert_ledger l
+         ON l.rule = $1 AND l.entity_type = 'PR' AND l.entity_id = p.id
+      WHERE p.status = 'PENDING_QS_APPROVAL'
+        AND s.submitted_at IS NOT NULL
+        AND s.submitted_at <= NOW() - make_interval(days => $2)
+        AND (l.last_fired_at IS NULL OR l.last_fired_at <= NOW() - make_interval(days => $2))`,
+    [rule, interval]
+  );
+  for (const pr of rows) {
+    const n = daysBetween(pr.submitted_at);
+    const proj = pr.project_name || pr.job_no;
+    const title = `PR ${pr.pr_no} still awaiting QS approval (${n} days)`;
+    const body = `PR ${pr.pr_no} (${proj}) has been pending QS approval for ${n} days. QS: please review the sourcing and approve or send it back. This reminder repeats every ${interval} days until actioned.`;
+    // Any QS can clear it → whole-role broadcast (no single assignee), like
+    // PO_INITIATION. Manager also gets it for oversight/escalation.
+    await insertNotification({ role: "QS", title, body, type: "warning", refPr: pr.pr_no });
+    await insertNotification({ role: "Manager", title, body, type: "warning", refPr: pr.pr_no });
+    sendSlaEmail({ toEmails: await emailsForRoles(["QS", "Manager"]),
+      subject: title, title: "Purchase request awaiting QS approval", lines: [body], prNo: pr.pr_no });
     await stampLedger(rule, "PR", pr.id);
   }
   return rows.length;
@@ -311,6 +349,7 @@ async function ruleShipmentEtaDue() {
 
 const RULES = [
   ["PR_APPROVAL_OVERDUE", rulePrApproval],
+  ["PR_QS_APPROVAL_OVERDUE", rulePrQsApproval],
   ["PO_INITIATION_OVERDUE", rulePoInitiation],
   ["PO_BUY_NO_MOVEMENT", ruleBuyNoMovement],
   ["PO_BUY_NOT_RECEIVED", ruleBuyNotReceived],
