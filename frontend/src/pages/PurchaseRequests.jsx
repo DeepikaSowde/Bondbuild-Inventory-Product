@@ -1570,7 +1570,8 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
               {showQsReview && (
                 <>
                   <Btn variant="warning" disabled={busy} onClick={() => {
-                    const reason = window.prompt("Reason for sending back to the Purchaser:") || "";
+                    const reason = window.prompt("Reason for sending back to the Purchaser:");
+                    if (reason === null) return; // Cancel pressed — do nothing
                     act(() => api.qsSendBackPr(pr.pr_no, reason), "Sent back to Purchaser");
                   }}>Send back</Btn>
                   <Btn disabled={busy} onClick={() => act(() => api.qsApprovePr(pr.pr_no),
