@@ -1530,9 +1530,8 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
           const buyItems = items.filter((it) => Number(it.buy_qty) > 0);
           const allBuyHaveSupplier = buyItems.every((it) => it.supplier_id);
           const allBuyHavePrice = buyItems.every((it) => Number(it.unit_price) > 0);
-          // A quotation must be requested from every buy supplier before the PO can be raised.
-          const allBuyQuoted = buyItems.every((it) => it.quote_requested_at);
-          const firstUnquoted = buyItems.find((it) => it.supplier_id && !it.quote_requested_at);
+          // Requesting a quotation is optional — the RFQ panel stays available, but a
+          // missing quote no longer blocks Generate Buy PO. A supplier is still required.
           const saveAssign = async () => api.assignItems(pr.pr_no, buyItems.map((it) => ({ id: it.id, supplier_id: it.supplier_id || null, supplier_name: it.supplier_name, unit_price: Number(it.unit_price) || 0, currency: it.currency || "SGD" })));
           // Each half is "done" once its own PO exists. A PR with both halves needs
           // BOTH actions — the buttons below only disappear once each is truly done.
@@ -1588,9 +1587,8 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
                 }}>Send stock to FIC</Btn>
               )}
               {showGenerate && (
-                <Btn disabled={busy || !allBuyHaveSupplier || !allBuyQuoted}
+                <Btn disabled={busy || !allBuyHaveSupplier}
                   title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first"
-                    : !allBuyQuoted ? `Request a quotation from ${firstUnquoted?.supplier_name || "every supplier"} before generating the PO`
                     : !allBuyHavePrice ? "Prices are still blank — the PO will be raised awaiting pricing" : ""}
                   onClick={() => {
                     if (stockPending && !window.confirm("The Buy PO will be created.\n\nYou still have stock items awaiting the Factory In-charge — remember to click \"Send stock to FIC\" as well, or the Stock PO won't be created.\n\nContinue?")) return;
@@ -1616,10 +1614,10 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
 // ── Request for Quotation panel ─────────────────────────────────────────────
 // Groups the PR's buy lines by supplier (one RFQ = one supplier). Each group can
 // export a Quotation Request (PDF / Excel, blank price column) and be marked as
-// "requested" — which is the gate that unlocks Generate Buy PO. Buy lines with no
-// supplier chosen yet are collected into a single "supplier to be selected" group
-// so an open RFQ can go out before a supplier is picked (the supplier is still
-// required later, at Generate Buy PO).
+// "requested". Requesting a quote is optional — it no longer gates Generate Buy PO,
+// it just records that the RFQ went out. Buy lines with no supplier chosen yet are
+// collected into a single "supplier to be selected" group so an open RFQ can go out
+// before a supplier is picked (a supplier is still required at Generate Buy PO).
 function RfqPanel({ pr, user, items, suppliers, canEditBuy, busy, act, notify }) {
   const buyItems = items.filter((it) => Number(it.buy_qty) > 0);
   // Once the Buy PO exists the RFQ step is done — the panel is only for the pre-PO stage.

@@ -699,7 +699,8 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
 // ── Request for Quotation (one supplier, or all) ──
 // Stamps the supplier's buy lines with quote_requested_at. The PDF/Excel RFQ
 // document itself is built on the client; this just records that the request went
-// out, which unlocks Generate Buy PO (gated below). Buy-only: stock goes to the FIC.
+// out. Requesting a quote is optional and no longer gates Generate Buy PO — it's
+// kept for record-keeping / re-export. Buy-only: stock goes to the FIC.
 router.post("/:prNo/request-quote", canDo("assign_supplier"), async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
@@ -770,12 +771,12 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
     if (!buyItems.length) return fail(res, 400, "No buy-quantity items on this PR");
     for (const it of buyItems) {
       if (!it.supplier_id) return fail(res, 400, `Assign a supplier to "${it.description}" first`);
-      if (!it.quote_requested_at) return fail(res, 400, `Request a quotation from ${it.supplier_name || "the supplier"} before generating the PO`);
-      // Unit price is NOT required here. A PO may be raised before the supplier
+      // Requesting a quotation is optional — an outstanding (or skipped) RFQ no longer
+      // blocks PO generation. Only a supplier is required here.
+      // Unit price is NOT required either. A PO may be raised before the supplier
       // has come back with prices; it lands OPEN · awaiting pricing (amount 0)
       // and the Purchaser fills the prices in on the PO itself
-      // (PUT /purchase-orders/:poNo/prices). The quotation gate above still
-      // stands — the RFQ must have gone out, only the reply may be outstanding.
+      // (PUT /purchase-orders/:poNo/prices).
     }
 
     // don't create buy POs twice
