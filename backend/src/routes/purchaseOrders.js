@@ -97,21 +97,26 @@ router.post("/", canDo("generate_po"), async (req, res) => {
       const prLoc = f.pr_no
         ? (await c.query("SELECT location FROM purchase_requests WHERE pr_no = $1", [f.pr_no])).rows[0]?.location
         : null;
+      // Site location follows the parent PR when there is one; the overall remark
+      // does too, so a manual PO raised against a PR carries the PR's note.
+      const prRemarks = f.pr_no
+        ? (await c.query("SELECT remarks FROM purchase_requests WHERE pr_no = $1", [f.pr_no])).rows[0]?.remarks
+        : null;
       const po = await c.query(
         `INSERT INTO purchase_orders
          (po_no, job_no, pr_no, project_name, location, supplier_id, supplier_name, supplier_type,
-          requested_by, prepared_by, required_date, delivery_method, delivery_address, amount)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+          requested_by, prepared_by, required_date, delivery_method, delivery_address, amount, remarks)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
         [poNo, f.job_no, f.pr_no, f.project_name, f.location || prLoc || null,
          f.supplier_id, sup.rows[0]?.name,
          sup.rows[0]?.type || "Local", f.requested_by, req.user.name, f.required_date,
-         f.delivery_method, deliveryAddr, amount]
+         f.delivery_method, deliveryAddr, amount, f.remarks ?? prRemarks ?? null]
       );
       let line = 1;
       for (const i of items)
         await c.query(
-          "INSERT INTO po_items (po_id, line_no, profile_code, description, qty, unit, unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-          [po.rows[0].id, line++, i.profile_code, i.description.trim(), Number(i.qty) || 0, i.unit || "pcs", Number(i.unit_price) || 0]
+          "INSERT INTO po_items (po_id, line_no, profile_code, description, colour, qty, unit, unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+          [po.rows[0].id, line++, i.profile_code, i.description.trim(), i.colour || null, Number(i.qty) || 0, i.unit || "pcs", Number(i.unit_price) || 0]
         );
       // A manual PO usually has no parent PR — then there's no approving manager
       // and no drafter to address, so poRaised() broadcasts to Managers instead.

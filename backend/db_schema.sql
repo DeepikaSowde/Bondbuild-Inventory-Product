@@ -292,6 +292,9 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   goods_received_date DATE,
   received_by      TEXT,
   received_notes   TEXT,
+  -- Header remark carried from the PR's overall Remark at PO generation. One PR
+  -- may raise several POs (per supplier + a Stock PO); each carries the same note.
+  remarks          TEXT,
   po_date          TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_po_status  ON purchase_orders(status);
@@ -305,6 +308,7 @@ CREATE TABLE IF NOT EXISTS po_items (
   line_no      INTEGER NOT NULL DEFAULT 1,
   profile_code TEXT,
   description  TEXT    NOT NULL,
+  colour       TEXT,   -- carried from pr_items.colour at PO generation
   qty          NUMERIC NOT NULL DEFAULT 0,
   unit         TEXT    NOT NULL DEFAULT 'pcs',
   unit_price   NUMERIC NOT NULL DEFAULT 0
