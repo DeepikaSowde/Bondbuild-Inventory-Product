@@ -147,6 +147,12 @@ export async function exportPoPdf(po, opts = {}) {
   // Site/delivery location carried from the PR. Omitted entirely when absent —
   // a bare "LOCATION:" on a document going to a supplier reads as a defect.
   if (po.location) { doc.text(`LOCATION: ${po.location}`, M, py, { maxWidth: W - M * 2 }); py += 15; }
+  // Overall remark carried from the PR header. Omitted entirely when absent.
+  if (po.remarks) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(0);
+    doc.splitTextToSize(`REMARK: ${po.remarks}`, W - M * 2).forEach((ln) => { doc.text(ln, M, py); py += 13; });
+    py += 2;
+  }
   if (!isStock) {
     doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(80);
     doc.text("With reference to the above, we would like to confirm the order as follow :-", M, py);

@@ -632,7 +632,7 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
       // Create the STOCK PO(s) — one per source pallet/location, value = inventory price.
       // Only if not already created (re-send safe).
       const fresh = await c.query(
-        `SELECT id, profile_code, description, unit, stock_qty, stock_location,
+        `SELECT id, profile_code, description, colour, unit, stock_qty, stock_location,
                 COALESCE(stock_unit_price,0) AS stock_unit_price
          FROM pr_items WHERE pr_id = $1 AND stock_qty > 0`, [pr.id]
       );
@@ -655,16 +655,16 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
             // from); pr.location is the delivery/site location the goods are for.
             `INSERT INTO purchase_orders
              (po_no, job_no, pr_id, pr_no, project_name, po_type, source_location, location,
-              supplier_id, supplier_name, supplier_type, requested_by, prepared_by, amount)
-             VALUES ($1,$2,$3,$4,$5,'STOCK',$6,$7, NULL, NULL, 'Local', $8, $9, $10) RETURNING id`,
+              supplier_id, supplier_name, supplier_type, requested_by, prepared_by, amount, remarks)
+             VALUES ($1,$2,$3,$4,$5,'STOCK',$6,$7, NULL, NULL, 'Local', $8, $9, $10, $11) RETURNING id`,
             [poNo, pr.job_no, pr.id, pr.pr_no, pr.project_name, location, pr.location || null,
-             pr.requested_by, req.user.name, amount]
+             pr.requested_by, req.user.name, amount, pr.remarks || null]
           );
           let ln = 1;
           for (const l of lines)
             await c.query(
-              "INSERT INTO po_items (po_id, line_no, profile_code, description, qty, unit, unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-              [po.rows[0].id, ln++, l.profile_code, l.description, Number(l.stock_qty), l.unit, Number(l.stock_unit_price)]
+              "INSERT INTO po_items (po_id, line_no, profile_code, description, colour, qty, unit, unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+              [po.rows[0].id, ln++, l.profile_code, l.description, l.colour || null, Number(l.stock_qty), l.unit, Number(l.stock_unit_price)]
             );
           await c.query(
             "INSERT INTO po_approvals (po_id, action, to_status, actor, actor_role) VALUES ($1,'CREATE_STOCK','OPEN',$2,$3)",
@@ -821,11 +821,12 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
           `INSERT INTO purchase_orders
            (po_no, job_no, pr_id, pr_no, project_name, location, supplier_id, supplier_name,
             supplier_type, requested_by, prepared_by, amount, currency,
-            price_status, price_approved_by, price_approved_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+            price_status, price_approved_by, price_approved_at, remarks)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
           [poNo, pr.job_no, pr.id, pr.pr_no, pr.project_name, pr.location || null, g.supplier_id,
            g.supplier_name, supType, pr.requested_by, req.user.name, amount, g.currency,
-           priceStatus, groupPriced ? pr.qs_approved_by : null, groupPriced ? pr.qs_approved_at : null]
+           priceStatus, groupPriced ? pr.qs_approved_by : null, groupPriced ? pr.qs_approved_at : null,
+           pr.remarks || null]
         );
         let line = 1;
         for (const it of g.items) {
