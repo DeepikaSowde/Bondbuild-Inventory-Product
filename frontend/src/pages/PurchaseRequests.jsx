@@ -884,7 +884,7 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
               <div className="grid grid-cols-[90px_90px_1fr_110px] gap-2.5 px-3 pb-2 pt-1">
                 <div><label className={lbl}>Total Qty</label><input type="number" min="0" className={inp} value={it.qty} onKeyDown={(e) => e.key === "-" && e.preventDefault()} onChange={(e) => { const v = e.target.value; if (v === "" || Number(v) >= 0) setItem(i, "qty", v); }} placeholder="0" /></div>
                 <div><label className={lbl}>Unit</label>
-                  <select className={inp} value={it.unit} onChange={(e) => setItem(i, "unit", e.target.value)}>{["pcs", "m", "set", "lot", "kg"].map((u) => <option key={u}>{u}</option>)}</select>
+                  <select className={inp} value={it.unit} onChange={(e) => setItem(i, "unit", e.target.value)}>{["pcs", "m", "set", "lot", "kg", "box"].map((u) => <option key={u}>{u}</option>)}</select>
                 </div>
                 <div><label className={lbl}>Supplier {buyQty > 0 ? <span className="text-[#DC2626]">*required</span> : <span className="text-[#D97706]">(for buy qty)</span>}</label>
                   <select className={`${inp} ${buyQty > 0 && !it.supplier_id ? "!border-[#DC2626]" : ""}`} value={it.supplier_id} onChange={(e) => { const s = suppliers.find((s) => String(s.id) === e.target.value); setItem(i, "supplier_id", e.target.value); setItem(i, "supplier_name", s?.name || ""); if (s) setItem(i, "supplier_type", s.type); }}>
