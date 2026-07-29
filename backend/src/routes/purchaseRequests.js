@@ -840,8 +840,8 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
           let desc = it.purpose ? `${it.description} — ${it.purpose}` : it.description;
           if (stageRef) desc = `${desc} (${stageRef})`;
           await c.query(
-            "INSERT INTO po_items (po_id, line_no, profile_code, description, qty, unit, unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-            [po.rows[0].id, line++, it.profile_code, desc, Number(it.buy_qty), it.unit, Number(it.unit_price) || 0]
+            "INSERT INTO po_items (po_id, line_no, profile_code, description, colour, qty, unit, unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+            [po.rows[0].id, line++, it.profile_code, desc, it.colour || null, Number(it.buy_qty), it.unit, Number(it.unit_price) || 0]
           );
         }
         await c.query(
