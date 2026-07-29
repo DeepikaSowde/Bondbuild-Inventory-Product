@@ -289,7 +289,7 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canQsApprove, 
 
       <table className="mb-4 w-full border-collapse text-[13px]">
         <thead>
-          <tr>{["Code", "Description", "Qty", "Unit", ...(canSeePrice ? ["Unit price"] : []), ...(canSeeAmount ? ["Amount"] : [])].map((h, i) => (
+          <tr>{["Code", "Description", "Colour", "Qty", "Unit", ...(canSeePrice ? ["Unit price"] : []), ...(canSeeAmount ? ["Amount"] : [])].map((h, i) => (
             <th key={i} className="border-b border-[#E5E7EB] px-2.5 py-2 text-left text-[10px] font-bold uppercase text-[#9CA3AF]">{h}</th>
           ))}</tr>
         </thead>
@@ -297,10 +297,8 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canQsApprove, 
           {po.items.map((it) => (
             <tr key={it.id}>
               <td className="border-b border-[#F3F4F6] px-2.5 py-2 font-mono">{it.profile_code || "—"}</td>
-              <td className="border-b border-[#F3F4F6] px-2.5 py-2">
-                {it.description}
-                {it.colour && <div className="text-[12px] font-semibold uppercase text-[#C81E1E]">{it.colour}</div>}
-              </td>
+              <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.description}</td>
+              <td className="border-b border-[#F3F4F6] px-2.5 py-2 font-semibold uppercase text-[#C81E1E]">{it.colour || "—"}</td>
               <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.qty}</td>
               <td className="border-b border-[#F3F4F6] px-2.5 py-2">{it.unit}</td>
               {canSeePrice && (
@@ -322,7 +320,7 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canQsApprove, 
           ))}
         </tbody>
         {canSeeAmount && (() => {
-          const span = 4 + (canSeePrice ? 1 : 0);
+          const span = 5 + (canSeePrice ? 1 : 0);
           const lbl = "px-2.5 py-2.5 text-right font-bold text-[#6B7280]";
           // Nothing priced yet — a 0.00 total would read as "free", so show a dash.
           if (Number(po.amount || 0) === 0 && unpriced) return (
