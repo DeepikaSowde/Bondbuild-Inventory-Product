@@ -164,25 +164,27 @@ export async function exportPoPdf(po, opts = {}) {
   const colours = items.map((it) => (it.colour ? String(it.colour).toUpperCase() : ""));
   const sym = CUR_SYM[po.currency] || po.currency || "S$";
   const head = showPrice
-    ? [["Item", "Descriptions", "Qty", "Unit", `Rate (${sym})`, `Price (${sym})`]]
-    : [["Item", "Descriptions", "Qty", "Unit"]];
-  // A PO may be raised before the supplier has quoted. An unpriced line prints
-  // blank Rate / Price cells rather than "0.00", which would read as free.
+    ? [["Item", "Descriptions", "Colour", "Qty", "Unit", `Rate (${sym})`, `Price (${sym})`]]
+    : [["Item", "Descriptions", "Colour", "Qty", "Unit"]];
+  // Colour is its own column (drawn in red via columnStyles). A PO may be raised
+  // before the supplier has quoted — an unpriced line prints blank Rate / Price
+  // cells rather than "0.00", which would read as free.
   const body = items.map((it, i) => {
-    const base = [i + 1, descs[i] + (colours[i] ? `\n${colours[i]}` : ""), it.qty ?? "", it.unit || ""];
+    const base = [i + 1, descs[i], colours[i], it.qty ?? "", it.unit || ""];
     if (!showPrice) return base;
     return Number(it.unit_price) > 0
       ? [...base, num2(it.unit_price), num2((Number(it.qty) || 0) * (Number(it.unit_price) || 0))]
       : [...base, "", ""];
   });
+  const RED = [200, 30, 30];
   const colStyles = showPrice
-    ? { 0: { cellWidth: 34, halign: "center" }, 1: { cellWidth: 230, valign: "top" }, 2: { cellWidth: 40, halign: "center" }, 3: { cellWidth: 45, halign: "center" }, 4: { cellWidth: 72, halign: "right" }, 5: { cellWidth: 93, halign: "right" } }
-    : { 0: { cellWidth: 40, halign: "center" }, 1: { cellWidth: 359, valign: "top" }, 2: { cellWidth: 55, halign: "center" }, 3: { cellWidth: 60, halign: "center" } };
+    ? { 0: { cellWidth: 30, halign: "center" }, 1: { cellWidth: 180, valign: "top" }, 2: { cellWidth: 60, halign: "center", textColor: RED, fontStyle: "bold" }, 3: { cellWidth: 34, halign: "center" }, 4: { cellWidth: 40, halign: "center" }, 5: { cellWidth: 78, halign: "right" }, 6: { cellWidth: 93, halign: "right" } }
+    : { 0: { cellWidth: 40, halign: "center" }, 1: { cellWidth: 280, valign: "top" }, 2: { cellWidth: 79, halign: "center", textColor: RED, fontStyle: "bold" }, 3: { cellWidth: 55, halign: "center" }, 4: { cellWidth: 60, halign: "center" } };
 
   // Totals. Local-supplier BUY POs carry GST, so they show Subtotal / GST /
   // Total; everyone else keeps the single (GST-free) Total. Values come from the
   // PO's stored gst_amount, so the document always agrees with the dashboard.
-  const lbl = (t) => ({ content: t, colSpan: 5, styles: { halign: "right", fontStyle: "bold" } });
+  const lbl = (t) => ({ content: t, colSpan: 6, styles: { halign: "right", fontStyle: "bold" } });
   const val = (n) => ({ content: num2(n), styles: { halign: "right", fontStyle: "bold" } });
   const fullyUnpriced = items.length > 0 && items.every((it) => !(Number(it.unit_price) > 0));
   const footRows = fullyUnpriced
@@ -202,24 +204,6 @@ export async function exportPoPdf(po, opts = {}) {
     headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: "bold", halign: "center", lineColor: [0, 0, 0], lineWidth: 0.7 },
     columnStyles: colStyles,
     margin: { left: M, right: M },
-    // custom-draw the Descriptions cell so the colour appends in red
-    willDrawCell: (data) => {
-      if (data.section === "body" && data.column.index === 1 && colours[data.row.index]) {
-        data.cell.styles.textColor = [255, 255, 255]; // hide native text; we redraw below
-      }
-    },
-    didDrawCell: (data) => {
-      if (data.section === "body" && data.column.index === 1 && colours[data.row.index]) {
-        const x = data.cell.x + 4, w = data.cell.width - 8;
-        doc.setFontSize(9); doc.setFont("helvetica", "normal");
-        let ty = data.cell.y + 4 + 7;
-        doc.setTextColor(20, 20, 20);
-        doc.splitTextToSize(descs[data.row.index], w).forEach((ln) => { doc.text(ln, x, ty); ty += 10.5; });
-        doc.setTextColor(200, 30, 30);
-        doc.splitTextToSize(colours[data.row.index], w).forEach((ln) => { doc.text(ln, x, ty); ty += 10.5; });
-        doc.setTextColor(0);
-      }
-    },
     foot: showPrice ? footRows : undefined,
     footStyles: { fillColor: [255, 255, 255], textColor: 0, lineColor: [0, 0, 0], lineWidth: 0.7 },
     didDrawPage: () => {
