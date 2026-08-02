@@ -6,6 +6,32 @@ const router = express.Router();
 const pool = require("../config/db");
 const { protect, adminOnly } = require("../middleware/auth");
 
+// Resolve a storage location by code, matching case- and space-insensitively so
+// "pallet-01", "Pallet-01" and "pallet - 01" all map to the SAME location.
+// Returns the canonical { id, code }; callers store this code on the inventory
+// row so display and the per-location uniqueness stay consistent no matter how
+// the location was typed. Creates the location (as typed, trimmed) if new.
+async function resolveLocation(location_code) {
+  const raw = String(location_code ?? "").trim();
+  const match = await pool.query(
+    `SELECT id, location_code FROM storage_locations
+      WHERE upper(replace(location_code, ' ', '')) = upper(replace($1, ' ', ''))
+      ORDER BY id
+      LIMIT 1`,
+    [raw],
+  );
+  if (match.rows.length > 0) {
+    return { id: match.rows[0].id, code: match.rows[0].location_code };
+  }
+  const created = await pool.query(
+    `INSERT INTO storage_locations (location_code, location_name, location_type, status)
+     VALUES ($1, $2, 'Pallet', 'Active')
+     RETURNING id, location_code`,
+    [raw, raw],
+  );
+  return { id: created.rows[0].id, code: created.rows[0].location_code };
+}
+
 // Who may edit a stock item, and which fields. Mirrors the frontend
 // stockPermissions.js so the UI and API agree: full editors change every
 // field; limited editors (Factory In-charge / Supervisor) may only move stock
@@ -146,23 +172,10 @@ router.post("/", async (req, res) => {
       profileId = createProfile.rows[0].id;
     }
 
-    // --- Resolve location_id (look up by code, create if missing) ---
-    let locationId = null;
-    const locationResult = await pool.query(
-      "SELECT id FROM storage_locations WHERE location_code = $1",
-      [location_code],
-    );
-    if (locationResult.rows.length > 0) {
-      locationId = locationResult.rows[0].id;
-    } else {
-      const createLocation = await pool.query(
-        `INSERT INTO storage_locations (location_code, location_name, location_type, status)
-         VALUES ($1, $2, 'Pallet', 'Active')
-         RETURNING id`,
-        [location_code, location_code],
-      );
-      locationId = createLocation.rows[0].id;
-    }
+    // --- Resolve location (case/space-insensitive; canonical code stored) ---
+    const loc = await resolveLocation(location_code);
+    const locationId = loc.id;
+    const locCode = loc.code;
 
     // --- Compute derived values ---
     const qty = parseInt(quantity_in_stock) || 0;
@@ -187,7 +200,7 @@ router.post("/", async (req, res) => {
       [
         item_code,
         locationId,
-        location_code,
+        locCode,
         profileId,
         profile_name,
         size || null,
@@ -505,27 +518,12 @@ router.put("/:id", protect, async (req, res) => {
             error: "Missing required fields: Location",
           });
         }
-        // Resolve location_id (look up by code, create if missing)
-        let locationId = null;
-        const locationResult = await pool.query(
-          "SELECT id FROM storage_locations WHERE location_code = $1",
-          [location_code],
-        );
-        if (locationResult.rows.length > 0) {
-          locationId = locationResult.rows[0].id;
-        } else {
-          const createLocation = await pool.query(
-            `INSERT INTO storage_locations (location_code, location_name, location_type, status)
-             VALUES ($1, $2, 'Pallet', 'Active')
-             RETURNING id`,
-            [location_code, location_code],
-          );
-          locationId = createLocation.rows[0].id;
-        }
+        // Resolve location (case/space-insensitive; store canonical code)
+        const loc = await resolveLocation(location_code);
         sets.push(`location_code = $${p++}`);
-        values.push(String(location_code).trim());
+        values.push(loc.code);
         sets.push(`location_id = $${p++}`);
-        values.push(locationId);
+        values.push(loc.id);
       }
 
       if (caps.quantity) {
@@ -617,23 +615,10 @@ router.put("/:id", protect, async (req, res) => {
       profileId = createProfile.rows[0].id;
     }
 
-    // --- Resolve location_id (look up by code, create if missing) ---
-    let locationId = null;
-    const locationResult = await pool.query(
-      "SELECT id FROM storage_locations WHERE location_code = $1",
-      [location_code],
-    );
-    if (locationResult.rows.length > 0) {
-      locationId = locationResult.rows[0].id;
-    } else {
-      const createLocation = await pool.query(
-        `INSERT INTO storage_locations (location_code, location_name, location_type, status)
-         VALUES ($1, $2, 'Pallet', 'Active')
-         RETURNING id`,
-        [location_code, location_code],
-      );
-      locationId = createLocation.rows[0].id;
-    }
+    // --- Resolve location (case/space-insensitive; canonical code stored) ---
+    const loc = await resolveLocation(location_code);
+    const locationId = loc.id;
+    const locCode = loc.code;
 
     // --- Recompute derived values ---
     const qty = parseInt(quantity_in_stock) || 0;
@@ -662,7 +647,7 @@ router.put("/:id", protect, async (req, res) => {
        WHERE id = $13
        RETURNING *`,
       [
-        location_code,
+        locCode,
         locationId,
         item_code,
         profile_name,

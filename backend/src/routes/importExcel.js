@@ -88,24 +88,31 @@ router.post("/seed", async (req, res) => {
             }
           }
 
-          // Get location ID
+          // Get location ID — match case/space-insensitively so "pallet-01",
+          // "Pallet-01" and "pallet - 01" resolve to one canonical location.
           let locationId = null;
+          let locCode = item.location_code;
           if (item.location_code) {
+            const raw = String(item.location_code).trim();
             const locationResult = await pool.query(
-              "SELECT id FROM storage_locations WHERE location_code = $1",
-              [item.location_code],
+              `SELECT id, location_code FROM storage_locations
+                WHERE upper(replace(location_code, ' ', '')) = upper(replace($1, ' ', ''))
+                ORDER BY id LIMIT 1`,
+              [raw],
             );
             if (locationResult.rows.length > 0) {
               locationId = locationResult.rows[0].id;
+              locCode = locationResult.rows[0].location_code;
             } else {
               // Create location if it doesn't exist
               const createLocationResult = await pool.query(
                 `INSERT INTO storage_locations (location_code, location_name, location_type, status)
                  VALUES ($1, $2, 'Pallet', 'Active')
-                 RETURNING id`,
-                [item.location_code, item.location_code],
+                 RETURNING id, location_code`,
+                [raw, raw],
               );
               locationId = createLocationResult.rows[0].id;
+              locCode = createLocationResult.rows[0].location_code;
             }
           }
 
@@ -139,7 +146,7 @@ router.post("/seed", async (req, res) => {
             [
               item.item_code,
               locationId,
-              item.location_code,
+              locCode,
               profileId,
               item.profile_name,
               item.size || null,
