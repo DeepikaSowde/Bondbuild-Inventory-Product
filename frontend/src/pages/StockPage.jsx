@@ -531,7 +531,21 @@ export default function StockPage() {
         return false;
       return true;
     },
-  );
+  )
+    // Order by Location in natural sequence (so A1, A2, … A10 — not A1, A10, A2),
+    // then Profile Code, then Size. Same numeric collation as the filter dropdowns.
+    .sort((a, b) => {
+      const cmp = (x, y) =>
+        String(x ?? "").localeCompare(String(y ?? ""), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      return (
+        cmp(a.location_code, b.location_code) ||
+        cmp(a.item_code, b.item_code) ||
+        cmp(a.size, b.size)
+      );
+    });
 
   // Paginate the (filtered) inventory, 20 per page; reset to page 1 when the
   // active filter set changes.
