@@ -207,11 +207,12 @@ router.post("/", async (req, res) => {
       message: "Item created successfully",
     });
   } catch (err) {
-    // Unique violation on item_code
+    // Unique violation on (item_code, location_id): the same Profile Code may
+    // live in another location, but not twice in the same one.
     if (err.code === "23505") {
       return res.status(409).json({
         success: false,
-        error: `Profile Code "${req.body.item_code}" already exists`,
+        error: `Profile Code "${req.body.item_code}" already exists in location "${req.body.location_code}"`,
       });
     }
     console.error("❌ Error creating item:", err.message);
@@ -681,6 +682,14 @@ router.put("/:id", protect, async (req, res) => {
       data: updateResult.rows[0],
     });
   } catch (err) {
+    // Editing a row's code or location can collide with the per-location
+    // unique (item_code, location_id).
+    if (err.code === "23505") {
+      return res.status(409).json({
+        success: false,
+        error: `Profile Code "${req.body.item_code}" already exists in location "${req.body.location_code}"`,
+      });
+    }
     console.error("❌ Error updating item:", err.message);
     res.status(500).json({
       success: false,

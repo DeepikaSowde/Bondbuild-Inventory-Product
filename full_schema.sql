@@ -116,7 +116,7 @@ CREATE TABLE public.inventory (
     id integer NOT NULL,
     item_code character varying(100) NOT NULL,
     item_name character varying(255),
-    location_id integer,
+    location_id integer NOT NULL,
     location_code character varying(50),
     profile_id integer,
     profile_name character varying(255),
@@ -587,11 +587,11 @@ ALTER TABLE ONLY public.storage_locations ALTER COLUMN id SET DEFAULT nextval('p
 
 
 --
--- Name: inventory inventory_item_code_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+-- Name: inventory inventory_item_code_location_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.inventory
-    ADD CONSTRAINT inventory_item_code_key UNIQUE (item_code);
+    ADD CONSTRAINT inventory_item_code_location_key UNIQUE (item_code, location_id);
 
 
 --
