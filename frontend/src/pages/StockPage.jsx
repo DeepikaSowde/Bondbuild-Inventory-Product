@@ -534,12 +534,16 @@ export default function StockPage() {
   )
     // Order by Location in natural sequence (so A1, A2, … A10 — not A1, A10, A2),
     // then Profile Code, then Size. Same numeric collation as the filter dropdowns.
+    // Whitespace is stripped before comparing so inconsistent naming ("Pallet - 44"
+    // vs "Pallet-44") sorts by the number, not by the stray space (a space would
+    // otherwise sort before the hyphen and push "Pallet - 44" to the top).
     .sort((a, b) => {
       const cmp = (x, y) =>
-        String(x ?? "").localeCompare(String(y ?? ""), undefined, {
-          numeric: true,
-          sensitivity: "base",
-        });
+        String(x ?? "").replace(/\s+/g, "").localeCompare(
+          String(y ?? "").replace(/\s+/g, ""),
+          undefined,
+          { numeric: true, sensitivity: "base" },
+        );
       return (
         cmp(a.location_code, b.location_code) ||
         cmp(a.item_code, b.item_code) ||
