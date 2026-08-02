@@ -13,7 +13,11 @@ const { protect, adminOnly } = require("../middleware/auth");
 const STOCK_EDIT = {
   Admin: { full: true, location: true, quantity: true },
   Purchaser: { full: true, location: true, quantity: true },
-  Manager: { full: true, location: true, quantity: true },
+  // Manager edits Location + Quantity only (like FIC but may also view price and
+  // Add Items). The Edit form on the frontend shows Manager just these two fields,
+  // so the API must accept a limited payload — treating Manager as a full editor
+  // made every edit fail with "Missing required fields: Profile Code, ...".
+  Manager: { full: false, location: true, quantity: true },
   "Factory In-charge": { full: false, location: true, quantity: true },
   Supervisor: { full: false, location: false, quantity: true },
 };
