@@ -13,7 +13,11 @@ const { protect, adminOnly } = require("../middleware/auth");
 const STOCK_EDIT = {
   Admin: { full: true, location: true, quantity: true },
   Purchaser: { full: true, location: true, quantity: true },
-  Manager: { full: true, location: true, quantity: true },
+  // Manager edits Location + Quantity only (like FIC but may also view price and
+  // Add Items). The Edit form on the frontend shows Manager just these two fields,
+  // so the API must accept a limited payload — treating Manager as a full editor
+  // made every edit fail with "Missing required fields: Profile Code, ...".
+  Manager: { full: false, location: true, quantity: true },
   "Factory In-charge": { full: false, location: true, quantity: true },
   Supervisor: { full: false, location: false, quantity: true },
 };
@@ -207,11 +211,12 @@ router.post("/", async (req, res) => {
       message: "Item created successfully",
     });
   } catch (err) {
-    // Unique violation on item_code
+    // Unique violation on (item_code, location_id): the same Profile Code may
+    // live in another location, but not twice in the same one.
     if (err.code === "23505") {
       return res.status(409).json({
         success: false,
-        error: `Profile Code "${req.body.item_code}" already exists`,
+        error: `Profile Code "${req.body.item_code}" already exists in location "${req.body.location_code}"`,
       });
     }
     console.error("❌ Error creating item:", err.message);
@@ -449,6 +454,11 @@ router.post("/remove-stock", async (req, res) => {
 
 // Admin-only. Edits every field and recomputes total_value / stock_status.
 router.put("/:id", protect, async (req, res) => {
+  // Code used in a duplicate-collision message. Full editors send item_code;
+  // limited editors (Manager/FIC/Supervisor) don't, so it's filled from the
+  // existing row below — otherwise the message reads Profile Code "undefined".
+  // Declared outside try so the catch block can read it.
+  let collisionCode = req.body.item_code;
   try {
     const { id } = req.params;
     const {
@@ -474,7 +484,7 @@ router.put("/:id", protect, async (req, res) => {
     //     change. Other submitted fields are ignored, not trusted. ---
     if (!caps.full) {
       const current = await pool.query(
-        "SELECT unit_price FROM inventory WHERE id = $1",
+        "SELECT unit_price, item_code FROM inventory WHERE id = $1",
         [id],
       );
       if (current.rows.length === 0) {
@@ -482,6 +492,7 @@ router.put("/:id", protect, async (req, res) => {
           .status(404)
           .json({ success: false, error: "Item not found" });
       }
+      collisionCode = current.rows[0].item_code;
 
       const sets = [];
       const values = [];
@@ -681,6 +692,14 @@ router.put("/:id", protect, async (req, res) => {
       data: updateResult.rows[0],
     });
   } catch (err) {
+    // Editing a row's code or location can collide with the per-location
+    // unique (item_code, location_id).
+    if (err.code === "23505") {
+      return res.status(409).json({
+        success: false,
+        error: `Profile Code "${collisionCode}" already exists in location "${req.body.location_code}"`,
+      });
+    }
     console.error("❌ Error updating item:", err.message);
     res.status(500).json({
       success: false,

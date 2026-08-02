@@ -135,7 +135,7 @@ router.post("/seed", async (req, res) => {
             ) VALUES (
               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW()
             )
-            ON CONFLICT (item_code) DO NOTHING`,
+            ON CONFLICT (item_code, location_id) DO NOTHING`,
             [
               item.item_code,
               locationId,
