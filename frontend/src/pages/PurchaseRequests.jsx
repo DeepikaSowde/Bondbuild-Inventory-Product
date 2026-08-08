@@ -343,15 +343,16 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
       </div>
 
       <Table columns={[
-        { label: "PR No" }, { label: "Job" }, { label: "Project" }, { label: "Requested by" },
+        { label: "PR No" }, { label: "Job" }, { label: "Project" }, { label: "Location" }, { label: "Requested by" },
         { label: "Required" }, { label: "Items", align: "center" }, { label: "Status" }, { label: "" },
       ]}>
-        {filtered.length === 0 && <EmptyRow colSpan={8}>{prs.length === 0 ? "No purchase requests yet." : "No PRs match your search / filters."}</EmptyRow>}
+        {filtered.length === 0 && <EmptyRow colSpan={9}>{prs.length === 0 ? "No purchase requests yet." : "No PRs match your search / filters."}</EmptyRow>}
         {pagePrs.map((p) => (
           <tr key={p.pr_no}>
             <Td mono bold className="!text-[#6366F1]">{p.pr_no}</Td>
             <Td mono>{p.job_no}</Td>
             <Td>{p.project_name || "—"}</Td>
+            <Td>{p.location || "—"}</Td>
             <Td>{p.requested_by}</Td>
             <Td>{p.date_required || "—"}</Td>
             <Td align="center">{p.item_count}</Td>
