@@ -394,7 +394,8 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canQsApprove, 
         onReceive={onOpenReceive}
         onSet={(stage) => act(() => api.setDeliveryStage(po.po_no, stage), stage ? "Delivery stage updated" : "Stage cleared")} />
 
-      <PhotoGallery photos={po.receive_photos || []} />
+      <PhotoGallery photos={po.receive_photos || []} poNo={po.po_no} canManage={canManage} notify={notify}
+        onRefresh={async () => onChanged(await api.po(po.po_no))} />
 
       <div className="mt-5 flex flex-wrap justify-end gap-2.5">
         <Btn variant="soft" disabled={busy} onClick={() => exportPoPdf(po, { showPrice: canSeePrice })}>⬇ PDF</Btn>
@@ -687,9 +688,17 @@ function ReceiveModal({ po, onClose, onConfirmed, busy }) {
 }
 
 // ── Receiving photos gallery (shown inside closed PO detail) ──────────────
-function PhotoGallery({ photos }) {
+// Attachments on a PO: receiving photos AND any document (tax invoice, DO, …)
+// added at any time after receipt. Images show as thumbnails (with a lightbox);
+// other files show as a file tile that opens/downloads on click.
+function PhotoGallery({ photos = [], poNo, canManage = false, notify, onRefresh }) {
   const [blobUrls, setBlobUrls]     = useState({});
   const [lightbox, setLightbox]     = useState(null);
+  const [busy, setBusy]             = useState(false);
+  const fileRef = useRef();
+
+  const isImage = (p) => (p.mime_type || "").startsWith("image/");
+  const images  = photos.filter(isImage);
 
   useEffect(() => {
     if (!photos.length) return;
@@ -702,28 +711,71 @@ function PhotoGallery({ photos }) {
     return () => { alive = false; };
   }, [photos]);
 
-  if (!photos.length) return null;
+  const pick = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+    setBusy(true);
+    try { await api.uploadReceivePhotos(poNo, files); notify?.(`${files.length} file(s) attached`); await onRefresh?.(); }
+    catch (err) { notify?.(apiError(err), "error"); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (id) => {
+    if (!window.confirm("Remove this attachment?")) return;
+    setBusy(true);
+    try { await api.deleteReceivePhoto(id); await onRefresh?.(); }
+    catch (err) { notify?.(apiError(err), "error"); }
+    finally { setBusy(false); }
+  };
+
+  const openFile = (p) => { const u = blobUrls[p.id]; if (u) window.open(u, "_blank", "noopener"); };
+
+  if (!photos.length && !canManage) return null;
 
   return (
     <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
-      <div className="mb-3 text-[13px] font-extrabold text-[#1E1B4B]">📷 Receiving Photos ({photos.length})</div>
-      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-        {photos.map((p) => (
-          <div
-            key={p.id}
-            onClick={() => blobUrls[p.id] && setLightbox(p.id)}
-            className="aspect-square cursor-pointer overflow-hidden rounded-lg border border-[#E5E7EB] bg-[#F3F4F6] hover:opacity-90 transition"
-            title={p.original_name}
-          >
-            {blobUrls[p.id]
-              ? <img src={blobUrls[p.id]} alt={p.original_name} className="h-full w-full object-cover" />
-              : <div className="flex h-full w-full items-center justify-center text-[#9CA3AF] text-xl">⏳</div>
-            }
-          </div>
-        ))}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="text-[13px] font-extrabold text-[#1E1B4B]">📎 Attachments ({photos.length})</div>
+        {canManage && (
+          <>
+            <input ref={fileRef} type="file" multiple className="hidden" onChange={pick} />
+            <Btn variant="soft" small disabled={busy} onClick={() => fileRef.current?.click()}>
+              {busy ? "Working…" : "＋ Attach files"}
+            </Btn>
+          </>
+        )}
       </div>
 
-      {/* Lightbox */}
+      {photos.length === 0 ? (
+        <div className="text-[12.5px] text-[#9CA3AF]">No attachments yet. Attach the tax invoice, delivery order or any document here.</div>
+      ) : (
+        <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+          {photos.map((p) => (
+            <div key={p.id} className="group relative aspect-square overflow-hidden rounded-lg border border-[#E5E7EB] bg-[#F3F4F6]" title={p.original_name}>
+              {isImage(p) ? (
+                <div onClick={() => blobUrls[p.id] && setLightbox(p.id)} className="h-full w-full cursor-pointer transition hover:opacity-90">
+                  {blobUrls[p.id]
+                    ? <img src={blobUrls[p.id]} alt={p.original_name} className="h-full w-full object-cover" />
+                    : <div className="flex h-full w-full items-center justify-center text-xl text-[#9CA3AF]">⏳</div>}
+                </div>
+              ) : (
+                <div onClick={() => openFile(p)} className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-1 p-1.5 text-center transition hover:bg-[#EEF2FF]">
+                  <div className="text-2xl">📄</div>
+                  <div className="w-full truncate text-[9px] leading-tight text-[#6B7280]">{p.original_name}</div>
+                </div>
+              )}
+              {canManage && (
+                <button onClick={(e) => { e.stopPropagation(); remove(p.id); }} disabled={busy}
+                  className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-white/90 text-[#DC2626] shadow hover:bg-white group-hover:flex"
+                  title="Remove attachment">✕</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Lightbox (images only) */}
       {lightbox && blobUrls[lightbox] && (
         <div
           onClick={() => setLightbox(null)}
@@ -741,10 +793,10 @@ function PhotoGallery({ photos }) {
               className="absolute -right-3 -top-3 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-white text-[#374151] shadow-lg hover:bg-[#F3F4F6]"
             >✕</button>
             {/* Prev / Next */}
-            {photos.length > 1 && (() => {
-              const idx  = photos.findIndex((p) => p.id === lightbox);
-              const prev = photos[idx - 1];
-              const next = photos[idx + 1];
+            {images.length > 1 && (() => {
+              const idx  = images.findIndex((p) => p.id === lightbox);
+              const prev = images[idx - 1];
+              const next = images[idx + 1];
               return (
                 <>
                   {prev && <button onClick={(e) => { e.stopPropagation(); setLightbox(prev.id); }}
