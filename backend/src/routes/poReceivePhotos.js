@@ -15,12 +15,17 @@ router.use(protect);
 
 const PREFIX = "po-receive-photos";
 
+// Any document may be attached (photos, PDF, Word, Excel, …). We block only
+// executable / script types for safety, and cap each file at 15 MB.
+const BLOCKED_EXT = /\.(exe|bat|cmd|com|msi|scr|pif|ps1|vbs|vbe|js|jse|wsf|wsh|sh|jar|dll|apk|cpl|hta|reg)$/i;
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) return cb(null, true);
-    cb(new Error("Only image files are allowed"));
+    if (BLOCKED_EXT.test(file.originalname || ""))
+      return cb(new Error("This file type is not allowed"));
+    cb(null, true);
   },
 });
 
@@ -92,6 +97,18 @@ router.get("/receive-photos/:id/view", async (req, res) => {
     if (spaces.isMissing(e)) return fail(res, 410, "Photo file missing from server");
     fail(res, 500, e.message);
   }
+});
+
+// Delete an attachment — removes the DB row and the stored file
+router.delete("/receive-photos/:id", async (req, res) => {
+  try {
+    const { rows } = await db.query("SELECT * FROM po_receive_photos WHERE id=$1", [req.params.id]);
+    const photo = rows[0];
+    if (!photo) return fail(res, 404, "Attachment not found");
+    await db.query("DELETE FROM po_receive_photos WHERE id=$1", [req.params.id]);
+    try { await spaces.deleteObject(photo.file_path); } catch { /* orphaned object; ignore */ }
+    ok(res, { id: Number(req.params.id) });
+  } catch (e) { fail(res, 500, e.message); }
 });
 
 // Multer error handler

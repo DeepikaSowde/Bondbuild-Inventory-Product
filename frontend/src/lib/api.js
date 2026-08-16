@@ -91,6 +91,7 @@ export const api = {
   receivePhotos: (poNo) => data(axiosClient.get(`/purchase-orders/${enc(poNo)}/receive-photos`)),
   receivePhotoBlob: (id) => axiosClient.get(`/purchase-orders/receive-photos/${id}/view`, { responseType: "blob" })
     .then((r) => URL.createObjectURL(r.data)),
+  deleteReceivePhoto: (id) => data(axiosClient.delete(`/purchase-orders/receive-photos/${enc(id)}`)),
 
   // purchase orders
   pos: (params = {}) => data(axiosClient.get(`/purchase-orders?${new URLSearchParams(params)}`)),
