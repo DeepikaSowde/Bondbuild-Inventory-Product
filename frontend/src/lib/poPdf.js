@@ -147,12 +147,6 @@ export async function exportPoPdf(po, opts = {}) {
   // Site/delivery location carried from the PR. Omitted entirely when absent —
   // a bare "LOCATION:" on a document going to a supplier reads as a defect.
   if (po.location) { doc.text(`LOCATION: ${po.location}`, M, py, { maxWidth: W - M * 2 }); py += 15; }
-  // Overall remark carried from the PR header. Omitted entirely when absent.
-  if (po.remarks) {
-    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(0);
-    doc.splitTextToSize(`REMARK: ${po.remarks}`, W - M * 2).forEach((ln) => { doc.text(ln, M, py); py += 13; });
-    py += 2;
-  }
   if (!isStock) {
     doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(80);
     doc.text("With reference to the above, we would like to confirm the order as follow :-", M, py);
@@ -218,8 +212,19 @@ export async function exportPoPdf(po, opts = {}) {
     },
   });
 
-  // ── Obligations (buy only) + signature ──
+  // ── Overall remark ──
+  // Carried from the PR header. Printed below the items table (not the document
+  // header) so the reading order is line items first, then the note about them —
+  // matching the on-screen PO and the PR layout. Omitted entirely when absent.
   let y = doc.lastAutoTable.finalY + 20;
+  if (po.remarks) {
+    if (y > H - 90) { doc.addPage(); y = 90; }
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(0);
+    doc.splitTextToSize(`REMARK: ${po.remarks}`, W - M * 2).forEach((ln) => { doc.text(ln, M, y); y += 13; });
+    y += 8;
+  }
+
+  // ── Obligations (buy only) + signature ──
   const needed = (isStock ? 0 : 96) + 70;
   if (y > H - needed) { doc.addPage(); y = 90; }
 

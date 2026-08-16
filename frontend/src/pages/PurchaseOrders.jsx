@@ -280,13 +280,6 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canQsApprove, 
         ))}
       </div>
 
-      {po.remarks && (
-        <div className="mb-4 rounded-lg border border-[#E5E7EB] bg-[#F9FAFB] px-3 py-2 text-[13px] text-[#374151]">
-          <span className="text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF]">Remark</span>
-          <div className="mt-0.5 whitespace-pre-wrap">{po.remarks}</div>
-        </div>
-      )}
-
       <table className="mb-4 w-full border-collapse text-[13px]">
         <thead>
           <tr>{["Code", "Description", "Colour", "Qty", "Unit", ...(canSeePrice ? ["Unit price"] : []), ...(canSeeAmount ? ["Amount"] : [])].map((h, i) => (
@@ -345,6 +338,15 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canQsApprove, 
           );
         })()}
       </table>
+
+      {/* Overall remark sits below the items — the reading order suppliers/users
+          expect (line items first, then the note about them), matching the PR. */}
+      {po.remarks && (
+        <div className="mb-4 rounded-lg border border-[#E5E7EB] bg-[#F9FAFB] px-3 py-2 text-[13px] text-[#374151]">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF]">Remark</span>
+          <div className="mt-0.5 whitespace-pre-wrap">{po.remarks}</div>
+        </div>
+      )}
 
       {canPrice && (
         <div className="mb-4 flex items-center justify-end gap-2.5">
