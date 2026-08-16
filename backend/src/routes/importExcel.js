@@ -116,6 +116,26 @@ router.post("/seed", async (req, res) => {
             }
           }
 
+          // Block a near-duplicate Profile Code (case/space-insensitive) already
+          // in this location — e.g. importing "la-900" when "LA-900" exists.
+          if (locationId != null) {
+            const near = await pool.query(
+              `SELECT item_code FROM inventory
+                WHERE location_id = $1
+                  AND upper(replace(item_code, ' ', '')) = upper(replace($2, ' ', ''))
+                LIMIT 1`,
+              [locationId, String(item.item_code).trim()],
+            );
+            if (near.rows.length > 0) {
+              errors.push({
+                item: item.item_code,
+                error: `Skipped — a variant of "${item.item_code}" already exists in ${locCode} (as "${near.rows[0].item_code}")`,
+              });
+              failed++;
+              continue;
+            }
+          }
+
           // Parse quantity and price
           const quantity = parseInt(item.quantity_in_stock) || 0;
           const unitPrice = parseFloat(item.unit_price) || 0;

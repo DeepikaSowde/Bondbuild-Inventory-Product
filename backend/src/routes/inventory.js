@@ -32,6 +32,32 @@ async function resolveLocation(location_code) {
   return { id: created.rows[0].id, code: created.rows[0].location_code };
 }
 
+// Find an existing inventory row in the same location whose Profile Code is the
+// same once case and spaces are ignored ("LA-900" / "la-900" / "LA - 900" all
+// match). Used to BLOCK new near-duplicates without rewriting any stored text.
+// excludeId skips the row being edited. Returns the clashing row or null.
+async function nearDuplicateCode(item_code, locationId, excludeId = null) {
+  const r = await pool.query(
+    `SELECT id, item_code FROM inventory
+      WHERE location_id = $1
+        AND upper(replace(item_code, ' ', '')) = upper(replace($2, ' ', ''))
+        AND ($3::int IS NULL OR id <> $3)
+      LIMIT 1`,
+    [locationId, String(item_code ?? "").trim(), excludeId],
+  );
+  return r.rows[0] || null;
+}
+
+// Build the 409 message for a blocked duplicate, hinting at the stored spelling
+// when it differs from what was typed.
+function duplicateError(typedCode, locCode, existing) {
+  const same =
+    String(existing.item_code).trim().toUpperCase() ===
+    String(typedCode).trim().toUpperCase();
+  const hint = same ? "" : ` (already stored as "${existing.item_code}")`;
+  return `Profile Code "${typedCode}" already exists in location "${locCode}"${hint}`;
+}
+
 // Who may edit a stock item, and which fields. Mirrors the frontend
 // stockPermissions.js so the UI and API agree: full editors change every
 // field; limited editors (Factory In-charge / Supervisor) may only move stock
@@ -176,6 +202,15 @@ router.post("/", async (req, res) => {
     const loc = await resolveLocation(location_code);
     const locationId = loc.id;
     const locCode = loc.code;
+
+    // --- Block a near-duplicate Profile Code in this location (case/space) ---
+    const dupe = await nearDuplicateCode(item_code, locationId);
+    if (dupe) {
+      return res.status(409).json({
+        success: false,
+        error: duplicateError(item_code, locCode, dupe),
+      });
+    }
 
     // --- Compute derived values ---
     const qty = parseInt(quantity_in_stock) || 0;
@@ -520,6 +555,15 @@ router.put("/:id", protect, async (req, res) => {
         }
         // Resolve location (case/space-insensitive; store canonical code)
         const loc = await resolveLocation(location_code);
+        // Moving this row must not land on a near-duplicate of its own code
+        // already in the target location. (This row keeps its own code.)
+        const dupe = await nearDuplicateCode(collisionCode, loc.id, id);
+        if (dupe) {
+          return res.status(409).json({
+            success: false,
+            error: duplicateError(collisionCode, loc.code, dupe),
+          });
+        }
         sets.push(`location_code = $${p++}`);
         values.push(loc.code);
         sets.push(`location_id = $${p++}`);
@@ -619,6 +663,15 @@ router.put("/:id", protect, async (req, res) => {
     const loc = await resolveLocation(location_code);
     const locationId = loc.id;
     const locCode = loc.code;
+
+    // --- Block a near-duplicate Profile Code in this location (excluding self) ---
+    const dupe = await nearDuplicateCode(item_code, locationId, id);
+    if (dupe) {
+      return res.status(409).json({
+        success: false,
+        error: duplicateError(item_code, locCode, dupe),
+      });
+    }
 
     // --- Recompute derived values ---
     const qty = parseInt(quantity_in_stock) || 0;
