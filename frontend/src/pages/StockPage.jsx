@@ -534,12 +534,16 @@ export default function StockPage() {
   )
     // Order by Location in natural sequence (so A1, A2, … A10 — not A1, A10, A2),
     // then Profile Code, then Size. Same numeric collation as the filter dropdowns.
+    // Whitespace is stripped before comparing so inconsistent naming ("Pallet - 44"
+    // vs "Pallet-44") sorts by the number, not by the stray space (a space would
+    // otherwise sort before the hyphen and push "Pallet - 44" to the top).
     .sort((a, b) => {
       const cmp = (x, y) =>
-        String(x ?? "").localeCompare(String(y ?? ""), undefined, {
-          numeric: true,
-          sensitivity: "base",
-        });
+        String(x ?? "").replace(/\s+/g, "").localeCompare(
+          String(y ?? "").replace(/\s+/g, ""),
+          undefined,
+          { numeric: true, sensitivity: "base" },
+        );
       return (
         cmp(a.location_code, b.location_code) ||
         cmp(a.item_code, b.item_code) ||
@@ -623,6 +627,24 @@ export default function StockPage() {
     return inventory.filter((item) => item.stock_status === "OUT_OF_STOCK")
       .length;
   };
+
+  // Combined value of all stock (Σ Qty × Unit Price). Sums the per-item
+  // total_value the backend already computes and stores, so this matches the
+  // "Total Value" column and the Excel export totals to the cent.
+  const getTotalStockValue = () => {
+    if (!Array.isArray(inventory)) return 0;
+    return inventory.reduce(
+      (sum, item) => sum + (Number(item.total_value) || 0),
+      0,
+    );
+  };
+
+  // Money with thousands separators for the KPI card, e.g. "12,345.67".
+  const formatMoney = (value) =>
+    (Number(value) || 0).toLocaleString("en-SG", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
 
   // ── Safe price formatting ──
   const formatPrice = (value) => {
@@ -884,6 +906,11 @@ export default function StockPage() {
             "#6366F1",
           ],
           ["Total Qty", getTotalQty(), "#059669"],
+          // Monetary — only for roles allowed to see stock value (same gate as
+          // the Unit Price / Total Value columns).
+          ...(permissions.view_total_value
+            ? [["Total Stock Value", `SGD ${formatMoney(getTotalStockValue())}`, "#7C3AED"]]
+            : []),
           ["Low Stock", getLowStockCount(), "#D97706"],
           ["Out of Stock", getOutOfStockCount(), "#DC2626"],
         ].map(([label, value, color]) => (
