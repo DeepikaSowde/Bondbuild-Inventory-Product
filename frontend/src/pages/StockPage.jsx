@@ -628,6 +628,24 @@ export default function StockPage() {
       .length;
   };
 
+  // Combined value of all stock (Σ Qty × Unit Price). Sums the per-item
+  // total_value the backend already computes and stores, so this matches the
+  // "Total Value" column and the Excel export totals to the cent.
+  const getTotalStockValue = () => {
+    if (!Array.isArray(inventory)) return 0;
+    return inventory.reduce(
+      (sum, item) => sum + (Number(item.total_value) || 0),
+      0,
+    );
+  };
+
+  // Money with thousands separators for the KPI card, e.g. "12,345.67".
+  const formatMoney = (value) =>
+    (Number(value) || 0).toLocaleString("en-SG", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
   // ── Safe price formatting ──
   const formatPrice = (value) => {
     if (!value) return "0.00";
@@ -888,6 +906,11 @@ export default function StockPage() {
             "#6366F1",
           ],
           ["Total Qty", getTotalQty(), "#059669"],
+          // Monetary — only for roles allowed to see stock value (same gate as
+          // the Unit Price / Total Value columns).
+          ...(permissions.view_total_value
+            ? [["Total Stock Value", `SGD ${formatMoney(getTotalStockValue())}`, "#7C3AED"]]
+            : []),
           ["Low Stock", getLowStockCount(), "#D97706"],
           ["Out of Stock", getOutOfStockCount(), "#DC2626"],
         ].map(([label, value, color]) => (
