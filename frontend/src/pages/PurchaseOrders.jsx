@@ -122,18 +122,19 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
         </span>
       </div>
 
-      <Table minWidth={1100} columns={[
-        { label: "PO No" }, { label: "PR" }, { label: "Project" }, { label: "Supplier" },
+      <Table minWidth={1180} columns={[
+        { label: "PO No" }, { label: "PR" }, { label: "Project" }, { label: "Location" }, { label: "Supplier" },
         { label: <SortHead label="Date" keyName="po_date" /> },
         ...(canSeeAmount ? [{ label: <SortHead label="Amount" keyName="amount" />, align: "right" }] : []),
         { label: <SortHead label="Status" keyName="status" /> }, { label: "Delivery stage" }, { label: "" },
       ]}>
-        {pos.length === 0 && <EmptyRow colSpan={9}>No purchase orders match.</EmptyRow>}
+        {pos.length === 0 && <EmptyRow colSpan={10}>No purchase orders match.</EmptyRow>}
         {pagePos.map((p) => (
           <tr key={p.po_no}>
             <Td mono bold className="!text-[#6366F1]">{p.po_no}</Td>
             <Td mono>{p.pr_no || "—"}</Td>
             <Td>{p.project_name || "—"}</Td>
+            <Td>{p.location || "—"}</Td>
             <Td>{p.po_type === "STOCK" ? <span className="text-[#6366F1]">From stock <span className="text-[11px] text-[#9CA3AF]">@ {p.source_location}</span></span> : p.supplier_name}</Td>
             <Td>{fmtDate(p.po_date)}</Td>
             {canSeeAmount && (
