@@ -7,6 +7,15 @@ import { exportPoPdf } from "../lib/poPdf";
 import { hasGst, gstAmount, grossAmount, gstRatePct } from "../lib/gst";
 import AuditTrail from "../components/AuditTrail";
 
+// A PO's location can arrive blank-ish — NULL, an empty/whitespace string, or the
+// literal text "undefined"/"null" (an artefact of some string-built/imported rows).
+// `p.location || "—"` only catches the falsy cases, so a whitespace or "undefined"
+// value would leak through. Normalise all of them to an em-dash.
+const cleanLoc = (v) => {
+  const s = String(v ?? "").trim();
+  return s && !/^(undefined|null)$/i.test(s) ? s : "—";
+};
+
 // A BUY PO may be raised before the supplier has quoted — it stays OPEN with a
 // zero amount until the prices are entered here. The list endpoint returns no
 // line items, so "unpriced" is read off the total; the detail view refines it
@@ -134,7 +143,7 @@ export default function PurchaseOrders({ user, perms = {}, notify, refreshInbox 
             <Td mono bold className="!text-[#6366F1]">{p.po_no}</Td>
             <Td mono>{p.pr_no || "—"}</Td>
             <Td>{p.project_name || "—"}</Td>
-            <Td>{p.location || "—"}</Td>
+            <Td>{cleanLoc(p.location)}</Td>
             <Td>{p.po_type === "STOCK" ? <span className="text-[#6366F1]">From stock <span className="text-[11px] text-[#9CA3AF]">@ {p.source_location}</span></span> : p.supplier_name}</Td>
             <Td>{fmtDate(p.po_date)}</Td>
             {canSeeAmount && (
@@ -252,7 +261,7 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canQsApprove, 
     ["Job", po.job_no || "—"], ["From PR", po.pr_no || "—"],
     // Carried from the originating PR at generation; POs raised before this
     // (and Excel imports, which have no PR) have none and show "—".
-    ["Location", po.location || "—"], ["Currency", po.currency || "SGD"],
+    ["Location", cleanLoc(po.location)], ["Currency", po.currency || "SGD"],
     ["Prepared by", po.prepared_by || "—"],
     ["PO date", fmtDate(po.po_date)], ["Received", fmtDate(po.goods_received_date) || "—"]];
 
