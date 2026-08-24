@@ -92,10 +92,17 @@ async function notifyInApp(client, audiences, { refPr = null, refPo = null } = {
  * sendSlaEmail is already non-blocking and no-ops when it has no addresses.
  */
 function mailAudiences(audiences, { refPr = null, refPo = null } = {}) {
-  for (const a of (audiences || []).filter(Boolean)) {
+  const list = (audiences || []).filter(Boolean);
+  // The event's ACTOR is the audience marked self:true; their mailbox is the
+  // address every OTHER email is sent FROM (send-as). When the actor has no
+  // email on file, fromEmail is undefined and the mailer falls back to MAIL_FROM.
+  const actor = list.find((a) => a.self && a.user);
+  const fromEmail = actor?.user?.email || undefined;
+  for (const a of list) {
+    if (a.self) continue; // the actor's own acknowledgement stays in-app only — no self-email
     const send = (toEmails) => sendSlaEmail({
       toEmails, subject: a.title, title: a.emailTitle || a.title,
-      lines: [a.body], prNo: refPr, poNo: refPo,
+      lines: [a.body], prNo: refPr, poNo: refPo, fromEmail,
     });
     if (a.user) send([a.user.email]);
     else emailsForRoles([a.role]).then(send).catch(() => {});
@@ -112,7 +119,7 @@ const label = (pr) => pr?.project_name || pr?.job_no || "";
 function prSubmitted({ actor, prNo, projectLabel, requestedBy }) {
   const proj = projectLabel ? ` for ${projectLabel}` : "";
   return [
-    { user: actor,
+    { user: actor, self: true,
       title: `PR ${prNo} submitted`,
       emailTitle: "Your purchase request was submitted",
       body: `Your purchase request ${prNo}${proj} has been submitted and is now awaiting Manager approval. You'll be notified once it is actioned.`,
@@ -136,7 +143,7 @@ async function prApproved({ actor, pr }) {
   // legacy PRs raised before created_by was recorded.
   const drafter = await userById(pr.created_by);
   return [
-    { user: actor,
+    { user: actor, self: true,
       title: `You approved PR ${pr.pr_no}`,
       emailTitle: "Approval recorded",
       body: `You approved purchase request ${pr.pr_no}${proj}. It has moved to the Purchaser to assign suppliers and raise the purchase order(s).`,
@@ -179,7 +186,7 @@ async function poRaised({ actor, pr, poNos, poType = "BUY" }) {
   const noun = many ? `${n} ${kind}s` : `${kind} ${list}`;
 
   const audiences = [
-    { user: actor,
+    { user: actor, self: true,
       title: `You raised ${many ? `${n} POs` : `PO ${list}`}${pr ? ` for ${pr.pr_no}` : ""}`,
       emailTitle: "Purchase order raised",
       body: `You raised ${noun}${fromPr}${proj}${many ? `: ${list}` : ""}. The Factory In-charge has been notified to take the next step.`,

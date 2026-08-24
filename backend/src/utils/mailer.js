@@ -67,7 +67,7 @@ async function getToken() {
  * @param {string} subject
  * @param {string} html
  */
-async function sendMail(to, subject, html) {
+async function sendMail(to, subject, html, from) {
   try {
     const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
     if (!recipients.length) return { ok: false, skipped: "no recipient" };
@@ -75,7 +75,10 @@ async function sendMail(to, subject, html) {
     const token = await getToken();
     if (!token) return { ok: false, skipped: "mail disabled" };
 
-    const from = process.env.MAIL_FROM;
+    // Send "as" the acting person when their mailbox is given; otherwise fall
+    // back to the service mailbox (MAIL_FROM) — used for system emails (SLA
+    // sweep) and any event without a specific actor.
+    const fromAddr = (from && String(from).trim()) || process.env.MAIL_FROM;
     const body = {
       message: {
         subject,
@@ -86,7 +89,7 @@ async function sendMail(to, subject, html) {
     };
 
     // POST /users/{from}/sendMail
-    const resp = await fetch(`${GRAPH}/users/${encodeURIComponent(from)}/sendMail`, {
+    const resp = await fetch(`${GRAPH}/users/${encodeURIComponent(fromAddr)}/sendMail`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -103,8 +106,8 @@ async function sendMail(to, subject, html) {
 }
 
 // Fire-and-forget: never blocks the request.
-function sendMailAsync(to, subject, html) {
-  sendMail(to, subject, html).catch(() => {});
+function sendMailAsync(to, subject, html, from) {
+  sendMail(to, subject, html, from).catch(() => {});
 }
 
 module.exports = { sendMail, sendMailAsync };

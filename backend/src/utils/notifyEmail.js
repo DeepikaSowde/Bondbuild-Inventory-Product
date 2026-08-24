@@ -79,10 +79,10 @@ const Email = {
 // Generic SLA-alert email: send a wrapped message to an explicit list of
 // addresses (specific owner + role recipients). Non-blocking / dormant while
 // MAIL_ENABLED=false. Used by the scheduled SLA sweep (utils/alertSla.js).
-function sendSlaEmail({ toEmails, subject, title, lines, prNo, poNo }) {
+function sendSlaEmail({ toEmails, subject, title, lines, prNo, poNo, fromEmail }) {
   const to = (toEmails || []).filter(Boolean);
   if (!to.length) return;
-  sendMailAsync([...new Set(to)], subject, wrap(title, lines.filter(Boolean), prNo, poNo));
+  sendMailAsync([...new Set(to)], subject, wrap(title, lines.filter(Boolean), prNo, poNo), fromEmail);
 }
 
 module.exports = { Email, wrap, emailsForRoles, sendSlaEmail };
