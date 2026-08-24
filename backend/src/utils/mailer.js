@@ -67,7 +67,7 @@ async function getToken() {
  * @param {string} subject
  * @param {string} html
  */
-async function sendMail(to, subject, html, from) {
+async function sendMail(to, subject, html, from, attachments) {
   try {
     const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
     if (!recipients.length) return { ok: false, skipped: "no recipient" };
@@ -79,11 +79,22 @@ async function sendMail(to, subject, html, from) {
     // back to the service mailbox (MAIL_FROM) — used for system emails (SLA
     // sweep) and any event without a specific actor.
     const fromAddr = (from && String(from).trim()) || process.env.MAIL_FROM;
+    // Inline file attachments (base64). The caller keeps the total under Graph's
+    // 4 MB message limit; larger files are omitted here and flagged in the body.
+    const files = (attachments || []).filter((a) => a && a.contentBytes);
     const body = {
       message: {
         subject,
         body: { contentType: "HTML", content: html },
         toRecipients: recipients.map((address) => ({ emailAddress: { address } })),
+        ...(files.length ? {
+          attachments: files.map((a) => ({
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            name: a.name,
+            contentType: a.contentType || "application/octet-stream",
+            contentBytes: a.contentBytes,
+          })),
+        } : {}),
       },
       saveToSentItems: false,
     };
@@ -106,8 +117,8 @@ async function sendMail(to, subject, html, from) {
 }
 
 // Fire-and-forget: never blocks the request.
-function sendMailAsync(to, subject, html, from) {
-  sendMail(to, subject, html, from).catch(() => {});
+function sendMailAsync(to, subject, html, from, attachments) {
+  sendMail(to, subject, html, from, attachments).catch(() => {});
 }
 
 module.exports = { sendMail, sendMailAsync };

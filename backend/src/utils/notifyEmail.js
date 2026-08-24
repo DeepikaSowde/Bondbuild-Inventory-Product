@@ -3,6 +3,7 @@
 // Pairs with the in-app po_notifications inbox — this just adds the email channel.
 // Non-blocking: uses sendMailAsync so the request never waits on email.
 const db = require("../config/db");
+const spaces = require("../config/spaces");
 const { sendMailAsync } = require("./mailer");
 
 // Get active users' emails for one or more roles
@@ -28,24 +29,66 @@ function appUrl() {
   return (first || "").replace(/\/+$/, "");
 }
 
-// The original file names attached to a PR (whole-PR + per-item), so the email
-// can LIST them (files themselves stay in the app, reached via the button).
-// Never throws — a missing table or lookup failure just yields no list.
-async function attachmentNamesForPr(prNo) {
-  if (!prNo) return [];
+// Microsoft Graph caps a sendMail request at 4 MB TOTAL (base64 inflates raw
+// bytes ~1.37x), so keep the combined raw attachment size under ~2.7 MB — the
+// email body is only a few KB. Files over the remaining budget are not attached;
+// they're listed with a "too large" note pointing at the app instead.
+const MAX_EMAIL_ATTACH_TOTAL = 2_700_000; // raw bytes across all files in one email
+
+// Collect a Spaces object stream into a Buffer.
+async function streamToBuffer(stream) {
+  if (!stream) return Buffer.alloc(0);
+  if (typeof stream.transformToByteArray === "function") {
+    return Buffer.from(await stream.transformToByteArray()); // AWS SDK v3 helper
+  }
+  const chunks = [];
+  for await (const c of stream) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+  return Buffer.concat(chunks);
+}
+
+// A PR's files (whole-PR + per-item), fetched from Spaces and split into two
+// buckets: `files` small enough to attach inline (base64), and `skipped` (too
+// large for email) to list with a note. Never throws — failures just skip.
+async function attachmentsForPr(prNo) {
+  if (!prNo) return { files: [], skipped: [] };
+  let rows;
   try {
-    const { rows } = await db.query(
-      `SELECT a.original_name FROM pr_attachments a
+    const r = await db.query(
+      `SELECT a.original_name, a.mime_type, a.size_bytes, a.file_path FROM pr_attachments a
          JOIN purchase_requests pr ON pr.id = a.pr_id WHERE pr.pr_no = $1
        UNION ALL
-       SELECT ia.original_name FROM pr_item_attachments ia
+       SELECT ia.original_name, ia.mime_type, ia.size_bytes, ia.file_path FROM pr_item_attachments ia
          JOIN purchase_requests pr ON pr.id = ia.pr_id WHERE pr.pr_no = $1`,
       [prNo]
     );
-    return rows.map((r) => r.original_name).filter(Boolean).slice(0, 25);
+    rows = r.rows;
   } catch {
-    return [];
+    return { files: [], skipped: [] };
   }
+
+  const files = [], skipped = [];
+  let total = 0;
+  for (const row of rows.slice(0, 25)) {
+    const size = Number(row.size_bytes) || 0;
+    const mb = (size / 1048576).toFixed(1);
+    if (size === 0 || total + size > MAX_EMAIL_ATTACH_TOTAL) {
+      skipped.push({ name: row.original_name, mb });
+      continue;
+    }
+    try {
+      const obj = await spaces.getObject(row.file_path);
+      const buf = await streamToBuffer(obj.Body);
+      files.push({
+        name: row.original_name,
+        contentType: row.mime_type || obj.ContentType || "application/octet-stream",
+        contentBytes: buf.toString("base64"),
+      });
+      total += size;
+    } catch {
+      skipped.push({ name: row.original_name, mb });
+    }
+  }
+  return { files, skipped };
 }
 
 // Minimal HTML-escape — only for user-supplied file names in the list. The
@@ -53,19 +96,26 @@ async function attachmentNamesForPr(prNo) {
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-// Professional HTML shell shared by every notification email. `opts.attachments`
-// is a list of file names to display (with a button to open them in the app).
+// Professional HTML shell shared by every notification email. `opts.attachedNames`
+// are the file names attached to this email; `opts.skipped` are [{name, mb}] files
+// too large to attach, shown as a short note pointing at the app.
 function wrap(title, lines, prNo, poNo, opts = {}) {
-  const attachments = opts.attachments || [];
+  const attachedNames = opts.attachedNames || [];
+  const skipped = opts.skipped || [];
   const url = appUrl();
   const ref = [prNo && `PR ${prNo}`, poNo && `PO ${poNo}`].filter(Boolean).join(" &nbsp;·&nbsp; ");
 
-  const attachHtml = attachments.length
-    ? `<div style="margin:18px 0 4px;padding:12px 14px;background:#F8F9FF;border:1px solid #E6E6F0;border-radius:8px">
-         <div style="font-size:12px;font-weight:700;color:#4F46E5;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">📎 Attachments (${attachments.length})</div>
-         ${attachments.map((n) => `<div style="font-size:13px;color:#374151;padding:3px 0;border-bottom:1px solid #F0F0F6">${escapeHtml(n)}</div>`).join("")}
-         <div style="font-size:11px;color:#9CA3AF;margin-top:8px">Open the ${poNo ? "PO" : "PR"} in InventoryOpz to view or download these files.</div>
+  const attachedHtml = attachedNames.length
+    ? `<div style="font-size:12px;font-weight:700;color:#4F46E5;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">📎 Attached (${attachedNames.length})</div>
+       ${attachedNames.map((n) => `<div style="font-size:13px;color:#374151;padding:3px 0;border-bottom:1px solid #F0F0F6">${escapeHtml(n)}</div>`).join("")}`
+    : "";
+  const skippedHtml = skipped.length
+    ? `<div style="font-size:12.5px;color:#B45309;background:#FEF6E7;border:1px solid #F3D9A4;border-radius:6px;padding:9px 11px;margin-top:${attachedNames.length ? "10px" : "0"}">
+         ${skipped.map((s) => `⚠️ <b>${escapeHtml(s.name)}</b> (${s.mb}&nbsp;MB) is too large to attach — open the ${poNo ? "PO" : "PR"} in InventoryOpz to download it.`).join("<br>")}
        </div>`
+    : "";
+  const attachHtml = (attachedNames.length || skipped.length)
+    ? `<div style="margin:18px 0 4px;padding:12px 14px;background:#F8F9FF;border:1px solid #E6E6F0;border-radius:8px">${attachedHtml}${skippedHtml}</div>`
     : "";
 
   const button = url
@@ -134,11 +184,17 @@ const Email = {
 // Generic SLA-alert email: send a wrapped message to an explicit list of
 // addresses (specific owner + role recipients). Non-blocking / dormant while
 // MAIL_ENABLED=false. Used by the scheduled SLA sweep (utils/alertSla.js).
-async function sendSlaEmail({ toEmails, subject, title, lines, prNo, poNo, fromEmail }) {
+// `attachments` (base64 files for Graph), `attachedNames` and `skipped` are
+// fetched ONCE per event by the caller (mailAudiences) and passed in, so a
+// multi-recipient event doesn't re-read the same files from Spaces per email.
+function sendSlaEmail({ toEmails, subject, title, lines, prNo, poNo, fromEmail, attachments = [], attachedNames = [], skipped = [] }) {
   const to = (toEmails || []).filter(Boolean);
   if (!to.length) return;
-  const attachments = await attachmentNamesForPr(prNo);
-  sendMailAsync([...new Set(to)], subject, wrap(title, lines.filter(Boolean), prNo, poNo, { attachments }), fromEmail);
+  sendMailAsync(
+    [...new Set(to)], subject,
+    wrap(title, lines.filter(Boolean), prNo, poNo, { attachedNames, skipped }),
+    fromEmail, attachments
+  );
 }
 
-module.exports = { Email, wrap, emailsForRoles, sendSlaEmail };
+module.exports = { Email, wrap, emailsForRoles, sendSlaEmail, attachmentsForPr };
