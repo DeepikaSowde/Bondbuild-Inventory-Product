@@ -138,6 +138,12 @@ db.query(`
     ON po_notifications (category, id DESC)
 `).catch((err) => console.error("Notification category index:", err.message));
 
+// User email: the address PR/PO notification emails are sent to (looked up by
+// role in utils/notifyEmail.js). Optional per user; NULL = no email on file.
+// Idempotent so it's safe on every boot and on DBs created before this column.
+db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`)
+  .catch((err) => console.error("users.email migration:", err.message));
+
 // Audit trail: structured before→after detail for edits (see utils/auditTrail.js).
 // Price fields inside `details` are redacted server-side per see_pr_price/see_po_price.
 db.query(`ALTER TABLE pr_approvals ADD COLUMN IF NOT EXISTS details JSONB`)

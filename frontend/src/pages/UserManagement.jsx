@@ -83,6 +83,7 @@ function UsersModule({
     name: "",
     role: "Drafter",
     username: "",
+    email: "",
     password: "",
     status: "Active",
   };
@@ -101,7 +102,9 @@ function UsersModule({
   };
 
   const openEdit = (u) => {
-    setForm({ ...u, password: "" }); // password blank on edit → keeps input controlled
+    // password blank on edit → keeps input controlled; email coerced to "" so the
+    // input stays controlled even when the user has none stored (null).
+    setForm({ ...u, password: "", email: u.email || "" });
     setEditUser(u);
     setShowForm(true);
   };
@@ -109,6 +112,7 @@ function UsersModule({
   const handleSave = async () => {
     const name = form.name.trim();
     const username = form.username.trim();
+    const email = (form.email || "").trim();
     const password = form.password || ""; // never trim a password
 
     // Required + length
@@ -120,6 +124,9 @@ function UsersModule({
     // Special characters (User ID whitelist)
     if (!/^[a-zA-Z0-9._]+$/.test(username))
       return showNotify("User ID can only contain letters, numbers, dot (.) and underscore (_). No spaces or special characters.", "error");
+    // Email is optional, but must be valid when provided (it's where notifications go)
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return showNotify("Enter a valid email address (or leave it blank)", "error");
     // Password: required on add; on edit only validated when a new one is typed
     if (!editUser || password) {
       const pErr = passwordError(password);
@@ -143,6 +150,7 @@ function UsersModule({
         const { data } = await api.put(`/auth/users/${editUser.id}`, {
           name,
           username,
+          email,
           role: form.role,
           status: form.status,
           ...(password && { password }),
@@ -155,6 +163,7 @@ function UsersModule({
         const { data } = await api.post("/auth/users", {
           name,
           username,
+          email,
           password,
           role: form.role,
           status: form.status,
@@ -557,6 +566,17 @@ function UsersModule({
                                 </span>
                               )}
                             </div>
+                            {u.email && (
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  color: "#9CA3AF",
+                                  marginTop: 1,
+                                }}
+                              >
+                                {u.email}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -837,6 +857,41 @@ function UsersModule({
                     fontFamily: "monospace",
                   }}
                 />
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "#6B7280",
+                    textTransform: "uppercase",
+                    display: "block",
+                    marginBottom: 4,
+                  }}
+                >
+                  Email (for notifications)
+                </label>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, email: e.target.value }))
+                  }
+                  placeholder="e.g. james@bondbuild.com.sg"
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    border: "1.5px solid #E5E7EB",
+                    borderRadius: 8,
+                    padding: "10px 12px",
+                    fontSize: 13,
+                    outline: "none",
+                  }}
+                />
+                <div style={{ fontSize: 10.5, color: "#9CA3AF", marginTop: 4 }}>
+                  Where this user receives PR/PO notification emails. Optional.
+                </div>
               </div>
 
               <div>

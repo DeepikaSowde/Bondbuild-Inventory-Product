@@ -28,12 +28,21 @@ const usernameError = (u) => {
     return "User ID can only contain letters, numbers, dot (.) and underscore (_)";
   return null;
 };
+// Email is OPTIONAL (a user may have none), but when given it must look valid —
+// it becomes the address that notification emails are sent to (and, if we ever
+// send "as" the actor, sent from). A blank string is normalised to NULL.
+const emailError = (e) => {
+  if (e === undefined || e === null || e === "") return null; // optional
+  if (typeof e !== "string" || e.length > 254) return "Email is too long";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return "Enter a valid email address";
+  return null;
+};
 
 // ── GET ALL USERS ──────────────────────────────────────────────
 router.get("/", protect, adminOnly, async (req, res) => {
   try {
     const result = await db.query(
-      "SELECT id, name, username, role, status, created_at FROM users ORDER BY created_at DESC",
+      "SELECT id, name, username, role, status, email, created_at FROM users ORDER BY created_at DESC",
     );
     res.json(result.rows);
   } catch (err) {
@@ -45,7 +54,7 @@ router.get("/", protect, adminOnly, async (req, res) => {
 router.get("/:id", protect, adminOnly, async (req, res) => {
   try {
     const result = await db.query(
-      "SELECT id, name, username, role, status, created_at FROM users WHERE id = $1",
+      "SELECT id, name, username, role, status, email, created_at FROM users WHERE id = $1",
       [req.params.id],
     );
     if (result.rows.length === 0) {
@@ -62,6 +71,7 @@ router.post("/", protect, adminOnly, async (req, res) => {
   try {
     const name = (req.body.name || "").trim();
     const username = (req.body.username || "").trim();
+    const email = (req.body.email || "").trim() || null;
     const { password, role } = req.body;
     const status = req.body.status || "Active";
 
@@ -74,6 +84,8 @@ router.post("/", protect, adminOnly, async (req, res) => {
     if (uErr) return res.status(400).json({ error: uErr });
     const pErr = passwordError(password);
     if (pErr) return res.status(400).json({ error: pErr });
+    const eErr = emailError(email);
+    if (eErr) return res.status(400).json({ error: eErr });
     if (!ALLOWED_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
     if (!ALLOWED_STATUS.includes(status)) return res.status(400).json({ error: "Invalid status" });
 
@@ -91,8 +103,8 @@ router.post("/", protect, adminOnly, async (req, res) => {
 
     // Insert new user
     const result = await db.query(
-      "INSERT INTO users (name, username, password_hash, role, status) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, username, role, status, created_at",
-      [name, username, hashedPassword, role, status || "Active"],
+      "INSERT INTO users (name, username, password_hash, role, status, email) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, username, role, status, email, created_at",
+      [name, username, hashedPassword, role, status || "Active", email],
     );
 
     res.status(201).json(result.rows[0]);
@@ -107,6 +119,8 @@ router.put("/:id", protect, adminOnly, async (req, res) => {
     const userId = req.params.id;
     const name = req.body.name != null ? String(req.body.name).trim() : undefined;
     const username = req.body.username != null ? String(req.body.username).trim() : undefined;
+    // Email is a partial field too: undefined = leave as-is, "" = clear to NULL.
+    const email = req.body.email != null ? String(req.body.email).trim() : undefined;
     const { role, status, password } = req.body;
 
     // Validate any provided field (edit is a partial update)
@@ -117,6 +131,10 @@ router.put("/:id", protect, adminOnly, async (req, res) => {
     if (username !== undefined) {
       const uErr = usernameError(username);
       if (uErr) return res.status(400).json({ error: uErr });
+    }
+    if (email !== undefined) {
+      const eErr = emailError(email);
+      if (eErr) return res.status(400).json({ error: eErr });
     }
     if (role !== undefined && !ALLOWED_ROLES.includes(role))
       return res.status(400).json({ error: "Invalid role" });
@@ -167,6 +185,11 @@ router.put("/:id", protect, adminOnly, async (req, res) => {
       updateFields.push(`username = $${paramCount++}`);
       values.push(username);
     }
+    // `!== undefined` (not truthy) so an admin can also CLEAR an email to NULL.
+    if (email !== undefined) {
+      updateFields.push(`email = $${paramCount++}`);
+      values.push(email || null);
+    }
     if (role) {
       updateFields.push(`role = $${paramCount++}`);
       values.push(role);
@@ -188,10 +211,10 @@ router.put("/:id", protect, adminOnly, async (req, res) => {
     // Add userId at the end
     values.push(userId);
     const updateQuery = `
-      UPDATE users 
+      UPDATE users
       SET ${updateFields.join(", ")}
       WHERE id = $${paramCount}
-      RETURNING id, name, username, role, status, created_at
+      RETURNING id, name, username, role, status, email, created_at
     `;
 
     const result = await db.query(updateQuery, values);
