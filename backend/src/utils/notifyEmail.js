@@ -149,6 +149,18 @@ function wrap(title, lines, prNo, poNo, opts = {}) {
 // live in utils/notifyEvent.js where the in-app and email audiences are built
 // once, from the same list. Adding role-only copies back here would double-send.
 const Email = {
+  // Email one or more ROLES with send-as + the PR's attachments, mirroring an
+  // in-app notify() for steps outside the audience/event machinery (e.g. the QS
+  // gate). `fromEmail` is the acting person's mailbox; falls back to MAIL_FROM.
+  emailRoles: async ({ roles, fromEmail, subject, title, body, prNo }) => {
+    const toEmails = await emailsForRoles(roles);
+    if (!toEmails.length) return;
+    const { files, skipped } = await attachmentsForPr(prNo);
+    sendSlaEmail({
+      toEmails, subject, title, lines: [body], prNo, fromEmail,
+      attachments: files, attachedNames: files.map((f) => f.name), skipped,
+    });
+  },
   prRejected: async (pr, sentBack, reason) => {
     sendMailAsync(await emailsForRoles(["Drafter"]),
       sentBack ? `PR ${pr.pr_no} sent back for changes` : `PR ${pr.pr_no} rejected`,
