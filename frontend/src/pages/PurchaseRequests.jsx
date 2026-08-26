@@ -1250,6 +1250,8 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
   // FIC shouldn't send stock to themselves — hide "Send stock to FIC" for that role.
   const pSendFic = (!!perms.send_to_fic || isAdmin) && user.role !== "Factory In-charge";
   const [items, setItems] = useState(pr.items.map((it) => ({ ...it })));
+  // Purchaser opt-in: also email the supplier(s) when submitting for QS approval.
+  const [emailSupplier, setEmailSupplier] = useState(false);
   const [tab, setTab] = useState("details");
   useEffect(() => { setItems(pr.items.map((it) => ({ ...it }))); }, [pr]);
   // Stays open through the QS gate + PO_RAISED too: a PR with both buy + stock items
@@ -1561,12 +1563,37 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
               )}
               {canEditBuy && <Btn variant="soft" disabled={busy} onClick={() => act(saveAssign, "Saved")}>Save prices</Btn>}
               {showSubmitQs && (
+                <label className="mr-1 flex items-center gap-1.5 self-center text-[12px] font-medium text-[#374151]"
+                  title="Also send a purchase enquiry email to the supplier(s) on this PR">
+                  <input type="checkbox" checked={emailSupplier} disabled={busy}
+                    onChange={(e) => setEmailSupplier(e.target.checked)} />
+                  Email supplier(s)
+                </label>
+              )}
+              {showSubmitQs && (
                 <Btn disabled={busy || !allBuyHaveSupplier}
                   title={!allBuyHaveSupplier ? "Assign a supplier to every buy item first" : ""}
                   onClick={() => act(async () => {
                     await saveAssign();
-                    await api.submitForQs(pr.pr_no);
-                  }, "Submitted for QS approval")}>Submit for QS approval</Btn>
+                    const res = await api.submitForQs(pr.pr_no, emailSupplier);
+                    const se = res?.supplierEmail;
+                    if (emailSupplier && se) {
+                      if (se.status === "missing")
+                        notify(`Submitted to QS. Supplier email NOT sent — no email for: ${se.missing.join(", ")}. Add it in the Supplier tab, then use “Email suppliers”.`, "error");
+                      else if (se.status === "sent")
+                        notify(`Submitted to QS and emailed ${se.count} supplier(s).`);
+                      else if (se.status === "none")
+                        notify("Submitted to QS. No suppliers to email on this PR.");
+                    }
+                  }, emailSupplier ? null : "Submitted for QS approval")}>Submit for QS approval</Btn>
+              )}
+              {["PENDING_QS_APPROVAL", "QS_APPROVED"].includes(pr.status) && pAssign && (
+                <Btn variant="soft" disabled={busy}
+                  title="Email the purchase enquiry to the supplier(s) on this PR"
+                  onClick={() => act(async () => {
+                    const r = await api.emailSuppliers(pr.pr_no);
+                    notify(`Emailed ${r?.data?.count ?? ""} supplier(s).`);
+                  }, null)}>Email suppliers</Btn>
               )}
               {showQsReview && (
                 <>

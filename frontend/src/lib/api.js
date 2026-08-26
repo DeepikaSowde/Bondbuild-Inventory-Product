@@ -47,7 +47,8 @@ export const api = {
       all ? { all: true } : noSupplier ? { noSupplier: true } : { supplier_id: supplierId })),
   generatePOs: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/generate-pos`)),
   // QS approval — Gate 1 (sourcing, on the PR)
-  submitForQs: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/submit-for-qs`)),
+  submitForQs: (prNo, emailSupplier = false) => raw(axiosClient.post(`/purchase-requests/${enc(prNo)}/submit-for-qs`, { emailSupplier })),
+  emailSuppliers: (prNo) => raw(axiosClient.post(`/purchase-requests/${enc(prNo)}/email-suppliers`)),
   qsApprovePr: (prNo) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/qs-approve`)),
   qsSendBackPr: (prNo, reason) => data(axiosClient.post(`/purchase-requests/${enc(prNo)}/qs-send-back`, { reason })),
   // Save PR as Draft (enhancement #9): drafts save via createPR/updatePR with draft:true;

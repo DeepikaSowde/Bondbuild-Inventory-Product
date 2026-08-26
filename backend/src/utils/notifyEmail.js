@@ -141,6 +141,54 @@ function wrap(title, lines, prNo, poNo, opts = {}) {
   </div>`;
 }
 
+// Supplier-facing enquiry email — formal/external, separate from the internal
+// wrap() template: navy header, an item table, no InventoryOpz branding. Prices
+// are intentionally omitted for now (pending client sign-off); add a Unit Price
+// column here when confirmed.
+function supplierHtml({ supplierName, projectName, location, prNo, items, purchaserName }) {
+  const cell = "font-size:13px;color:#374151;padding:8px 10px;border-bottom:1px solid #F0F0F6";
+  const th = "font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#6B7280;padding:8px 10px;background:#F3F4F6;border-bottom:1px solid #E5E7EB";
+  const rows = (items || []).map((it, i) => `
+    <tr>
+      <td style="${cell}">${i + 1}</td>
+      <td style="${cell}">${escapeHtml(it.profile_code || "")}</td>
+      <td style="${cell}">${escapeHtml(it.description || "")}</td>
+      <td style="${cell};text-align:right">${Number(it.qty) || 0}</td>
+      <td style="${cell}">${escapeHtml(it.unit || "")}</td>
+    </tr>`).join("");
+  return `
+  <div style="font-family:-apple-system,Segoe UI,Arial,Helvetica,sans-serif;max-width:600px;margin:auto;background:#ffffff;border:1px solid #E6E6F0;border-radius:12px;overflow:hidden">
+    <div style="background:#1E3A5F;padding:18px 24px">
+      <div style="color:#ffffff;font-size:17px;font-weight:800">Bond Building Products Pte. Ltd.</div>
+      <div style="color:#AEC3DE;font-size:11px;font-weight:600;margin-top:2px">Procurement Department</div>
+    </div>
+    <div style="padding:24px">
+      <p style="margin:0 0 11px;font-weight:700;color:#1E1B4B;font-size:14px">Dear ${escapeHtml(supplierName || "Supplier")},</p>
+      <p style="margin:11px 0;font-size:14px;line-height:1.65;color:#374151">We are processing an order for the following items for our project <b>${escapeHtml(projectName || "")}</b>${location ? ` (Location: <b>${escapeHtml(location)}</b>)` : ""}, and would like to confirm the details with you.</p>
+      <div style="display:inline-block;font-size:12px;color:#4F46E5;background:#EEF2FF;border-radius:6px;padding:4px 10px;font-weight:700;margin:2px 0 4px">Reference: ${escapeHtml(prNo || "")}</div>
+      <table style="width:100%;border-collapse:collapse;margin:14px 0 6px">
+        <thead><tr>
+          <th style="${th};text-align:left">#</th><th style="${th};text-align:left">Profile Code</th>
+          <th style="${th};text-align:left">Description</th><th style="${th};text-align:right">Qty</th>
+          <th style="${th};text-align:left">Unit</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="margin:14px 0 4px;padding:12px 15px;background:#F8F9FF;border:1px solid #E6E6F0;border-radius:8px">
+        <div style="font-size:12px;font-weight:800;color:#1E1B4B;margin-bottom:6px">Please confirm at your earliest convenience:</div>
+        <ul style="margin:0;padding-left:18px">
+          <li style="font-size:13px;color:#374151;margin:3px 0">Unit prices and total amount</li>
+          <li style="font-size:13px;color:#374151;margin:3px 0">Availability &amp; delivery lead time</li>
+          <li style="font-size:13px;color:#374151;margin:3px 0">Delivery terms</li>
+        </ul>
+      </div>
+      <p style="margin:11px 0;font-size:14px;line-height:1.65;color:#374151">A formal <b>Purchase Order</b> will be issued once our internal approval is complete. Should you have any questions, kindly reply to this email.</p>
+      <div style="margin-top:18px;font-size:14px;color:#374151">Thank you,<br><b style="color:#1E1B4B">${escapeHtml(purchaserName || "Procurement")}</b><br>Procurement · Bond Building Products Pte. Ltd.</div>
+    </div>
+    <div style="background:#F7F7FB;padding:14px 24px;font-size:11px;color:#9CA3AF;border-top:1px solid #F0F0F6">This message was sent from Bond Building Products Pte. Ltd. procurement. Please reply to this email to respond.</div>
+  </div>`;
+}
+
 // The stage-by-stage emails. Each takes a context object and fires async.
 //
 // NOTE: PR-submitted, PR-approved and POs-created are NOT here. Those three
@@ -149,6 +197,14 @@ function wrap(title, lines, prNo, poNo, opts = {}) {
 // live in utils/notifyEvent.js where the in-app and email audiences are built
 // once, from the same list. Adding role-only copies back here would double-send.
 const Email = {
+  // Supplier-facing purchase enquiry (send-as the Purchaser). Fire-and-forget.
+  supplierEnquiry: ({ supplierEmail, supplierName, projectName, location, prNo, items, purchaserName, fromEmail }) => {
+    if (!supplierEmail) return;
+    sendMailAsync([supplierEmail],
+      `Purchase enquiry — ${projectName || prNo} · Ref ${prNo}`,
+      supplierHtml({ supplierName, projectName, location, prNo, items, purchaserName }),
+      fromEmail);
+  },
   // Email one or more ROLES with send-as + the PR's attachments, mirroring an
   // in-app notify() for steps outside the audience/event machinery (e.g. the QS
   // gate). `fromEmail` is the acting person's mailbox; falls back to MAIL_FROM.

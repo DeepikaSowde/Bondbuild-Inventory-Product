@@ -123,6 +123,37 @@ async function notify(client, rolesList, title, body, type, refPr = null, refPo 
   }
 }
 
+// Email the PR's buy-item suppliers a purchase enquiry, sent AS the acting
+// Purchaser. All-or-nothing: if ANY supplier has no email on file, send NONE and
+// return the missing names — the Purchaser adds them in the Supplier tab and
+// resends. Returns { status: 'sent'|'missing'|'none', ... }.
+async function sendSupplierEnquiries(pr, req) {
+  const buyItems = (pr.items || []).filter((it) => Number(it.buy_qty) > 0 && it.supplier_id);
+  if (!buyItems.length) return { status: "none" };
+  const groups = {};
+  for (const it of buyItems) {
+    (groups[String(it.supplier_id)] ||= { supplier_name: it.supplier_name, items: [] })
+      .items.push({ profile_code: it.profile_code, description: it.description, qty: it.buy_qty, unit: it.unit });
+  }
+  const ids = Object.keys(groups);
+  // id::text keeps the lookup type-safe whether supplier ids are int or uuid.
+  const { rows } = await db.query("SELECT id, name, email FROM po_suppliers WHERE id::text = ANY($1)", [ids]);
+  const byId = {};
+  rows.forEach((r) => (byId[String(r.id)] = r));
+  const missing = ids
+    .filter((id) => !byId[id]?.email || !String(byId[id].email).trim())
+    .map((id) => groups[id].supplier_name || byId[id]?.name || "Unknown supplier");
+  if (missing.length) return { status: "missing", missing };
+  for (const id of ids) {
+    Email.supplierEnquiry({
+      supplierEmail: byId[id].email, supplierName: groups[id].supplier_name || byId[id].name,
+      projectName: pr.project_name, location: pr.location, prNo: pr.pr_no,
+      items: groups[id].items, purchaserName: req.user.name, fromEmail: req.user.email,
+    });
+  }
+  return { status: "sent", count: ids.length };
+}
+
 // ── List ──
 router.get("/", async (req, res) => {
   try {
@@ -490,7 +521,28 @@ router.post("/:prNo/submit-for-qs", canDo("assign_supplier"), async (req, res) =
       title: "A purchase request needs your QS approval",
       body: `${req.user.name} submitted ${pr.project_name || pr.job_no} (PR ${pr.pr_no}) for QS approval. Please review the sourcing and approve or send it back.`,
     }).catch(() => {});
-    ok(res, await getPR(pr.pr_no));
+    // Opt-in: also email the suppliers. Never blocks the QS submit — if any
+    // supplier has no email, none are sent and the missing names come back so the
+    // Purchaser can add them and use "Email suppliers" to resend.
+    let supplierEmail = null;
+    if (req.body?.emailSupplier) {
+      try { supplierEmail = await sendSupplierEnquiries(pr, req); }
+      catch { supplierEmail = { status: "error" }; }
+    }
+    ok(res, await getPR(pr.pr_no), { supplierEmail });
+  } catch (e) { fail(res, 500, e.message); }
+});
+
+// Resend the supplier enquiry emails (after missing supplier emails are added).
+router.post("/:prNo/email-suppliers", canDo("assign_supplier"), async (req, res) => {
+  try {
+    const pr = await getPR(req.params.prNo);
+    if (!pr) return fail(res, 404, "PR not found");
+    const result = await sendSupplierEnquiries(pr, req);
+    if (result.status === "none") return fail(res, 400, "No suppliers are assigned on this PR.");
+    if (result.status === "missing")
+      return fail(res, 400, `No email for: ${result.missing.join(", ")}. Add it in the Supplier tab, then resend.`);
+    ok(res, result);
   } catch (e) { fail(res, 500, e.message); }
 });
 
