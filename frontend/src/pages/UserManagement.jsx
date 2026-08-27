@@ -49,6 +49,15 @@ const DEFAULT_FIELD_PERMS = {
     editPOSupplier: false,
     editPOPrice: false,
   },
+  // Account = view-only finance: sees PR/PO prices & amounts, edits nothing.
+  Account: {
+    seePRPrice: true,
+    editPRSupplier: false,
+    seePOPrice: true,
+    seePOAmount: true,
+    editPOSupplier: false,
+    editPOPrice: false,
+  },
 };
 
 // Password policy: 8–128 chars, at least one letter, one number, one special char.
@@ -77,6 +86,7 @@ function UsersModule({
     "Factory In-charge",
     "Supervisor",
     "QS",
+    "Account",
   ];
 
   const emptyForm = {
@@ -250,6 +260,8 @@ function UsersModule({
     Purchaser: "🛒",
     "Factory In-charge": "🏭",
     Supervisor: "👷",
+    QS: "🔎",
+    Account: "💰",
     Admin: "👑",
   };
 
@@ -259,6 +271,8 @@ function UsersModule({
     Purchaser: "#D97706",
     "Factory In-charge": "#0891B2",
     Supervisor: "#7C3AED",
+    QS: "#0EA5E9",
+    Account: "#0D9488",
     Admin: "#DC2626",
   };
 
@@ -455,6 +469,8 @@ function UsersModule({
               "Purchaser",
               "Factory In-charge",
               "Supervisor",
+              "QS",
+              "Account",
               "Admin",
             ].map((r) => (
               <button

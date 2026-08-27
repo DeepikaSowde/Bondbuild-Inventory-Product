@@ -144,6 +144,15 @@ db.query(`
 db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`)
   .catch((err) => console.error("users.email migration:", err.message));
 
+// Account role (view-only finance): seed its stock permissions so the Role
+// Permissions admin screen can show/manage it. View everything, change nothing.
+db.query(
+  `INSERT INTO stock_permissions
+     (role, view_stock, view_unit_price, view_total_value, edit_quantity, edit_location, add_item, delete_item, export_excel)
+   VALUES ('Account', true, true, true, false, false, false, false, true)
+   ON CONFLICT (role) DO NOTHING`
+).catch((err) => console.error("stock_permissions Account seed:", err.message));
+
 // Audit trail: structured before→after detail for edits (see utils/auditTrail.js).
 // Price fields inside `details` are redacted server-side per see_pr_price/see_po_price.
 db.query(`ALTER TABLE pr_approvals ADD COLUMN IF NOT EXISTS details JSONB`)

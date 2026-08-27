@@ -308,7 +308,7 @@ router.post("/:poNo/close", canDo("generate_po"), async (req, res) => {
         "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'CLOSE','OPEN','CLOSED',$2,$3,$4)",
         [po.id, req.user.name, req.user.role, (req.body?.notes || "").trim() || "Delivered and price approved — PO closed"]
       );
-      await notify(c, ["Purchaser", "Manager"], `PO closed: ${po.po_no}`,
+      await notify(c, ["Purchaser", "Manager", "Account"], `PO closed: ${po.po_no}`,
         `${po.po_no} closed — goods delivered and price approved.`, "success", po.pr_no, po.po_no);
     });
     const fresh = await getPO(po.po_no);

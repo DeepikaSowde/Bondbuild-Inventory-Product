@@ -13,7 +13,7 @@ const COLS = [
   "see_operation_finance", "see_accounting",
 ];
 
-const ALL_ROLES = ["Drafter", "Manager", "Purchaser", "Factory In-charge", "Supervisor", "QS", "Admin"];
+const ALL_ROLES = ["Drafter", "Manager", "Purchaser", "Factory In-charge", "Supervisor", "QS", "Account", "Admin"];
 
 // the same role defaults used by the backend gate (fallback when no row exists)
 const ROLE_DEFAULTS = {
@@ -28,9 +28,9 @@ const ROLE_DEFAULTS = {
   set_delivery:           ["Factory In-charge", "Supervisor", "Admin"],
   receive_po:             ["Purchaser", "Supervisor", "Factory In-charge", "Admin"],
   cancel_po:              ["Purchaser", "Admin"],
-  see_pr_price:           ["Manager", "Purchaser", "QS", "Admin"],
-  see_po_price:           ["Manager", "Purchaser", "QS", "Admin"],
-  see_po_amount:          ["Manager", "Purchaser", "QS", "Admin"],
+  see_pr_price:           ["Manager", "Purchaser", "QS", "Account", "Admin"],
+  see_po_price:           ["Manager", "Purchaser", "QS", "Account", "Admin"],
+  see_po_amount:          ["Manager", "Purchaser", "QS", "Account", "Admin"],
   see_operation_finance:  ALL_ROLES,   // all roles can see by default; admin can restrict
   see_accounting:         ALL_ROLES,
 };

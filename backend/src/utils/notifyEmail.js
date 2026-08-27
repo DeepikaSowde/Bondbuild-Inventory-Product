@@ -243,7 +243,7 @@ const Email = {
         [`PO <b>${po.po_no}</b> (${po.supplier_name}) is now: <b>${stageLabel}</b>.`], po.pr_no, po.po_no));
   },
   poClosed: async (po) => {
-    sendMailAsync(await emailsForRoles(["Purchaser", "Manager"]), `PO ${po.po_no} closed`,
+    sendMailAsync(await emailsForRoles(["Purchaser", "Manager", "Account"]), `PO ${po.po_no} closed`,
       wrap("Purchase order closed",
         [`Goods received from <b>${po.supplier_name}</b>. PO <b>${po.po_no}</b> is now closed.`], po.pr_no, po.po_no));
   },

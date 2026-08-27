@@ -12,6 +12,7 @@ const ROLES = [
   "Factory In-charge",
   "Supervisor",
   "QS",
+  "Account",
 ];
 
 const ROLE_ICON = {
@@ -21,6 +22,7 @@ const ROLE_ICON = {
   "Factory In-charge": "🏭",
   Supervisor: "👷",
   QS: "📊",
+  Account: "💰",
 };
 
 const ROLE_CLR = {
@@ -30,6 +32,7 @@ const ROLE_CLR = {
   "Factory In-charge": "#0891B2",
   Supervisor: "#7C3AED",
   QS: "#8B5CF6",
+  Account: "#0D9488",
 };
 
 const PERM_GROUPS = [

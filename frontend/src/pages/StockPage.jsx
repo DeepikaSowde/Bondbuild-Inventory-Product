@@ -106,6 +106,18 @@ const DEFAULT_PERMISSIONS = {
     delete_item: false,
     export_excel: true,
   },
+  // Account = view-only finance: sees stock + prices + value, exports, but
+  // changes nothing.
+  Account: {
+    view_stock: true,
+    view_unit_price: true,
+    view_total_value: true,
+    edit_quantity: false,
+    edit_location: false,
+    add_item: false,
+    delete_item: false,
+    export_excel: true,
+  },
   Admin: {
     view_stock: true,
     view_unit_price: true,
