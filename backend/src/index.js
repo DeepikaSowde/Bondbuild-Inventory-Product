@@ -144,6 +144,17 @@ db.query(`
 db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`)
   .catch((err) => console.error("users.email migration:", err.message));
 
+// Some DBs carry a legacy users_role_check CHECK constraint that predates the
+// newer roles (QS, Account), so INSERT/UPDATE of those roles fails with
+// "violates check constraint users_role_check". Replace it with the current
+// role set. Idempotent: drop-if-exists then re-add (existing rows already
+// satisfy the superset). Keep this list in sync with users.ALLOWED_ROLES.
+db.query(`
+  ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+  ALTER TABLE users ADD CONSTRAINT users_role_check
+    CHECK (role IN ('Drafter','Manager','Purchaser','Factory In-charge','Supervisor','QS','Account','Admin'));
+`).catch((err) => console.error("users_role_check migration:", err.message));
+
 // Account role (view-only finance): seed its stock permissions so the Role
 // Permissions admin screen can show/manage it. View everything, change nothing.
 db.query(
