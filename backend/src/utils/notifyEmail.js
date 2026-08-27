@@ -91,6 +91,27 @@ async function attachmentsForPr(prNo) {
   return { files, skipped };
 }
 
+// A PR's requested items for the email table — one row per distinct item, with
+// the total requested qty (buy + stock). Never throws.
+async function itemsForPr(prNo) {
+  if (!prNo) return [];
+  try {
+    const { rows } = await db.query(
+      `SELECT MIN(i.line_no) AS line_no, i.profile_code, i.description, i.unit,
+              SUM(COALESCE(i.buy_qty,0) + COALESCE(i.stock_qty,0)) AS qty
+         FROM pr_items i JOIN purchase_requests pr ON pr.id = i.pr_id
+        WHERE pr.pr_no = $1
+        GROUP BY i.profile_code, i.description, i.unit
+       HAVING SUM(COALESCE(i.buy_qty,0) + COALESCE(i.stock_qty,0)) > 0
+        ORDER BY line_no`,
+      [prNo]
+    );
+    return rows.slice(0, 40);
+  } catch {
+    return [];
+  }
+}
+
 // Minimal HTML-escape — only for user-supplied file names in the list. The
 // message `lines` are our own trusted HTML and are intentionally not escaped.
 const escapeHtml = (s) =>
@@ -122,6 +143,24 @@ function wrap(title, lines, prNo, poNo, opts = {}) {
     ? `<div style="margin:22px 0 4px"><a href="${url}" style="display:inline-block;background:#6366F1;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 22px;border-radius:8px">View in InventoryOpz →</a></div>`
     : "";
 
+  // Optional clean-format extras (the layout the client asked for on PR/PO
+  // emails): a greeting instead of the bare title, an item table, and a signature.
+  const items = opts.items || [];
+  const cS = "font-size:13px;color:#374151;padding:7px 10px;border-bottom:1px solid #F0F0F6";
+  const hS = "font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#6B7280;padding:7px 10px;background:#F3F4F6;border-bottom:1px solid #E5E7EB";
+  const itemsHtml = items.length
+    ? `<table style="width:100%;border-collapse:collapse;margin:14px 0 6px">
+         <thead><tr><th style="${hS};text-align:left">#</th><th style="${hS};text-align:left">Profile Code</th><th style="${hS};text-align:left">Description</th><th style="${hS};text-align:right">Qty</th><th style="${hS};text-align:left">Unit</th></tr></thead>
+         <tbody>${items.map((it, i) => `<tr><td style="${cS}">${i + 1}</td><td style="${cS}">${escapeHtml(it.profile_code || "")}</td><td style="${cS}">${escapeHtml(it.description || "")}</td><td style="${cS};text-align:right">${Number(it.qty) || 0}</td><td style="${cS}">${escapeHtml(it.unit || "")}</td></tr>`).join("")}</tbody>
+       </table>`
+    : "";
+  const heading = opts.greeting
+    ? `<p style="margin:0 0 12px;font-weight:700;color:#1E1B4B;font-size:14px">${escapeHtml(opts.greeting)}</p>`
+    : `<h2 style="margin:0 0 12px;font-size:18px;color:#1E1B4B;font-weight:800">${title}</h2>`;
+  const sign = opts.signName
+    ? `<div style="margin-top:18px;font-size:14px;color:#374151">Thank you,<br><b style="color:#1E1B4B">${escapeHtml(opts.signName)}</b><br>Bond Building Products Pte. Ltd.</div>`
+    : "";
+
   return `
   <div style="font-family:-apple-system,Segoe UI,Arial,Helvetica,sans-serif;max-width:600px;margin:auto;background:#ffffff;border:1px solid #E6E6F0;border-radius:12px;overflow:hidden">
     <div style="background:#6366F1;padding:16px 22px">
@@ -129,11 +168,13 @@ function wrap(title, lines, prNo, poNo, opts = {}) {
       <div style="color:#C7D2FE;font-size:11px;font-weight:600;margin-top:2px;text-transform:uppercase;letter-spacing:.08em">InventoryOpz</div>
     </div>
     <div style="padding:22px">
-      <h2 style="margin:0 0 12px;font-size:18px;color:#1E1B4B;font-weight:800">${title}</h2>
+      ${heading}
       ${lines.map((l) => `<p style="margin:8px 0;font-size:14px;line-height:1.6;color:#374151">${l}</p>`).join("")}
-      ${ref ? `<p style="margin:14px 0 0;font-size:12px;color:#9CA3AF;font-weight:600">${ref}</p>` : ""}
+      ${ref ? `<p style="margin:14px 0 4px;font-size:12px;color:#9CA3AF;font-weight:600">${ref}</p>` : ""}
+      ${itemsHtml}
       ${attachHtml}
       ${button}
+      ${sign}
     </div>
     <div style="background:#F7F7FB;padding:14px 22px;font-size:11px;color:#9CA3AF;border-top:1px solid #F0F0F6">
       Automated message from InventoryOpz · Bond Building Products Pte. Ltd. Please log in to take action.
@@ -208,13 +249,14 @@ const Email = {
   // Email one or more ROLES with send-as + the PR's attachments, mirroring an
   // in-app notify() for steps outside the audience/event machinery (e.g. the QS
   // gate). `fromEmail` is the acting person's mailbox; falls back to MAIL_FROM.
-  emailRoles: async ({ roles, fromEmail, subject, title, body, prNo }) => {
+  emailRoles: async ({ roles, fromEmail, subject, title, body, prNo, signName }) => {
     const toEmails = await emailsForRoles(roles);
     if (!toEmails.length) return;
-    const { files, skipped } = await attachmentsForPr(prNo);
+    const [{ files, skipped }, items] = await Promise.all([attachmentsForPr(prNo), itemsForPr(prNo)]);
     sendSlaEmail({
       toEmails, subject, title, lines: [body], prNo, fromEmail,
       attachments: files, attachedNames: files.map((f) => f.name), skipped,
+      items, greeting: `Dear ${roles[0]},`, signName,
     });
   },
   prRejected: async (pr, sentBack, reason) => {
@@ -255,14 +297,14 @@ const Email = {
 // `attachments` (base64 files for Graph), `attachedNames` and `skipped` are
 // fetched ONCE per event by the caller (mailAudiences) and passed in, so a
 // multi-recipient event doesn't re-read the same files from Spaces per email.
-function sendSlaEmail({ toEmails, subject, title, lines, prNo, poNo, fromEmail, attachments = [], attachedNames = [], skipped = [] }) {
+function sendSlaEmail({ toEmails, subject, title, lines, prNo, poNo, fromEmail, attachments = [], attachedNames = [], skipped = [], items = [], greeting, signName }) {
   const to = (toEmails || []).filter(Boolean);
   if (!to.length) return;
   sendMailAsync(
     [...new Set(to)], subject,
-    wrap(title, lines.filter(Boolean), prNo, poNo, { attachedNames, skipped }),
+    wrap(title, lines.filter(Boolean), prNo, poNo, { attachedNames, skipped, items, greeting, signName }),
     fromEmail, attachments
   );
 }
 
-module.exports = { Email, wrap, emailsForRoles, sendSlaEmail, attachmentsForPr };
+module.exports = { Email, wrap, emailsForRoles, sendSlaEmail, attachmentsForPr, itemsForPr };

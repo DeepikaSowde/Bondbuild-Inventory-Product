@@ -29,7 +29,7 @@
 // Same audiences, same wording — it just also leaves the building.
 // ─────────────────────────────────────────────────────────────────────────────
 const db = require("../config/db");
-const { emailsForRoles, sendSlaEmail, attachmentsForPr } = require("./notifyEmail");
+const { emailsForRoles, sendSlaEmail, attachmentsForPr, itemsForPr } = require("./notifyEmail");
 
 // ── who ──────────────────────────────────────────────────────────────────────
 async function userById(id) {
@@ -98,16 +98,18 @@ function mailAudiences(audiences, { refPr = null, refPo = null } = {}) {
   // email on file, fromEmail is undefined and the mailer falls back to MAIL_FROM.
   const actor = list.find((a) => a.self && a.user);
   const fromEmail = actor?.user?.email || undefined;
-  // Fetch the PR's files ONCE (small ones as base64 attachments, big ones flagged)
-  // and reuse across every recipient, so a multi-audience event reads Spaces once.
-  attachmentsForPr(refPr).then(({ files, skipped }) => {
+  const signName = actor?.user?.name || undefined; // signs the email as the acting person
+  // Fetch the PR's files + items ONCE and reuse across every recipient, so a
+  // multi-audience event reads Spaces / the DB just once.
+  Promise.all([attachmentsForPr(refPr), itemsForPr(refPr)]).then(([{ files, skipped }, items]) => {
     const attachedNames = files.map((f) => f.name);
     for (const a of list) {
       if (a.self) continue; // the actor's own acknowledgement stays in-app only — no self-email
+      const greeting = `Dear ${a.user?.name || a.role},`;
       const send = (toEmails) => sendSlaEmail({
         toEmails, subject: a.title, title: a.emailTitle || a.title,
         lines: [a.body], prNo: refPr, poNo: refPo, fromEmail,
-        attachments: files, attachedNames, skipped,
+        attachments: files, attachedNames, skipped, items, greeting, signName,
       });
       if (a.user) send([a.user.email]);
       else emailsForRoles([a.role]).then(send).catch(() => {});

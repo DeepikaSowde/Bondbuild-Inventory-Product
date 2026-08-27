@@ -516,7 +516,7 @@ router.post("/:prNo/submit-for-qs", canDo("assign_supplier"), async (req, res) =
     });
     // Email QS (from the Purchaser who submitted), non-blocking.
     Email.emailRoles({
-      roles: ["QS"], fromEmail: req.user.email, prNo: pr.pr_no,
+      roles: ["QS"], fromEmail: req.user.email, signName: req.user.name, prNo: pr.pr_no,
       subject: `PR pending QS approval: ${pr.pr_no}`,
       title: "A purchase request needs your QS approval",
       body: `${req.user.name} submitted ${pr.project_name || pr.job_no} (PR ${pr.pr_no}) for QS approval. Please review the sourcing and approve or send it back.`,
@@ -573,7 +573,7 @@ router.post("/:prNo/qs-approve", canDo("qs_approve"), async (req, res) => {
     });
     // Email Purchaser + Manager (from the QS who approved), non-blocking.
     Email.emailRoles({
-      roles: ["Purchaser", "Manager"], fromEmail: req.user.email, prNo: pr.pr_no,
+      roles: ["Purchaser", "Manager"], fromEmail: req.user.email, signName: req.user.name, prNo: pr.pr_no,
       subject: `QS approved: ${pr.pr_no}`,
       title: "QS approved the sourcing",
       body: `${req.user.name} (QS) approved the sourcing for ${pr.project_name || pr.job_no} (PR ${pr.pr_no}). The Purchaser can now generate the Buy PO.`,
@@ -607,7 +607,7 @@ router.post("/:prNo/qs-send-back", canDo("qs_approve"), async (req, res) => {
     });
     // Email Purchaser + Manager (from the QS who sent it back), non-blocking.
     Email.emailRoles({
-      roles: ["Purchaser", "Manager"], fromEmail: req.user.email, prNo: pr.pr_no,
+      roles: ["Purchaser", "Manager"], fromEmail: req.user.email, signName: req.user.name, prNo: pr.pr_no,
       subject: `QS sent back: ${pr.pr_no}`,
       title: "QS sent the PR back",
       body: `${req.user.name} (QS) sent ${pr.project_name || pr.job_no} (PR ${pr.pr_no}) back to the Purchaser${reason ? `: ${reason}` : "."} Please revise the sourcing and resubmit.`,
