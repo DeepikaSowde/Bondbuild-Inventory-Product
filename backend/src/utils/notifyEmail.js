@@ -98,7 +98,8 @@ async function itemsForPr(prNo) {
   try {
     const { rows } = await db.query(
       `SELECT MIN(i.line_no) AS line_no, i.profile_code, i.description, i.unit,
-              SUM(COALESCE(i.buy_qty,0) + COALESCE(i.stock_qty,0)) AS qty
+              SUM(COALESCE(i.buy_qty,0) + COALESCE(i.stock_qty,0)) AS qty,
+              MAX(i.onedrive_url) AS onedrive_url
          FROM pr_items i JOIN purchase_requests pr ON pr.id = i.pr_id
         WHERE pr.pr_no = $1
         GROUP BY i.profile_code, i.description, i.unit
@@ -148,10 +149,16 @@ function wrap(title, lines, prNo, poNo, opts = {}) {
   const items = opts.items || [];
   const cS = "font-size:13px;color:#374151;padding:7px 10px;border-bottom:1px solid #F0F0F6";
   const hS = "font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#6B7280;padding:7px 10px;background:#F3F4F6;border-bottom:1px solid #E5E7EB";
+  // Show a "Link" column only when at least one item carries a OneDrive link.
+  const hasLinks = items.some((it) => it.onedrive_url);
+  const linkTh = hasLinks ? `<th style="${hS};text-align:left">Link</th>` : "";
+  const linkTd = (it) => hasLinks
+    ? `<td style="${cS}">${it.onedrive_url ? `<a href="${escapeHtml(it.onedrive_url)}" style="color:#4F46E5;font-weight:700;text-decoration:none">🔗 Open</a>` : ""}</td>`
+    : "";
   const itemsHtml = items.length
     ? `<table style="width:100%;border-collapse:collapse;margin:14px 0 6px">
-         <thead><tr><th style="${hS};text-align:left">#</th><th style="${hS};text-align:left">Profile Code</th><th style="${hS};text-align:left">Description</th><th style="${hS};text-align:right">Qty</th><th style="${hS};text-align:left">Unit</th></tr></thead>
-         <tbody>${items.map((it, i) => `<tr><td style="${cS}">${i + 1}</td><td style="${cS}">${escapeHtml(it.profile_code || "")}</td><td style="${cS}">${escapeHtml(it.description || "")}</td><td style="${cS};text-align:right">${Number(it.qty) || 0}</td><td style="${cS}">${escapeHtml(it.unit || "")}</td></tr>`).join("")}</tbody>
+         <thead><tr><th style="${hS};text-align:left">#</th><th style="${hS};text-align:left">Profile Code</th><th style="${hS};text-align:left">Description</th><th style="${hS};text-align:right">Qty</th><th style="${hS};text-align:left">Unit</th>${linkTh}</tr></thead>
+         <tbody>${items.map((it, i) => `<tr><td style="${cS}">${i + 1}</td><td style="${cS}">${escapeHtml(it.profile_code || "")}</td><td style="${cS}">${escapeHtml(it.description || "")}</td><td style="${cS};text-align:right">${Number(it.qty) || 0}</td><td style="${cS}">${escapeHtml(it.unit || "")}</td>${linkTd(it)}</tr>`).join("")}</tbody>
        </table>`
     : "";
   const heading = opts.greeting
