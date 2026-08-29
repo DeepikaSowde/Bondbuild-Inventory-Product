@@ -75,10 +75,17 @@ async function sendMail(to, subject, html, from, attachments) {
     const token = await getToken();
     if (!token) return { ok: false, skipped: "mail disabled" };
 
-    // Send "as" the acting person when their mailbox is given; otherwise fall
-    // back to the service mailbox (MAIL_FROM) — used for system emails (SLA
-    // sweep) and any event without a specific actor.
-    const fromAddr = (from && String(from).trim()) || process.env.MAIL_FROM;
+    // Send "as" the acting person — but ONLY when their mailbox is in our own
+    // tenant domain (same as MAIL_FROM). Graph cannot send as an external address
+    // (a test Gmail, or a user with no real mailbox), so fall back to MAIL_FROM
+    // rather than failing the whole email. In production every actor has a real
+    // tenant mailbox, so this is true send-as; it only degrades for odd/test data.
+    const mailFrom = (process.env.MAIL_FROM || "").trim();
+    const tenantDomain = mailFrom.split("@")[1]?.toLowerCase();
+    const fromDomain = String(from || "").trim().split("@")[1]?.toLowerCase();
+    const fromAddr = (from && fromDomain && fromDomain === tenantDomain)
+      ? String(from).trim()
+      : mailFrom;
     // Inline file attachments (base64). The caller keeps the total under Graph's
     // 4 MB message limit; larger files are omitted here and flagged in the body.
     const files = (attachments || []).filter((a) => a && a.contentBytes);
