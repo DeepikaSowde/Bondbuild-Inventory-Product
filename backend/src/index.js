@@ -164,6 +164,21 @@ db.query(
    ON CONFLICT (role) DO NOTHING`
 ).catch((err) => console.error("stock_permissions Account seed:", err.message));
 
+// Account's PR/PO permission row — without it, the Role Permissions screen can't
+// save Account's toggles ("Role not found" on the UPDATE). View-only: all action
+// permissions FALSE, price/amount views TRUE. see_operation_finance/see_accounting
+// aren't listed here — they were added by a later migration with DEFAULT true, so
+// omitting them (a) avoids a column-order race and (b) leaves them TRUE for Account.
+db.query(
+  `INSERT INTO pr_po_permissions
+     (role, raise_pr, approve_pr, reject_pr, assign_supplier, send_to_fic, issue_stock,
+      generate_po, qs_approve, set_delivery, receive_po, cancel_po,
+      see_pr_price, see_po_price, see_po_amount)
+   VALUES ('Account', false,false,false,false,false,false,false,false,false,false,false,
+      true,true,true)
+   ON CONFLICT (role) DO NOTHING`
+).catch((err) => console.error("pr_po_permissions Account seed:", err.message));
+
 // Audit trail: structured before→after detail for edits (see utils/auditTrail.js).
 // Price fields inside `details` are redacted server-side per see_pr_price/see_po_price.
 db.query(`ALTER TABLE pr_approvals ADD COLUMN IF NOT EXISTS details JSONB`)
