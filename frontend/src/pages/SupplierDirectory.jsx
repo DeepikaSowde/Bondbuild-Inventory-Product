@@ -82,17 +82,20 @@ const isPhoneLike = (v) =>
 
 function validateSupplier(f) {
   const err = {};
-  if (!f.name.trim()) err.name = "Company name is required";
-  else if (f.name.trim().length < 2) err.name = "Name is too short";
+  // Fields can arrive as null from the DB (an existing supplier with blanks), so
+  // coalesce before trimming — otherwise `.trim()` throws and the whole save
+  // handler crashes before any validation message can show.
+  const name = (f.name || "").trim();
+  const email = (f.email || "").trim();
+  const phone = (f.phone || "").trim();
+  const fax = (f.fax || "").trim();
 
-  if (f.email.trim() && !EMAIL_RE.test(f.email.trim()))
-    err.email = "Enter a valid email address";
+  if (!name) err.name = "Company name is required";
+  else if (name.length < 2) err.name = "Name is too short";
 
-  if (f.phone.trim() && !isPhoneLike(f.phone))
-    err.phone = "Enter a valid phone number";
-
-  if (f.fax.trim() && !isPhoneLike(f.fax))
-    err.fax = "Enter a valid fax number";
+  if (email && !EMAIL_RE.test(email)) err.email = "Enter a valid email address";
+  if (phone && !isPhoneLike(phone)) err.phone = "Enter a valid phone number";
+  if (fax && !isPhoneLike(fax)) err.fax = "Enter a valid fax number";
 
   return err;
 }
@@ -104,7 +107,13 @@ function ErrText({ msg }) {
 }
 
 function SupplierForm({ initial, onSave, onClose, saving }) {
-  const [form, setForm] = useState({ ...BLANK, ...initial });
+  // Coalesce null/undefined DB values to "" so every field is a controlled
+  // string — keeps inputs controlled and validation (.trim()) null-safe.
+  const [form, setForm] = useState(() => {
+    const src = { ...BLANK, ...(initial || {}) };
+    for (const k of Object.keys(BLANK)) if (src[k] == null) src[k] = "";
+    return src;
+  });
   const [errors, setErrors] = useState({});
   const set = (k) => (e) => {
     setForm((f) => ({ ...f, [k]: e.target.value }));
