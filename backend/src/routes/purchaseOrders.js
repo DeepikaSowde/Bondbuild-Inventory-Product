@@ -426,6 +426,36 @@ router.post("/:poNo/receive", canDo("receive_po"), async (req, res) => {
         "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'RECEIVE','OPEN',$2,$3,$4,$5)",
         [po.id, willClose ? "CLOSED" : "OPEN", req.user.name, req.user.role, req.body?.notes || ""]
       );
+      // A PR whose lines all come from stock never enters the QS / buy path — submit-for-qs
+      // rejects it and send-to-fic leaves it APPROVED — so nothing else would ever move it
+      // on, and it kept showing "Approved" long after the stock was collected. Once its
+      // last stock PO is collected it has been fulfilled: move it to PO_RAISED (the same
+      // end state a PR reaches once its PO exists). Guarded so a PR that still has buy
+      // lines (it must stay APPROVED to be submitted to QS), open POs, or un-issued stock
+      // lines is left alone.
+      if (po.po_type === "STOCK" && po.pr_id) {
+        const fulfilled = await c.query(
+          `SELECT
+             NOT EXISTS (SELECT 1 FROM pr_items WHERE pr_id = $1 AND buy_qty > 0)           AS no_buy,
+             NOT EXISTS (SELECT 1 FROM purchase_orders WHERE pr_id = $1 AND status = 'OPEN') AS none_open,
+             NOT EXISTS (SELECT 1 FROM pr_items WHERE pr_id = $1 AND stock_qty > 0
+                           AND COALESCE(stock_status, '') <> 'STOCK_REDUCED')                 AS all_issued`,
+          [po.pr_id]
+        );
+        const f = fulfilled.rows[0];
+        if (f.no_buy && f.none_open && f.all_issued) {
+          const moved = await c.query(
+            "UPDATE purchase_requests SET status='PO_RAISED' WHERE id=$1 AND status='APPROVED' RETURNING id",
+            [po.pr_id]
+          );
+          if (moved.rowCount) {
+            await c.query(
+              "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'STOCK_COLLECTED','APPROVED','PO_RAISED',$2,$3,$4)",
+              [po.pr_id, req.user.name, req.user.role, `Stock PO ${po.po_no} collected — request fulfilled from stock`]
+            );
+          }
+        }
+      }
       // A BUY PO stays OPEN after receipt: the goods are Delivered, but the Purchaser
       // still Closes it explicitly once the price is QS-approved. A STOCK PO closes here.
       if (!willClose) {
