@@ -375,6 +375,17 @@ function POView({ po, canManage, canReceive, canTrack, canCancel, canQsApprove, 
         </div>
       )}
 
+      {/* Shipment ETA, read-only — for everyone who doesn't get the editable
+          "Delivery & lead times" block below (which already has the ETA input). */}
+      {po.po_type !== "STOCK" && !(canManage && po.status === "OPEN") && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-[#E5E7EB] bg-[#F9FAFB] px-3 py-2 text-[13px]">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF]">Shipment ETA</span>
+          {po.tracking?.shipment_eta
+            ? <span className="font-semibold text-[#374151]">{fmtDate(po.tracking.shipment_eta)}</span>
+            : <span className="text-[#9CA3AF]">— not yet provided</span>}
+        </div>
+      )}
+
       {canManage && po.status === "OPEN" && po.po_type !== "STOCK" && (
         <>
           <div className="my-1.5 text-[11px] font-bold uppercase tracking-wide text-[#9CA3AF]">Delivery &amp; lead times</div>
