@@ -11,7 +11,7 @@ const spaces = require("../config/spaces");
 const { protect, roles, denyRoles } = require("../middleware/auth");
 const { withTransaction } = require("../utils/withTransaction");
 const { canDo, isAllowed } = require("../utils/canDo");
-const { Email } = require("../utils/notifyEmail");
+const { Email, enquiryCcEmails } = require("../utils/notifyEmail");
 const { notifyInApp, mailAudiences, events } = require("../utils/notifyEvent");
 const { buildPrEditDiff, redactDetails } = require("../utils/auditTrail");
 const { checkItemOneDriveUrls, validateOneDriveUrl } = require("../utils/oneDriveUrl");
@@ -144,11 +144,14 @@ async function sendSupplierEnquiries(pr, req) {
     .filter((id) => !byId[id]?.email || !String(byId[id].email).trim())
     .map((id) => groups[id].supplier_name || byId[id]?.name || "Unknown supplier");
   if (missing.length) return { status: "missing", missing };
+  // Internal copy list — same for every supplier on this PR (drafter, approving
+  // Manager, QS, and the sending Purchaser). See enquiryCcEmails.
+  const cc = await enquiryCcEmails(pr, req.user.email);
   for (const id of ids) {
     Email.supplierEnquiry({
       supplierEmail: byId[id].email, supplierName: groups[id].supplier_name || byId[id].name,
       projectName: pr.project_name, location: pr.location, prNo: pr.pr_no,
-      items: groups[id].items, purchaserName: req.user.name, fromEmail: req.user.email,
+      items: groups[id].items, purchaserName: req.user.name, fromEmail: req.user.email, cc,
     });
   }
   return { status: "sent", count: ids.length };
@@ -446,8 +449,8 @@ router.post("/:prNo/approve", canDo("approve_pr"), async (req, res) => {
     const audience = await events.prApproved({ actor: req.user, pr });
     await withTransaction(async (c) => {
       await c.query(
-        "UPDATE purchase_requests SET status='APPROVED', approved_date=CURRENT_DATE, approved_by=$2 WHERE id=$1",
-        [pr.id, req.body?.approved_by || req.user.name]
+        "UPDATE purchase_requests SET status='APPROVED', approved_date=CURRENT_DATE, approved_by=$2, approved_by_id=$3 WHERE id=$1",
+        [pr.id, req.body?.approved_by || req.user.name, asUuid(req.user.id)]
       );
       // DR-AUD-003: record the approver's optional comments alongside who/when.
       await c.query(
@@ -557,8 +560,8 @@ router.post("/:prNo/qs-approve", canDo("qs_approve"), async (req, res) => {
     const pricedAtGate1 = buyItems.length > 0 && buyItems.every((it) => Number(it.unit_price) > 0);
     await withTransaction(async (c) => {
       await c.query(
-        "UPDATE purchase_requests SET status='QS_APPROVED', qs_approved_by=$2, qs_approved_at=NOW(), qs_sent_back_reason=NULL WHERE id=$1",
-        [pr.id, req.user.name]
+        "UPDATE purchase_requests SET status='QS_APPROVED', qs_approved_by=$2, qs_approved_by_id=$3, qs_approved_at=NOW(), qs_sent_back_reason=NULL WHERE id=$1",
+        [pr.id, req.user.name, asUuid(req.user.id)]
       );
       await c.query(
         "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'QS_APPROVE_SOURCING','PENDING_QS_APPROVAL','QS_APPROVED',$2,$3,$4)",
