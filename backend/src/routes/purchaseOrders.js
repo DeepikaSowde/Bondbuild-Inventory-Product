@@ -115,8 +115,9 @@ router.post("/", canDo("generate_po"), async (req, res) => {
       let line = 1;
       for (const i of items)
         await c.query(
-          "INSERT INTO po_items (po_id, line_no, profile_code, description, colour, qty, unit, unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-          [po.rows[0].id, line++, i.profile_code, i.description.trim(), i.colour || null, Number(i.qty) || 0, i.unit || "pcs", Number(i.unit_price) || 0]
+          "INSERT INTO po_items (po_id, line_no, profile_code, description, colour, qty, unit, unit_price, remarks) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+          [po.rows[0].id, line++, i.profile_code, i.description.trim(), i.colour || null, Number(i.qty) || 0, i.unit || "pcs", Number(i.unit_price) || 0,
+           String(i.remarks || "").trim() || null]
         );
       // A manual PO usually has no parent PR — then there's no approving manager
       // and no drafter to address, so poRaised() broadcasts to Managers instead.

@@ -160,37 +160,53 @@ export async function exportPoPdf(po, opts = {}) {
   const descs = items.map((it) => String(it.description || ""));
   const colours = items.map((it) => (it.colour ? String(it.colour).toUpperCase() : ""));
   const sym = CUR_SYM[po.currency] || po.currency || "S$";
-  const head = showPrice
-    ? [["Item", "Descriptions", "Colour", "Qty", "Unit", `Rate (${sym})`, `Price (${sym})`]]
-    : [["Item", "Descriptions", "Colour", "Qty", "Unit"]];
+  // Per-line remarks (carried from the PR's REMARKS column). Added as a last column
+  // only when at least one line has a remark, so POs without any keep the original,
+  // roomier layout instead of showing an empty column.
+  const remarks = items.map((it) => String(it.remarks || "").trim());
+  const hasRemarks = remarks.some(Boolean);
+  const head = [[
+    "Item", "Descriptions", "Colour", "Qty", "Unit",
+    ...(showPrice ? [`Rate (${sym})`, `Price (${sym})`] : []),
+    ...(hasRemarks ? ["Remarks"] : []),
+  ]];
   // Colour is its own column (drawn in red via columnStyles). A PO may be raised
   // before the supplier has quoted — an unpriced line prints blank Rate / Price
   // cells rather than "0.00", which would read as free.
   const body = items.map((it, i) => {
     const base = [i + 1, descs[i], colours[i], it.qty ?? "", it.unit || ""];
-    if (!showPrice) return base;
-    return Number(it.unit_price) > 0
-      ? [...base, num2(it.unit_price), num2((Number(it.qty) || 0) * (Number(it.unit_price) || 0))]
-      : [...base, "", ""];
+    const priced = !showPrice ? [] : Number(it.unit_price) > 0
+      ? [num2(it.unit_price), num2((Number(it.qty) || 0) * (Number(it.unit_price) || 0))]
+      : ["", ""];
+    return [...base, ...priced, ...(hasRemarks ? [remarks[i]] : [])];
   });
   const RED = [200, 30, 30];
+  // Column widths sum to the 515pt printable width in every variant.
+  const REM = { halign: "left", valign: "top", fontSize: 8 };
   const colStyles = showPrice
-    ? { 0: { cellWidth: 30, halign: "center" }, 1: { cellWidth: 180, valign: "top" }, 2: { cellWidth: 60, halign: "center", textColor: RED, fontStyle: "bold" }, 3: { cellWidth: 34, halign: "center" }, 4: { cellWidth: 40, halign: "center" }, 5: { cellWidth: 78, halign: "right" }, 6: { cellWidth: 93, halign: "right" } }
-    : { 0: { cellWidth: 40, halign: "center" }, 1: { cellWidth: 280, valign: "top" }, 2: { cellWidth: 79, halign: "center", textColor: RED, fontStyle: "bold" }, 3: { cellWidth: 55, halign: "center" }, 4: { cellWidth: 60, halign: "center" } };
+    ? (hasRemarks
+      ? { 0: { cellWidth: 26, halign: "center" }, 1: { cellWidth: 148, valign: "top" }, 2: { cellWidth: 60, halign: "center", textColor: RED, fontStyle: "bold" }, 3: { cellWidth: 30, halign: "center" }, 4: { cellWidth: 34, halign: "center" }, 5: { cellWidth: 60, halign: "right" }, 6: { cellWidth: 64, halign: "right" }, 7: { cellWidth: 93, ...REM } }
+      : { 0: { cellWidth: 30, halign: "center" }, 1: { cellWidth: 180, valign: "top" }, 2: { cellWidth: 60, halign: "center", textColor: RED, fontStyle: "bold" }, 3: { cellWidth: 34, halign: "center" }, 4: { cellWidth: 40, halign: "center" }, 5: { cellWidth: 78, halign: "right" }, 6: { cellWidth: 93, halign: "right" } })
+    : (hasRemarks
+      ? { 0: { cellWidth: 34, halign: "center" }, 1: { cellWidth: 191, valign: "top" }, 2: { cellWidth: 79, halign: "center", textColor: RED, fontStyle: "bold" }, 3: { cellWidth: 40, halign: "center" }, 4: { cellWidth: 46, halign: "center" }, 5: { cellWidth: 125, ...REM } }
+      : { 0: { cellWidth: 40, halign: "center" }, 1: { cellWidth: 280, valign: "top" }, 2: { cellWidth: 79, halign: "center", textColor: RED, fontStyle: "bold" }, 3: { cellWidth: 55, halign: "center" }, 4: { cellWidth: 60, halign: "center" } });
 
   // Totals. Local-supplier BUY POs carry GST, so they show Subtotal / GST /
   // Total; everyone else keeps the single (GST-free) Total. Values come from the
   // PO's stored gst_amount, so the document always agrees with the dashboard.
+  // When the Remarks column is present the footer needs one trailing blank cell
+  // under it so the total still lines up with the Price column.
   const lbl = (t) => ({ content: t, colSpan: 6, styles: { halign: "right", fontStyle: "bold" } });
   const val = (n) => ({ content: num2(n), styles: { halign: "right", fontStyle: "bold" } });
+  const pad = hasRemarks ? [{ content: "", styles: {} }] : [];
   const fullyUnpriced = items.length > 0 && items.every((it) => !(Number(it.unit_price) > 0));
   const footRows = fullyUnpriced
-    ? [[lbl("TOTAL"), { content: "", styles: { halign: "right", fontStyle: "bold" } }]]
+    ? [[lbl("TOTAL"), { content: "", styles: { halign: "right", fontStyle: "bold" } }, ...pad]]
     : hasGst(po)
-    ? [[lbl("SUBTOTAL"), val(po.amount)],
-       [lbl(`GST ${gstRatePct(po)}%`), val(gstAmount(po))],
-       [lbl("TOTAL"), val(grossAmount(po))]]
-    : [[lbl("TOTAL"), val(po.amount)]];
+    ? [[lbl("SUBTOTAL"), val(po.amount), ...pad],
+       [lbl(`GST ${gstRatePct(po)}%`), val(gstAmount(po)), ...pad],
+       [lbl("TOTAL"), val(grossAmount(po)), ...pad]]
+    : [[lbl("TOTAL"), val(po.amount), ...pad]];
 
   autoTable(doc, {
     startY: py + 8,
@@ -203,6 +219,13 @@ export async function exportPoPdf(po, opts = {}) {
     margin: { left: M, right: M },
     foot: showPrice ? footRows : undefined,
     footStyles: { fillColor: [255, 255, 255], textColor: 0, lineColor: [0, 0, 0], lineWidth: 0.7 },
+    // URGENT remarks in red bold, matching the PR form.
+    didParseCell: (data) => {
+      if (hasRemarks && data.section === "body" && data.column.index === head[0].length - 1 && /urgent/i.test(String(data.cell.raw || ""))) {
+        data.cell.styles.textColor = RED;
+        data.cell.styles.fontStyle = "bold";
+      }
+    },
     didDrawPage: () => {
       let fy = H - 46;
       if (certs) {
