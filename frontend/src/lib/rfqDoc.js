@@ -108,25 +108,40 @@ export async function exportRfqPdf(group) {
     ["*Date", todayStr()],
     ["Please reply by", fmtDate(g.reply_by) || ""],
   ];
-  const rowH = 16, boxH = rowH * (rows.length + 1);
+  const valX = bx + 96, valW = bx + bw - 4 - valX;
+  // Long values (the RFQ Ref embeds the supplier name and has no spaces to wrap on) are broken
+  // by character width so they stay inside the box instead of running off its right edge.
+  const breakToWidth = (text, width) => {
+    const out = []; let cur = "";
+    // Prefer breaking after "-", "_", "/" or a space; only split inside a token that alone is too wide.
+    for (const token of text.split(/(?<=[-_/ ])/)) {
+      if (!cur || doc.getTextWidth(cur + token) <= width) { cur += token; continue; }
+      out.push(cur); cur = "";
+      for (const ch of token) {
+        if (cur && doc.getTextWidth(cur + ch) > width) { out.push(cur); cur = ch; } else cur += ch;
+      }
+    }
+    if (cur) out.push(cur);
+    return out.length ? out : [""];
+  };
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
+  const valLines = rows.map((r) => breakToWidth(`: ${r[1]}`, valW));
+  const rowHs = valLines.map((ls) => Math.max(16, ls.length * 10 + 6));
+  const boxH = 16 + rowHs.reduce((a, b) => a + b, 0);
   doc.setDrawColor(0); doc.setLineWidth(0.7);
   doc.rect(bx, by, bw, boxH);
   doc.setFont("helvetica", "bold"); doc.setFontSize(10);
   doc.text("*REQUEST FOR QUOTATION", bx + bw / 2, by + 11.5, { align: "center" });
   doc.setFontSize(8.5);
-  const valX = bx + 96, valW = bx + bw - 4 - valX;
+  let rTop = by + 16;
   rows.forEach((r, i) => {
-    const ry = by + rowH * (i + 1);
-    doc.line(bx, ry, bx + bw, ry);
-    doc.setFont("helvetica", "bold"); doc.text(r[0], bx + 4, ry + 11);
+    doc.line(bx, rTop, bx + bw, rTop);
+    doc.setFont("helvetica", "bold"); doc.text(r[0], bx + 4, rTop + 11);
     doc.setFont("helvetica", "normal");
     if (r[0] === "Please reply by") doc.setTextColor(200, 30, 30);
-    const val = `: ${r[1]}`;
-    let fs = 8.5;
-    while (fs > 6 && doc.getTextWidth(val) > valW) { fs -= 0.5; doc.setFontSize(fs); }
-    doc.text(val, valX, ry + 11);
-    doc.setFontSize(8.5);
+    valLines[i].forEach((ln, j) => doc.text(ln, valX, rTop + 11 + j * 10));
     doc.setTextColor(0);
+    rTop += rowHs[i];
   });
 
   // ── Project + intro ──
@@ -140,6 +155,7 @@ export async function exportRfqPdf(group) {
   // ── Items table — Unit Price / Total left BLANK for the supplier ──
   const descs = items.map((it) => String(it.description || ""));
   const colours = items.map((it) => (it.colour ? String(it.colour).toUpperCase() : ""));
+  const colourDraw = {}; // row index -> { lines, nDesc }, filled in willDrawCell, used in didDrawCell
   const head = [["Item", "Descriptions", "Qty", "Unit", `Unit Price (${sym})`, `Total (${sym})`]];
   const body = items.map((it, i) => [
     i + 1,
@@ -159,22 +175,34 @@ export async function exportRfqPdf(group) {
     headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: "bold", halign: "center", lineColor: [0, 0, 0], lineWidth: 0.7 },
     columnStyles: { 0: { cellWidth: 34, halign: "center" }, 1: { cellWidth: 230, valign: "top" }, 2: { cellWidth: 40, halign: "center" }, 3: { cellWidth: 45, halign: "center" }, 4: { cellWidth: 72, halign: "right" }, 5: { cellWidth: 93, halign: "right" } },
     margin: { left: M, right: M },
+    // The colour is part of the cell text so the row is sized for it, but it must print in red.
+    // autoTable applies the cell's styles BEFORE willDrawCell runs, so a colour change here is
+    // too late — the description would print dark and then again in didDrawCell (the overlapping
+    // text bug). Instead, drop the colour lines from what autoTable prints and draw them
+    // ourselves, once, directly under the description.
     willDrawCell: (data) => {
       if (data.section === "body" && data.column.index === 1 && colours[data.row.index]) {
-        data.cell.styles.textColor = [255, 255, 255];
+        const w = Math.ceil(data.cell.width - data.cell.padding("left") - data.cell.padding("right"));
+        const nColour = doc.splitTextToSize(colours[data.row.index], w).length;
+        colourDraw[data.row.index] = {
+          lines: doc.splitTextToSize(colours[data.row.index], w),
+          nDesc: Math.max(0, data.cell.text.length - nColour),
+        };
+        data.cell.text = data.cell.text.slice(0, colourDraw[data.row.index].nDesc);
       }
     },
     didDrawCell: (data) => {
-      if (data.section === "body" && data.column.index === 1 && colours[data.row.index]) {
-        const x = data.cell.x + 4, w = data.cell.width - 8;
-        doc.setFontSize(9); doc.setFont("helvetica", "normal");
-        let ty = data.cell.y + 4 + 7;
-        doc.setTextColor(20, 20, 20);
-        doc.splitTextToSize(descs[data.row.index], w).forEach((ln) => { doc.text(ln, x, ty); ty += 10.5; });
-        doc.setTextColor(200, 30, 30);
-        doc.splitTextToSize(colours[data.row.index], w).forEach((ln) => { doc.text(ln, x, ty); ty += 10.5; });
-        doc.setTextColor(0);
-      }
+      const cd = data.section === "body" && data.column.index === 1 ? colourDraw[data.row.index] : null;
+      if (!cd) return;
+      const pos = data.cell.getTextPos();
+      const fs = data.cell.styles.fontSize;
+      const lineH = fs * (doc.getLineHeightFactor ? doc.getLineHeightFactor() : 1.15);
+      // Same baseline autoTable uses for the first line, then step past the description lines.
+      let ty = pos.y + fs * (2 - 1.15) + cd.nDesc * lineH;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(fs);
+      doc.setTextColor(200, 30, 30);
+      cd.lines.forEach((ln) => { doc.text(ln, pos.x, ty); ty += lineH; });
+      doc.setTextColor(0);
     },
     foot: [[{ content: "TOTAL", colSpan: 5, styles: { halign: "right", fontStyle: "bold" } }, { content: "", styles: {} }]],
     footStyles: { fillColor: [255, 255, 255], textColor: 0, lineColor: [0, 0, 0], lineWidth: 0.7 },
