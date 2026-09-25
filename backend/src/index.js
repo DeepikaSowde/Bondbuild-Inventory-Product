@@ -192,6 +192,11 @@ db.query(`ALTER TABLE po_approvals ADD COLUMN IF NOT EXISTS details JSONB`)
 db.query(`ALTER TABLE pr_items ADD COLUMN IF NOT EXISTS quote_requested_at TIMESTAMPTZ`)
   .catch((err) => console.error("pr_items.quote_requested_at migration:", err.message));
 
+// PO line remarks: the per-line Remarks from the PR, carried onto the PO at generation
+// so the PO PDF can print them (the PR form already has a REMARKS column). NULL = none.
+db.query(`ALTER TABLE po_items ADD COLUMN IF NOT EXISTS remarks TEXT`)
+  .catch((err) => console.error("po_items.remarks migration:", err.message));
+
 // Processing chain (enhancement #5): one requested item flows through a straight
 // line of processing stages (fabrication → powder coating → anodising…), each done
 // by a supplier and each becoming its own Buy PO. Stages share the parent's line_no
