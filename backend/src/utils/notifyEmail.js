@@ -20,6 +20,52 @@ async function emailsForRoles(roles) {
   }
 }
 
+// Who is copied on a supplier enquiry: the people tied to THIS PR rather than
+// every user of a role — the drafter who raised it, the Manager who approved it,
+// the QS who approved its sourcing, and the sending Purchaser (sent mail isn't
+// saved to Sent Items, so the CC is their copy). The enquiry can go out at
+// "Submit for QS approval", before any QS has signed off; in that case the QS
+// users are copied instead, as they're the ones about to review it.
+// People are found by USER ID wherever the PR has one (created_by, approved_by_id,
+// qs_approved_by_id — stamped from the logged-in user, so they can't miss or hit a
+// namesake). PRs approved before those ids existed fall back to the stored NAME,
+// and only when exactly one active user has that name — if it's ambiguous or
+// unmatched the person is skipped rather than risking copying the wrong one.
+// Anyone without an email on file is skipped. Never throws — an empty list just
+// means no CC.
+async function enquiryCcEmails(pr, senderEmail) {
+  const found = [senderEmail];
+  const byId = async (id) => {
+    try {
+      const { rows } = await db.query("SELECT email FROM users WHERE id = $1 AND email IS NOT NULL AND email <> ''", [id]);
+      if (rows[0]?.email) found.push(rows[0].email);
+      return rows.length > 0;
+    } catch { return false; }
+  };
+  const byUniqueName = async (name) => {
+    try {
+      const { rows } = await db.query(
+        "SELECT email FROM users WHERE lower(name) = lower($1) AND status = 'Active' AND email IS NOT NULL AND email <> ''", [name]);
+      if (rows.length === 1) found.push(rows[0].email);
+    } catch { /* skip */ }
+  };
+  // A saved id is authoritative: use it and stop (a person with no email on file is
+  // just skipped — never swapped for a namesake). Only PRs with no id use the name.
+  const person = async (id, name) => { if (id) await byId(id); else if (name) await byUniqueName(name); };
+
+  await person(pr?.created_by, pr?.requested_by);
+  await person(pr?.approved_by_id, pr?.approved_by);
+  if (pr?.qs_approved_by_id || pr?.qs_approved_by) await person(pr.qs_approved_by_id, pr.qs_approved_by);
+  else found.push(...(await emailsForRoles(["QS"])));
+  const seen = new Set();
+  return found.filter((e) => {
+    const k = String(e || "").trim().toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 // The app's public URL, for the "View in InventoryOpz" button. Prefers an
 // explicit APP_URL, else the first non-localhost origin in CORS_ORIGINS/CLIENT_URL.
 function appUrl() {
@@ -246,12 +292,14 @@ function supplierHtml({ supplierName, projectName, location, prNo, items, purcha
 // once, from the same list. Adding role-only copies back here would double-send.
 const Email = {
   // Supplier-facing purchase enquiry (send-as the Purchaser). Fire-and-forget.
-  supplierEnquiry: ({ supplierEmail, supplierName, projectName, location, prNo, items, purchaserName, fromEmail }) => {
+  // `cc` = the internal people to copy (see enquiryCcEmails); the mailer drops
+  // duplicates and the supplier's own address.
+  supplierEnquiry: ({ supplierEmail, supplierName, projectName, location, prNo, items, purchaserName, fromEmail, cc }) => {
     if (!supplierEmail) return;
     sendMailAsync([supplierEmail],
       `Purchase enquiry — ${projectName || prNo} · Ref ${prNo}`,
       supplierHtml({ supplierName, projectName, location, prNo, items, purchaserName }),
-      fromEmail);
+      fromEmail, undefined, cc);
   },
   // Email one or more ROLES with send-as + the PR's attachments, mirroring an
   // in-app notify() for steps outside the audience/event machinery (e.g. the QS
@@ -314,4 +362,4 @@ function sendSlaEmail({ toEmails, subject, title, lines, prNo, poNo, fromEmail, 
   );
 }
 
-module.exports = { Email, wrap, emailsForRoles, sendSlaEmail, attachmentsForPr, itemsForPr };
+module.exports = { Email, wrap, emailsForRoles, enquiryCcEmails, sendSlaEmail, attachmentsForPr, itemsForPr };

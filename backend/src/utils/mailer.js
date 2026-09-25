@@ -66,8 +66,11 @@ async function getToken() {
  * @param {string|string[]} to   recipient email(s); falsy entries ignored
  * @param {string} subject
  * @param {string} html
+ * @param {string} [from]        acting person's mailbox (send-as); falls back to MAIL_FROM
+ * @param {Array}  [attachments]
+ * @param {string|string[]} [cc] optional CC address(es); duplicates and anyone already in `to` are dropped
  */
-async function sendMail(to, subject, html, from, attachments) {
+async function sendMail(to, subject, html, from, attachments, cc) {
   try {
     const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
     if (!recipients.length) return { ok: false, skipped: "no recipient" };
@@ -89,11 +92,21 @@ async function sendMail(to, subject, html, from, attachments) {
     // Inline file attachments (base64). The caller keeps the total under Graph's
     // 4 MB message limit; larger files are omitted here and flagged in the body.
     const files = (attachments || []).filter((a) => a && a.contentBytes);
+    // CC: de-duplicated (case-insensitive) and never repeating a To address.
+    const seen = new Set(recipients.map((a) => String(a).trim().toLowerCase()));
+    const ccList = [];
+    for (const a of (Array.isArray(cc) ? cc : [cc])) {
+      const addr = String(a || "").trim();
+      if (!addr || seen.has(addr.toLowerCase())) continue;
+      seen.add(addr.toLowerCase());
+      ccList.push(addr);
+    }
     const body = {
       message: {
         subject,
         body: { contentType: "HTML", content: html },
         toRecipients: recipients.map((address) => ({ emailAddress: { address } })),
+        ...(ccList.length ? { ccRecipients: ccList.map((address) => ({ emailAddress: { address } })) } : {}),
         ...(files.length ? {
           attachments: files.map((a) => ({
             "@odata.type": "#microsoft.graph.fileAttachment",
@@ -124,8 +137,8 @@ async function sendMail(to, subject, html, from, attachments) {
 }
 
 // Fire-and-forget: never blocks the request.
-function sendMailAsync(to, subject, html, from, attachments) {
-  sendMail(to, subject, html, from, attachments).catch(() => {});
+function sendMailAsync(to, subject, html, from, attachments, cc) {
+  sendMail(to, subject, html, from, attachments, cc).catch(() => {});
 }
 
 module.exports = { sendMail, sendMailAsync };

@@ -234,6 +234,16 @@ db.query(`ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS qs_approved_at 
 db.query(`ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS qs_sent_back_reason TEXT`)
   .catch((err) => console.error("purchase_requests.qs_sent_back_reason migration:", err.message));
 
+// Who actually approved, by user id. approved_by / qs_approved_by hold display NAMES
+// (approved_by can even be typed over on the approve form), so looking a person up
+// by name can miss them or hit a namesake. These ids are stamped from the logged-in
+// user at approval and are what the supplier-enquiry CC list uses. NULL on PRs
+// approved before this existed — those fall back to a unique-name match.
+db.query(`ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS approved_by_id UUID REFERENCES users(id) ON DELETE SET NULL`)
+  .catch((err) => console.error("purchase_requests.approved_by_id migration:", err.message));
+db.query(`ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS qs_approved_by_id UUID REFERENCES users(id) ON DELETE SET NULL`)
+  .catch((err) => console.error("purchase_requests.qs_approved_by_id migration:", err.message));
+
 // Gate 2 (PO, price): a SEPARATE price-approval track on the PO, independent of the
 // delivery_stage/status track — the two never gate each other; only Close checks both.
 // AWAITING_PRICING → PENDING_QS_PRICE (on any price edit) → PRICE_APPROVED (QS).
