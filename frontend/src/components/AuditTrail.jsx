@@ -30,6 +30,8 @@ const ACTION = {
   CREATE_STOCK:   { label: "Stock PO created",   cls: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
   DELIVERY_STAGE: { label: "Delivery updated",   cls: "bg-sky-50 text-sky-700 ring-sky-200" },
   RECEIVE:        { label: "Goods received",     cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  // A stock-only PR is fulfilled once its last stock PO is collected (Approved → PO Raised).
+  STOCK_COLLECTED:{ label: "Stock collected",    cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
   CANCEL:         { label: "Cancelled",          cls: "bg-red-50 text-red-700 ring-red-200" },
 };
 const act = (a) => ACTION[a] || { label: a, cls: "bg-gray-50 text-gray-700 ring-gray-200" };
