@@ -251,7 +251,18 @@ export async function exportPrPdf(pr) {
   });
 
   // ── Signatory block ──
-  let sy = doc.lastAutoTable.finalY + 26;
+  let sy = doc.lastAutoTable.finalY + 20;
+  // Overall remark (PR header), below the items table — same placement as the PO PDF.
+  if (pr.remarks) {
+    if (sy > H - 150) { doc.addPage(); sy = 90; }
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(0);
+    doc.splitTextToSize(`REMARK: ${pr.remarks}`, W - M * 2).forEach((ln) => {
+      if (sy > H - 120) { doc.addPage(); sy = 90; }
+      doc.text(ln, M, sy); sy += 13;
+    });
+    sy += 8;
+  }
+  sy += 6;
   // keep it clear of the company footer
   if (sy > H - 120) { doc.addPage(); sy = 90; }
   doc.setFontSize(10); doc.setTextColor(0);
