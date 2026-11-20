@@ -12,6 +12,7 @@ const path = require("path");
 const db = require("../config/db");
 const spaces = require("../config/spaces");
 const { protect } = require("../middleware/auth");
+const { canManagePrFiles, DENIED } = require("../utils/prFilePerms");
 
 const router = express.Router();
 
@@ -50,8 +51,9 @@ router.post("/:prNo/attachments", protect, upload.array("files", 20), async (req
   if (!spaces.isConfigured()) return fail(res, 503, "File storage is not configured on the server yet");
   const uploadedKeys = [];
   try {
-    const pr = await db.query("SELECT id FROM purchase_requests WHERE pr_no = $1", [req.params.prNo]);
+    const pr = await db.query("SELECT id, status, created_by FROM purchase_requests WHERE pr_no = $1", [req.params.prNo]);
     if (!pr.rows[0]) return fail(res, 404, "PR not found");
+    if (!(await canManagePrFiles(req.user, pr.rows[0]))) return fail(res, 403, DENIED);
     const prId = pr.rows[0].id;
     const saved = [];
     for (const f of files) {
@@ -104,12 +106,19 @@ router.get("/attachments/:id/download", protect, async (req, res) => {
   }
 });
 
-// Delete one file
+// Delete one file — roles with manage_pr_attachments (any stage), or the raiser while editable
 router.delete("/attachments/:id", protect, async (req, res) => {
   try {
-    const { rows } = await db.query("DELETE FROM pr_attachments WHERE id = $1 RETURNING *", [req.params.id]);
+    const { rows } = await db.query(
+      `SELECT a.*, pr.status, pr.created_by
+       FROM pr_attachments a JOIN purchase_requests pr ON pr.id = a.pr_id
+       WHERE a.id = $1`,
+      [req.params.id]
+    );
     const a = rows[0];
     if (!a) return fail(res, 404, "Attachment not found");
+    if (!(await canManagePrFiles(req.user, a))) return fail(res, 403, DENIED);
+    await db.query("DELETE FROM pr_attachments WHERE id = $1", [req.params.id]);
     await spaces.deleteObject(a.file_path);
     ok(res, { deleted: true });
   } catch (e) { fail(res, 500, e.message); }

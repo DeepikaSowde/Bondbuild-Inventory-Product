@@ -276,6 +276,20 @@ db.query(`
   END $$;
 `).catch((err) => console.error("pr_po_permissions.qs_approve migration:", err.message));
 
+// Who may add/remove PR attachments (whole-PR + per-item) after the PR is raised.
+// Same first-creation-only backfill as qs_approve, so later boots never undo an
+// Admin's edits on the Role Permissions screen.
+db.query(`
+  DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'pr_po_permissions' AND column_name = 'manage_pr_attachments') THEN
+      ALTER TABLE pr_po_permissions ADD COLUMN manage_pr_attachments BOOLEAN NOT NULL DEFAULT FALSE;
+      UPDATE pr_po_permissions SET manage_pr_attachments = TRUE
+       WHERE role IN ('Drafter','Manager','Purchaser','Admin');
+    END IF;
+  END $$;
+`).catch((err) => console.error("pr_po_permissions.manage_pr_attachments migration:", err.message));
+
 // GST 9% on local-supplier BUY POs (overseas suppliers and internal STOCK POs
 // are excluded — a Stock PO is stamped supplier_type 'Local', hence the po_type
 // check). Generated columns, so every PO write path stays correct with no app

@@ -11,8 +11,8 @@
 //
 // PERMISSIONS (as agreed with the client):
 //   view / download → any authenticated user ("all in the ecosystem")
-//   upload          → any authenticated user, while the PR is still editable
-//   delete          → the PR's creator, or an Admin, while the PR is still editable
+//   upload / delete → roles with "manage_pr_attachments" at ANY stage, or the PR's
+//                     raiser while the PR is still editable (utils/prFilePerms.js)
 //
 // Note the deliberate consequence: because download is open to every authenticated
 // user, a supplier quotation attached here is readable by users whose *price columns*
@@ -26,6 +26,7 @@ const path = require("path");
 const db = require("../config/db");
 const spaces = require("../config/spaces");
 const { protect } = require("../middleware/auth");
+const { canManagePrFiles, DENIED } = require("../utils/prFilePerms");
 
 const router = express.Router();
 
@@ -36,11 +37,6 @@ const PREFIX = "pr-item-attachments";
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES_PER_ITEM = 2;
 const MAX_PR_BYTES = 20 * 1024 * 1024;
-
-// A PR's items may only be touched while the PR itself is still editable — the same
-// gate routes/purchaseRequests.js applies to PUT /:prNo. Once approved, the attachments
-// are part of what was approved and freeze with it.
-const EDITABLE_STATUSES = ["PENDING", "SEND_BACK"];
 
 // Allowlist, not a blocklist. prAttachments.js enumerates ~40 banned extensions and
 // still lets .html and .svg through; inverting the default closes that whole class.
@@ -102,9 +98,7 @@ router.post("/:prNo/items/:itemUid/attachments", protect, upload.array("files", 
     try {
       const pr = await loadPr(prNo);
       if (!pr) return fail(res, 404, "PR not found");
-      if (!EDITABLE_STATUSES.includes(pr.status)) {
-        return fail(res, 409, `PR is ${pr.status} — its item attachments can no longer be changed`);
-      }
+      if (!(await canManagePrFiles(req.user, pr))) return fail(res, 403, DENIED);
 
       // The item must actually belong to this PR. Without this, any uid string would
       // create attachment rows nobody can ever see or delete.
@@ -187,7 +181,7 @@ router.get("/item-attachments/:id/download", protect, async (req, res) => {
   }
 });
 
-// ── Delete — PR creator or Admin only, and only while the PR is editable ──
+// ── Delete — manage_pr_attachments roles (any stage), or the raiser while editable ──
 router.delete("/item-attachments/:id", protect, async (req, res) => {
   try {
     const { rows } = await db.query(
@@ -200,13 +194,7 @@ router.delete("/item-attachments/:id", protect, async (req, res) => {
     const a = rows[0];
     if (!a) return fail(res, 404, "Attachment not found");
 
-    const isOwner = a.created_by && String(a.created_by) === String(req.user.id);
-    if (req.user.role !== "Admin" && !isOwner) {
-      return fail(res, 403, "Only the person who raised this PR, or an Admin, can remove its attachments");
-    }
-    if (!EDITABLE_STATUSES.includes(a.status)) {
-      return fail(res, 409, `PR is ${a.status} — its item attachments can no longer be changed`);
-    }
+    if (!(await canManagePrFiles(req.user, a))) return fail(res, 403, DENIED);
 
     await db.query("DELETE FROM pr_item_attachments WHERE id = $1", [req.params.id]);
     await spaces.deleteObject(a.file_path);

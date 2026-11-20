@@ -370,7 +370,7 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
       <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} />
 
       {showCreate && (
-        <PRForm user={user} suppliers={suppliers} editPR={editPR} notify={notify}
+        <PRForm user={user} suppliers={suppliers} editPR={editPR} perms={perms} notify={notify}
           onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); refresh(); }} />
       )}
       {viewPR && (
@@ -393,7 +393,12 @@ export default function PurchaseRequests({ user, perms = {}, notify, refreshInbo
   );
 }
 
-function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
+function PRForm({ user, suppliers, editPR, perms = {}, notify, onClose, onSaved }) {
+  // Add/remove per-item files on the form. A new PR is the raiser's own; on an edit,
+  // the raiser keeps it while editable (the form only opens then), otherwise it needs
+  // "Manage PR Attachments" — same rule as backend utils/prFilePerms.js.
+  const canManageFiles = !editPR || user.role === "Admin" || !!perms.manage_pr_attachments ||
+    (!!editPR.created_by && String(editPR.created_by) === String(user.id));
   const blankItem = () => ({
     profile_code: "", description: "", colour: "", qty: "", unit: "pcs",
     remarks: "", supplier_id: "", supplier_name: "", supplier_type: "Local",
@@ -997,7 +1002,7 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
                 )}
               </div>
 
-              {/* Per-item attachments — everyone can view and add; only the raiser or an Admin removes */}
+              {/* Per-item attachments — everyone can download; add / remove needs canManageFiles */}
               <div className="px-3 pb-2">
                 <label className={lbl}>
                   Attachments ({fileCountOf(it.item_uid)}/{ITEM_FILE_LIMITS.maxPerItem}) — PDF, image, Word or Excel · max 5 MB each
@@ -1013,7 +1018,9 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
                       >
                         {a.original_name}
                       </button>
-                      <button type="button" className="text-[#9CA3AF] hover:text-[#DC2626]" title="Remove" onClick={() => dropSavedFile(a)}>✕</button>
+                      {canManageFiles && (
+                        <button type="button" className="text-[#9CA3AF] hover:text-[#DC2626]" title="Remove" onClick={() => dropSavedFile(a)}>✕</button>
+                      )}
                     </span>
                   ))}
                   {heldFilesOf(it.item_uid).map((f, x) => (
@@ -1022,7 +1029,7 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
                       <button type="button" className="text-[#9CA3AF] hover:text-[#DC2626]" title="Remove" onClick={() => dropHeldFile(it.item_uid, x)}>✕</button>
                     </span>
                   ))}
-                  {fileCountOf(it.item_uid) < ITEM_FILE_LIMITS.maxPerItem && (
+                  {canManageFiles && fileCountOf(it.item_uid) < ITEM_FILE_LIMITS.maxPerItem && (
                     <label className="cursor-pointer rounded border border-[#E5E7EB] bg-white px-2 py-px text-[11px] font-semibold text-[#4F46E5] hover:bg-[#F5F3FF]">
                       + Attach
                       <input
@@ -1196,7 +1203,7 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
       </div>
 
       {/* Whole-PR attachments — files are held now, uploaded right after the PR saves */}
-      <div className="mt-3.5">
+      {canManageFiles && <div className="mt-3.5">
         <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF]">Attachments (whole PR)</div>
         <div className="rounded-lg border border-dashed border-[#C7D2FE] bg-[#F5F3FF] px-3 py-2.5">
           <button type="button" onClick={() => fileInputRef.current && fileInputRef.current.click()}
@@ -1224,7 +1231,7 @@ function PRForm({ user, suppliers, editPR, notify, onClose, onSaved }) {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       <div className="mt-5 flex justify-end gap-2.5">
         <Btn variant="soft" onClick={guardedClose}>Cancel</Btn>
@@ -1249,6 +1256,11 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
   const pQsApprove = !!perms.qs_approve || isAdmin;   // QS approval Gate 1 (sourcing)
   // FIC shouldn't send stock to themselves — hide "Send stock to FIC" for that role.
   const pSendFic = (!!perms.send_to_fic || isAdmin) && user.role !== "Factory In-charge";
+  // Add/remove PR files (whole-PR + per-item). Mirrors backend utils/prFilePerms.js:
+  // the permission at any stage, or the raiser while the PR is still editable.
+  const pManageFiles = !!perms.manage_pr_attachments || isAdmin ||
+    (!!pr.created_by && String(pr.created_by) === String(user.id) &&
+      ["DRAFT", "PENDING", "SEND_BACK"].includes(pr.status));
   const [items, setItems] = useState(pr.items.map((it) => ({ ...it })));
   // Purchaser opt-in: also email the supplier(s) when submitting for QS approval.
   const [emailSupplier, setEmailSupplier] = useState(false);
@@ -1439,56 +1451,14 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
 
       {pr.remarks && <div className="mt-3 text-[13px] text-[#6B7280]">Remarks: {pr.remarks}</div>}
 
-      {/* Per-item links & files — read-only mirror of what the drafter attached to each line.
-          Grouped by item_uid so a material split across a stock + buy row shows once. */}
-      {(() => {
-        const seen = new Set();
-        const perItem = [];
-        for (const it of items) {
-          const uid = it.item_uid;
-          if (!uid || seen.has(uid)) continue;
-          seen.add(uid);
-          const files = (pr.item_attachments || []).filter((a) => a.item_uid === uid);
-          const link = (it.onedrive_url || "").trim();
-          if (!link && !files.length) continue;
-          perItem.push({ it, link, files });
-        }
-        if (!perItem.length) return null;
-        return (
-          <div className="mt-4">
-            <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[#9CA3AF]">Item links &amp; files</div>
-            <div className="space-y-1.5">
-              {perItem.map(({ it, link, files }) => (
-                <div key={it.item_uid} className="rounded-lg border border-[#F3F4F6] px-3 py-2">
-                  <div className="mb-1 text-[12.5px] font-semibold text-[#374151]">{it.description || it.profile_code || "Item"}</div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {link && (
-                      <a href={link} target="_blank" rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 rounded border border-[#E5E7EB] bg-white px-1.5 py-px text-[11px] text-[#4F46E5] hover:underline"
-                        title={link}>
-                        🔗 OneDrive link
-                      </a>
-                    )}
-                    {files.map((a) => (
-                      <button key={a.id} type="button"
-                        className="inline-flex max-w-[200px] items-center gap-1 truncate rounded border border-[#E5E7EB] bg-white px-1.5 py-px text-[11px] text-[#4F46E5] hover:underline"
-                        title={`Download ${a.original_name}`}
-                        onClick={() => downloadAttachment(api.itemAttachmentDownloadPath(a.id), a.original_name)}>
-                        {a.original_name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
+      {/* Per-item links & files — everyone can download; roles with "Manage PR
+          Attachments" can also add / remove here, at any stage. */}
+      <PRItemFiles pr={pr} items={items} canManage={pManageFiles} notify={notify} />
 
-      {/* Whole-PR attachments — view, add, remove */}
+      {/* Whole-PR attachments — everyone can download; add / remove needs the permission */}
       <div className="mt-4">
         <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[#9CA3AF]">Attachments</div>
-        <PRAttachments pr={pr} notify={notify} onChanged={() => onChanged(pr)} />
+        <PRAttachments pr={pr} notify={notify} canManage={pManageFiles} onChanged={() => onChanged(pr)} />
       </div>
 
       {assignMode && (
@@ -1770,7 +1740,7 @@ function RejectModal({ pr, busy, onClose, onDone }) {
 
 // Per-item attachment list + uploader (files attach after the PR is saved)
 // Whole-PR attachments: list + add + download + remove (used when a PR is opened)
-function PRAttachments({ pr, notify, onChanged }) {
+function PRAttachments({ pr, notify, canManage = false, onChanged }) {
   const [files, setFiles] = useState(pr.attachments || []);
   const [busy, setBusy] = useState(false);
   useEffect(() => { setFiles(pr.attachments || []); }, [pr]);
@@ -1804,10 +1774,12 @@ function PRAttachments({ pr, notify, onChanged }) {
     <div className="rounded-lg border border-[#E5E7EB] px-3 py-2.5">
       <div className="mb-1.5 flex items-center justify-between">
         <span className="text-[12px] font-semibold text-[#374151]">Files for {pr.pr_no}</span>
-        <label className={`cursor-pointer rounded-md bg-[#EEF2FF] px-2.5 py-1 text-[11px] font-semibold text-[#6366F1] ${busy ? "opacity-50" : ""}`}>
-          📎 Attach File
-          <input type="file" multiple className="hidden" disabled={busy} onChange={onPick} />
-        </label>
+        {canManage && (
+          <label className={`cursor-pointer rounded-md bg-[#EEF2FF] px-2.5 py-1 text-[11px] font-semibold text-[#6366F1] ${busy ? "opacity-50" : ""}`}>
+            📎 Attach File
+            <input type="file" multiple className="hidden" disabled={busy} onChange={onPick} />
+          </label>
+        )}
       </div>
       {files.length === 0 ? (
         <div className="text-[11px] text-[#9CA3AF]">No files attached.</div>
@@ -1818,11 +1790,112 @@ function PRAttachments({ pr, notify, onChanged }) {
               <button onClick={() => download(a)} className="truncate text-left text-[#6366F1] hover:underline" title={a.original_name}>
                 📄 {a.original_name} <span className="text-[#9CA3AF]">({kb(a.size_bytes)})</span>
               </button>
-              <button onClick={() => remove(a)} disabled={busy} className="ml-2 shrink-0 text-[#EF4444]">✕</button>
+              {canManage && (
+                <button onClick={() => remove(a)} disabled={busy} className="ml-2 shrink-0 text-[#EF4444]" title="Remove">✕</button>
+              )}
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// Per-item links & files on an opened PR. Read-only for most roles; with canManage
+// each item also gets "+ Attach" (up to the per-item limit) and ✕ on its files.
+// Files key on item_uid, so a material split across stock + buy rows shows once.
+function PRItemFiles({ pr, items, canManage, notify }) {
+  const [files, setFiles] = useState(pr.item_attachments || []);
+  const [busyUid, setBusyUid] = useState(null);
+  useEffect(() => { setFiles(pr.item_attachments || []); }, [pr]);
+
+  const refresh = async () => { try { setFiles(await api.listItemAttachments(pr.pr_no)); } catch {} };
+
+  const seen = new Set();
+  const rows = [];
+  for (const it of items) {
+    const uid = it.item_uid;
+    if (!uid || seen.has(uid)) continue;
+    seen.add(uid);
+    const mine = files.filter((a) => a.item_uid === uid);
+    const link = (it.onedrive_url || "").trim();
+    // Viewers only see items that actually have something; managers see every item
+    // so they can attach to one that has nothing yet.
+    if (!canManage && !link && !mine.length) continue;
+    rows.push({ it, link, files: mine });
+  }
+  if (!rows.length) return null;
+
+  const onPick = async (uid, current, fileList) => {
+    const picked = Array.from(fileList || []);
+    if (!picked.length) return;
+    const room = ITEM_FILE_LIMITS.maxPerItem - current;
+    if (picked.length > room) {
+      return notify(room <= 0
+        ? `This item already has ${ITEM_FILE_LIMITS.maxPerItem} files — remove one first`
+        : `Only ${room} more file(s) allowed on this item`, "error");
+    }
+    const tooBig = picked.find((f) => f.size > ITEM_FILE_LIMITS.maxBytes);
+    if (tooBig) return notify(`"${tooBig.name}" is over the 5 MB limit`, "error");
+    setBusyUid(uid);
+    try { await api.uploadItemAttachments(pr.pr_no, uid, picked); notify(`${picked.length} file(s) attached`); await refresh(); }
+    catch (e) { notify(apiError(e), "error"); }
+    finally { setBusyUid(null); }
+  };
+  const remove = async (a) => {
+    if (!window.confirm(`Delete attachment "${a.original_name}"?\n\nThis removes the file permanently and can't be undone.`)) return;
+    setBusyUid(a.item_uid);
+    try { await api.deleteItemAttachment(a.id); await refresh(); notify("Attachment removed"); }
+    catch (e) { notify(apiError(e), "error"); }
+    finally { setBusyUid(null); }
+  };
+
+  return (
+    <div className="mt-4">
+      <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[#9CA3AF]">Item links &amp; files</div>
+      <div className="space-y-1.5">
+        {rows.map(({ it, link, files: fs }) => {
+          const busy = busyUid === it.item_uid;
+          return (
+            <div key={it.item_uid} className="rounded-lg border border-[#F3F4F6] px-3 py-2">
+              <div className="mb-1 text-[12.5px] font-semibold text-[#374151]">{it.description || it.profile_code || "Item"}</div>
+              <div className={`flex flex-wrap items-center gap-1.5 ${busy ? "opacity-50" : ""}`}>
+                {link && (
+                  <a href={link} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded border border-[#E5E7EB] bg-white px-1.5 py-px text-[11px] text-[#4F46E5] hover:underline"
+                    title={link}>
+                    🔗 OneDrive link
+                  </a>
+                )}
+                {fs.map((a) => (
+                  <span key={a.id} className="inline-flex items-center gap-1 rounded border border-[#E5E7EB] bg-white px-1.5 py-px text-[11px]">
+                    <button type="button"
+                      className="max-w-[200px] truncate text-[#4F46E5] hover:underline"
+                      title={`Download ${a.original_name}`}
+                      onClick={() => downloadAttachment(api.itemAttachmentDownloadPath(a.id), a.original_name)
+                        .catch((e) => notify(apiError(e), "error"))}>
+                      {a.original_name}
+                    </button>
+                    {canManage && (
+                      <button type="button" disabled={busy} className="text-[#9CA3AF] hover:text-[#DC2626]" title="Remove" onClick={() => remove(a)}>✕</button>
+                    )}
+                  </span>
+                ))}
+                {canManage && fs.length < ITEM_FILE_LIMITS.maxPerItem && (
+                  <label className="cursor-pointer rounded border border-[#E5E7EB] bg-white px-2 py-px text-[11px] font-semibold text-[#4F46E5] hover:bg-[#F5F3FF]">
+                    + Attach
+                    <input type="file" multiple accept={ITEM_FILE_ACCEPT} className="hidden" disabled={busy}
+                      onChange={(e) => { onPick(it.item_uid, fs.length, e.target.files); e.target.value = ""; }} />
+                  </label>
+                )}
+                {canManage && !link && !fs.length && (
+                  <span className="text-[11px] text-[#9CA3AF]">No files yet.</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

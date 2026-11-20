@@ -104,6 +104,7 @@ const PRPO_PERM_GROUPS = [
       { key: "assign_supplier", label: "Assign Supplier & Price", desc: "Can set vendor and buy price" },
       { key: "send_to_fic", label: "Send Stock to FIC", desc: "Can send stock items to Factory In-charge" },
       { key: "issue_stock", label: "Issue Stock", desc: "Can reduce inventory for a PR" },
+      { key: "manage_pr_attachments", label: "Manage PR Attachments", desc: "Can add or remove PR files (whole-PR and per-item) at any stage" },
     ],
   },
   {

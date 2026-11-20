@@ -17,6 +17,7 @@ const ROLE_DEFAULTS = {
   set_delivery:    ["Factory In-charge", "Supervisor", "Admin"],
   receive_po:      ["Purchaser", "Supervisor", "Factory In-charge", "Admin"],
   cancel_po:       ["Purchaser", "Admin"],
+  manage_pr_attachments: ["Drafter", "Manager", "Purchaser", "Admin"],
 };
 
 // returns true/false for a (role, action), honouring the table then falling back to role

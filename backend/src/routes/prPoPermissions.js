@@ -9,6 +9,7 @@ const router = express.Router();
 const COLS = [
   "raise_pr", "approve_pr", "reject_pr", "assign_supplier", "send_to_fic",
   "issue_stock", "generate_po", "qs_approve", "set_delivery", "receive_po", "cancel_po",
+  "manage_pr_attachments",
   "see_pr_price", "see_po_price", "see_po_amount",
   "see_operation_finance", "see_accounting",
 ];
@@ -28,6 +29,7 @@ const ROLE_DEFAULTS = {
   set_delivery:           ["Factory In-charge", "Supervisor", "Admin"],
   receive_po:             ["Purchaser", "Supervisor", "Factory In-charge", "Admin"],
   cancel_po:              ["Purchaser", "Admin"],
+  manage_pr_attachments:  ["Drafter", "Manager", "Purchaser", "Admin"],
   see_pr_price:           ["Manager", "Purchaser", "QS", "Account", "Admin"],
   see_po_price:           ["Manager", "Purchaser", "QS", "Account", "Admin"],
   see_po_amount:          ["Manager", "Purchaser", "QS", "Account", "Admin"],
