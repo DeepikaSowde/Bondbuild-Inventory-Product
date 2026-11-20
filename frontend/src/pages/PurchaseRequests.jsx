@@ -690,9 +690,17 @@ function PRForm({ user, suppliers, editPR, perms = {}, notify, onClose, onSaved 
       if (editPR) {
         await api.updatePR(editPR.pr_no, { ...payload, resubmit: editPR.status === "SEND_BACK" });
         const { failed } = await uploadHeldItemFiles(editPR.pr_no);
+        // Whole-PR files picked while editing (draft / send-back / edit) — these were
+        // previously never uploaded on this path, so they silently vanished.
+        let prFilesErr = null;
+        if (heldFiles.length) {
+          try { await api.uploadAttachments(editPR.pr_no, heldFiles); }
+          catch (e) { prFilesErr = apiError(e); }
+        }
         // A draft is promoted to PENDING here — this is its Submit-for-approval path.
         if (editPR.status === "DRAFT") await api.submitPR(editPR.pr_no);
-        if (failed.length) notify(`${editPR.pr_no} updated, but ${failed.length} item file(s) failed: ${failed[0]}`, "warning");
+        if (prFilesErr) notify(`${editPR.pr_no} saved, but the attachment(s) failed to upload: ${prFilesErr} — open the PR to add them`, "warning");
+        else if (failed.length) notify(`${editPR.pr_no} updated, but ${failed.length} item file(s) failed: ${failed[0]}`, "warning");
         else if (editPR.status === "DRAFT") notify(`${editPR.pr_no} submitted for approval`);
         else notify(`${editPR.pr_no} updated${editPR.status === "SEND_BACK" ? " and resubmitted" : ""}`);
       }
@@ -734,9 +742,11 @@ function PRForm({ user, suppliers, editPR, perms = {}, notify, onClose, onSaved 
       const payload = { ...form, items: flattenItems(form.items.filter((it) => it.description.trim())) };
       const prNo = editPR ? editPR.pr_no : (await api.createPR({ ...payload, draft: true })).pr_no;
       if (editPR) await api.updatePR(editPR.pr_no, payload);
-      await uploadHeldItemFiles(prNo);
-      if (heldFiles.length) { try { await api.uploadAttachments(prNo, heldFiles); } catch { /* re-add from the reopened draft */ } }
-      notify(`${prNo} saved as draft`);
+      const itemResult = await uploadHeldItemFiles(prNo);
+      let filesOk = !itemResult.failed.length;
+      if (heldFiles.length) { try { await api.uploadAttachments(prNo, heldFiles); } catch { filesOk = false; } }
+      if (filesOk) notify(`${prNo} saved as draft`);
+      else notify(`${prNo} saved as draft, but some files failed to upload — open the draft to add them`, "warning");
       onSaved();
     } catch (e) { notify(apiError(e), "error"); } finally { setBusy(false); }
   };
