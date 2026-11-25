@@ -76,6 +76,9 @@ const FIELD_CLS = "w-full box-border bg-white border border-[#E5E7EB] rounded-lg
 export function Input({ className = "", ...props }) {
   return <input {...props} className={`${FIELD_CLS} ${className}`} />;
 }
+export function Textarea({ className = "", ...props }) {
+  return <textarea {...props} className={`${FIELD_CLS} resize-y ${className}`} />;
+}
 export function Select({ children, className = "", ...props }) {
   return <select {...props} className={`${FIELD_CLS} ${className}`}>{children}</select>;
 }

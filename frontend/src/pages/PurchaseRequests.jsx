@@ -1,7 +1,7 @@
 // pages/PurchaseRequests.jsx — Tailwind version
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiError, downloadAttachment } from "../lib/api";
-import { Btn, Badge, Modal, Field, Input, Select, EmptyRow, money, curMoney, fmtDate } from "../components/ui";
+import { Btn, Badge, Modal, Field, Input, Textarea, Select, EmptyRow, money, curMoney, fmtDate } from "../components/ui";
 import { Table, Td, usePaged, Pagination } from "../components/Table";
 import { exportPrPdf } from "../lib/prPdf";
 import { exportRfqPdf, exportRfqExcel } from "../lib/rfqDoc";
@@ -81,7 +81,10 @@ const tracksOf = (it) => (stockSumOf(it) > 0 && buyQtyOf(it) > 0 ? ["S", "B"] : 
 const newItemUid = () =>
   globalThis.crypto?.randomUUID?.() ?? `uid-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-const ITEM_FILE_LIMITS = { maxPerItem: 2, maxBytes: 5 * 1024 * 1024, maxPrBytes: 20 * 1024 * 1024 };
+// Overall PR remark: multi-line, max length (the DB column is TEXT — this is a UI cap).
+const OVERALL_REMARK_MAX = 1000;
+
+const ITEM_FILE_LIMITS ={ maxPerItem: 2, maxBytes: 5 * 1024 * 1024, maxPrBytes: 20 * 1024 * 1024 };
 const ITEM_FILE_ACCEPT = ".pdf,.jpg,.jpeg,.png,.webp,.docx,.xlsx";
 
 // Mirrors backend/src/utils/oneDriveUrl.js — the server is the authority; this is
@@ -1207,8 +1210,12 @@ function PRForm({ user, suppliers, editPR, perms = {}, notify, onClose, onSaved 
       <Btn variant="soft" small className="mt-3" onClick={addItem}>+ Add item</Btn>
 
       <div className="mt-3.5">
-        <Field label={`Remarks (overall) — ${(form.remarks || "").length}/200`}>
-          <Input value={form.remarks || ""} maxLength={200} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
+        {/* Multi-line, up to OVERALL_REMARK_MAX chars. Line breaks are kept on the PR
+            view, the PO screen, and both PDFs (jsPDF splits on \n). */}
+        <Field label={`Remarks (overall) — ${(form.remarks || "").length}/${OVERALL_REMARK_MAX}`}>
+          <Textarea rows={3} value={form.remarks || ""} maxLength={OVERALL_REMARK_MAX}
+            onChange={(e) => setForm({ ...form, remarks: e.target.value })}
+            placeholder="Notes for the whole request — press Enter for a new line" />
         </Field>
       </div>
 
@@ -1459,7 +1466,7 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
         </table>
       </div>
 
-      {pr.remarks && <div className="mt-3 text-[13px] text-[#6B7280]">Remarks: {pr.remarks}</div>}
+      {pr.remarks && <div className="mt-3 whitespace-pre-wrap break-words text-[13px] text-[#6B7280]">Remarks: {pr.remarks}</div>}
 
       {/* Per-item links & files — everyone can download; roles with "Manage PR
           Attachments" can also add / remove here, at any stage. */}
@@ -1783,7 +1790,10 @@ function PRAttachments({ pr, notify, canManage = false, onChanged }) {
   return (
     <div className="rounded-lg border border-[#E5E7EB] px-3 py-2.5">
       <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-[12px] font-semibold text-[#374151]">Files for {pr.pr_no}</span>
+        <span className="text-[12px] font-semibold text-[#374151]">
+          Files for {pr.pr_no}
+          {canManage && <span className="ml-1.5 font-normal text-[#9CA3AF]">· whole request · max {MAX_UPLOAD_MB} MB each</span>}
+        </span>
         {canManage && (
           <label className={`cursor-pointer rounded-md bg-[#EEF2FF] px-2.5 py-1 text-[11px] font-semibold text-[#6366F1] ${busy ? "opacity-50" : ""}`}>
             📎 Attach File
@@ -1862,7 +1872,10 @@ function PRItemFiles({ pr, items, canManage, notify }) {
 
   return (
     <div className="mt-4">
-      <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[#9CA3AF]">Item links &amp; files</div>
+      <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[#9CA3AF]">
+        Item links &amp; files
+        {canManage && <span className="ml-1.5 font-normal normal-case tracking-normal">· PDF, image, Word or Excel · max {ITEM_FILE_LIMITS.maxPerItem} per item, 5 MB each</span>}
+      </div>
       <div className="space-y-1.5">
         {rows.map(({ it, link, files: fs }) => {
           const busy = busyUid === it.item_uid;

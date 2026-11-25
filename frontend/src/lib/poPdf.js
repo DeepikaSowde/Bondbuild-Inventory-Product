@@ -246,7 +246,13 @@ export async function exportPoPdf(po, opts = {}) {
   if (po.remarks) {
     if (y > H - 90) { doc.addPage(); y = 90; }
     doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(0);
-    doc.splitTextToSize(`REMARK: ${po.remarks}`, W - M * 2).forEach((ln) => { doc.text(ln, M, y); y += 13; });
+    // Per-line guard: the overall remark can now be up to 1000 chars over several
+    // lines, so a long one must continue on the next page rather than run into the
+    // footer / off the page.
+    doc.splitTextToSize(`REMARK: ${po.remarks}`, W - M * 2).forEach((ln) => {
+      if (y > H - 90) { doc.addPage(); y = 90; }
+      doc.text(ln, M, y); y += 13;
+    });
     y += 8;
   }
 
