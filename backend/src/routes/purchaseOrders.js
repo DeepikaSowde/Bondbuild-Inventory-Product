@@ -426,11 +426,9 @@ router.post("/:poNo/receive", canDo("receive_po"), async (req, res) => {
         "INSERT INTO po_approvals (po_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'RECEIVE','OPEN',$2,$3,$4,$5)",
         [po.id, willClose ? "CLOSED" : "OPEN", req.user.name, req.user.role, req.body?.notes || ""]
       );
-      // A PR whose lines all come from stock never enters the QS / buy path — submit-for-qs
-      // rejects it and send-to-fic leaves it APPROVED — so nothing else would ever move it
-      // on, and it kept showing "Approved" long after the stock was collected. Once its
-      // last stock PO is collected it has been fulfilled: move it to PO_RAISED (the same
-      // end state a PR reaches once its PO exists). Guarded so a PR that still has buy
+      // Safety net: send-to-fic now moves a stock-only PR to PO_RAISED when it creates
+      // the Stock PO, so this normally finds the PR already moved and does nothing. It
+      // still catches stock-only PRs sent to FIC before that change. Guarded so a PR that still has buy
       // lines (it must stay APPROVED to be submitted to QS), open POs, or un-issued stock
       // lines is left alone.
       if (po.po_type === "STOCK" && po.pr_id) {
@@ -518,6 +516,32 @@ router.post("/:poNo/cancel", canDo("cancel_po"), async (req, res) => {
             "UPDATE pr_items SET stock_status = 'AWAITING_PURCHASER' WHERE id = $1",
             [it.id]
           );
+        }
+        // A stock-only PR moved to PO_RAISED at send-to-fic. If this was its last open
+        // PO and stock lines are now back with the Purchaser, nothing is in flight any
+        // more: move it back to APPROVED so the status stays honest. Mixed PRs (any buy
+        // line) are left alone — their status follows the Buy PO.
+        if (po.pr_id) {
+          const st = await c.query(
+            `SELECT
+               NOT EXISTS (SELECT 1 FROM pr_items WHERE pr_id = $1 AND buy_qty > 0)            AS no_buy,
+               NOT EXISTS (SELECT 1 FROM purchase_orders WHERE pr_id = $1 AND status = 'OPEN')  AS none_open,
+               EXISTS (SELECT 1 FROM pr_items WHERE pr_id = $1 AND stock_qty > 0
+                         AND stock_status = 'AWAITING_PURCHASER')                               AS needs_resend`,
+            [po.pr_id]
+          );
+          const s = st.rows[0];
+          if (s.no_buy && s.none_open && s.needs_resend) {
+            const back = await c.query(
+              "UPDATE purchase_requests SET status='APPROVED' WHERE id=$1 AND status='PO_RAISED' RETURNING id",
+              [po.pr_id]
+            );
+            if (back.rowCount)
+              await c.query(
+                "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'STOCK_PO_CANCELLED','PO_RAISED','APPROVED',$2,$3,$4)",
+                [po.pr_id, req.user.name, req.user.role, `Stock PO ${po.po_no} cancelled — stock to be re-sent`]
+              );
+          }
         }
       }
     });

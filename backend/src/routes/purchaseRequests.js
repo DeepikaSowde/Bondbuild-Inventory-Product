@@ -100,10 +100,12 @@ async function getPR(prNo, client = db) {
   let buyPoCreated = false, stockPoCreated = false;
   try {
     const pos = await client.query(
-      "SELECT po_type FROM purchase_orders WHERE pr_id = $1", [rows[0].id]
+      "SELECT po_type, status FROM purchase_orders WHERE pr_id = $1", [rows[0].id]
     );
     buyPoCreated = pos.rows.some((r) => r.po_type === "BUY");
-    stockPoCreated = pos.rows.some((r) => r.po_type === "STOCK");
+    // A cancelled Stock PO doesn't count: its lines are back with the Purchaser and
+    // must be re-sendable (the button and reminders depend on this flag).
+    stockPoCreated = pos.rows.some((r) => r.po_type === "STOCK" && r.status !== "CANCELLED");
   } catch { /* purchase_orders table always present; guard is belt-and-braces */ }
   return { ...rows[0], items: items.rows, attachments, item_attachments: itemAttachments,
            buy_po_created: buyPoCreated, stock_po_created: stockPoCreated };
@@ -667,7 +669,10 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
   try {
     const pr = await getPR(req.params.prNo);
     if (!pr) return fail(res, 404, "PR not found");
-    if (!["APPROVED","PO_RAISED"].includes(pr.status)) return fail(res, 409, "PR must be approved first");
+    // The stock side never changes a mixed PR's status, so it may be sent at any point
+    // after approval — including while the buy side is with QS.
+    if (!["APPROVED","PENDING_QS_APPROVAL","QS_APPROVED","PO_RAISED"].includes(pr.status))
+      return fail(res, 409, "PR must be approved first");
     const stockItems = pr.items.filter((it) => Number(it.stock_qty) > 0);
     if (!stockItems.length) return fail(res, 400, "This PR has no from-stock items");
     await withTransaction(async (c) => {
@@ -712,14 +717,20 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
                 COALESCE(stock_unit_price,0) AS stock_unit_price
          FROM pr_items WHERE pr_id = $1 AND stock_qty > 0`, [pr.id]
       );
+      // Re-send safe per location: skip a location that already has a live (OPEN or
+      // CLOSED) Stock PO. A CANCELLED one doesn't count, so re-sending after a cancel
+      // raises a fresh Stock PO for that location.
       const existingStockPO = await c.query(
-        "SELECT 1 FROM purchase_orders WHERE pr_id = $1 AND po_type = 'STOCK' LIMIT 1", [pr.id]
+        `SELECT DISTINCT COALESCE(source_location, 'Stock') AS loc FROM purchase_orders
+          WHERE pr_id = $1 AND po_type = 'STOCK' AND status <> 'CANCELLED'`, [pr.id]
       );
+      const coveredLocs = new Set(existingStockPO.rows.map((r) => r.loc));
       const stockPoNos = [];
-      if (!existingStockPO.rows.length) {
+      {
         const groups = {};
         for (const it of fresh.rows) {
           const key = it.stock_location || "Stock";
+          if (coveredLocs.has(key)) continue;
           (groups[key] ||= []).push(it);
         }
         for (const [location, lines] of Object.entries(groups)) {
@@ -748,6 +759,27 @@ router.post("/:prNo/send-to-fic", canDo("send_to_fic"), async (req, res) => {
             [po.rows[0].id, req.user.name, req.user.role]
           );
           stockPoNos.push(poNo);
+        }
+      }
+
+      // A stock-only PR is "PO raised" the moment its Stock PO(s) exist — the same
+      // point a buy PR moves, at Generate Buy PO. A mixed PR (any buy line) must stay
+      // APPROVED here: it still has to go through QS, and Generate Buy PO moves it.
+      // The receive hook in purchaseOrders.js stays as a safety net.
+      if (stockPoNos.length && pr.status === "APPROVED") {
+        const hasBuy = await c.query(
+          "SELECT 1 FROM pr_items WHERE pr_id = $1 AND buy_qty > 0 LIMIT 1", [pr.id]
+        );
+        if (!hasBuy.rows.length) {
+          const moved = await c.query(
+            "UPDATE purchase_requests SET status='PO_RAISED' WHERE id=$1 AND status='APPROVED' RETURNING id",
+            [pr.id]
+          );
+          if (moved.rowCount)
+            await c.query(
+              "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'CREATE_STOCK','APPROVED','PO_RAISED',$2,$3,$4)",
+              [pr.id, req.user.name, req.user.role, `Stock PO ${stockPoNos.join(", ")} raised from stock`]
+            );
         }
       }
 
