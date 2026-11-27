@@ -35,6 +35,8 @@ const ACTION = {
   CANCEL:         { label: "Cancelled",          cls: "bg-red-50 text-red-700 ring-red-200" },
   // A stock-only PR's last open Stock PO was cancelled (PO Raised → Approved).
   STOCK_PO_CANCELLED: { label: "Stock PO cancelled", cls: "bg-red-50 text-red-700 ring-red-200" },
+  // Every PO on a PR with buy lines was cancelled (PO Raised → Approved).
+  ALL_POS_CANCELLED:  { label: "All POs cancelled",  cls: "bg-red-50 text-red-700 ring-red-200" },
 };
 const act = (a) => ACTION[a] || { label: a, cls: "bg-gray-50 text-gray-700 ring-gray-200" };
 const when = (ts) => (ts ? new Date(ts).toLocaleString() : "—");

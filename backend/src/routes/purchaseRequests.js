@@ -102,7 +102,8 @@ async function getPR(prNo, client = db) {
     const pos = await client.query(
       "SELECT po_type, status FROM purchase_orders WHERE pr_id = $1", [rows[0].id]
     );
-    buyPoCreated = pos.rows.some((r) => r.po_type === "BUY");
+    // Cancelled POs don't count: their lines go back to the Purchaser to redo.
+    buyPoCreated = pos.rows.some((r) => r.po_type === "BUY" && r.status !== "CANCELLED");
     // A cancelled Stock PO doesn't count: its lines are back with the Purchaser and
     // must be re-sendable (the button and reminders depend on this flag).
     stockPoCreated = pos.rows.some((r) => r.po_type === "STOCK" && r.status !== "CANCELLED");
@@ -895,9 +896,9 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
       // (PUT /purchase-orders/:poNo/prices).
     }
 
-    // don't create buy POs twice
+    // don't create buy POs twice (a cancelled Buy PO doesn't count — it may be redone)
     const existingBuy = await db.query(
-      "SELECT 1 FROM purchase_orders WHERE pr_id = $1 AND po_type = 'BUY' LIMIT 1", [pr.id]
+      "SELECT 1 FROM purchase_orders WHERE pr_id = $1 AND po_type = 'BUY' AND status <> 'CANCELLED' LIMIT 1", [pr.id]
     );
     if (existingBuy.rows.length) return fail(res, 409, "Buy PO already generated for this PR");
 

@@ -544,6 +544,31 @@ router.post("/:poNo/cancel", canDo("cancel_po"), async (req, res) => {
           }
         }
       }
+      // A PR with buy lines (buy-only or stock + buy) goes back to APPROVED once EVERY
+      // PO raised for it is cancelled — nothing is left in flight, and the Purchaser
+      // redoes it (Submit for QS → Generate Buy PO, and Send stock to FIC for stock).
+      // While any of its POs is still OPEN or CLOSED, it stays PO_RAISED.
+      // (Stock-only PRs are handled above.)
+      if (po.pr_id) {
+        const st = await c.query(
+          `SELECT
+             EXISTS (SELECT 1 FROM pr_items WHERE pr_id = $1 AND buy_qty > 0)                          AS has_buy,
+             NOT EXISTS (SELECT 1 FROM purchase_orders WHERE pr_id = $1 AND status <> 'CANCELLED')    AS all_cancelled`,
+          [po.pr_id]
+        );
+        const s = st.rows[0];
+        if (s.has_buy && s.all_cancelled) {
+          const back = await c.query(
+            "UPDATE purchase_requests SET status='APPROVED' WHERE id=$1 AND status='PO_RAISED' RETURNING id",
+            [po.pr_id]
+          );
+          if (back.rowCount)
+            await c.query(
+              "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'ALL_POS_CANCELLED','PO_RAISED','APPROVED',$2,$3,$4)",
+              [po.pr_id, req.user.name, req.user.role, `${po.po_no} cancelled — all POs on this PR are cancelled`]
+            );
+        }
+      }
     });
     ok(res, await getPO(po.po_no));
   } catch (e) { fail(res, 500, e.message); }
