@@ -9,6 +9,7 @@
 // pattern in pages/ProcurementExport.jsx. Logo/cert images load from /public.
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { enableCjk, cjkCell } from "./pdfCjk";
 import ExcelJS from "exceljs";
 
 const COMPANY = [
@@ -75,7 +76,7 @@ export async function exportRfqPdf(group) {
   const H = doc.internal.pageSize.getHeight();
   const M = 40;
 
-  const [logo, certs] = await Promise.all([loadImage("/bdb-logo.png"), loadImage("/bdb-certs.png")]);
+  const [logo, certs] = await Promise.all([loadImage("/bdb-logo.png"), loadImage("/bdb-certs.png"), enableCjk(doc, g)]);
 
   // ── Logo (top-right) ──
   if (logo) {
@@ -175,6 +176,7 @@ export async function exportRfqPdf(group) {
     headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: "bold", halign: "center", lineColor: [0, 0, 0], lineWidth: 0.7 },
     columnStyles: { 0: { cellWidth: 34, halign: "center" }, 1: { cellWidth: 230, valign: "top" }, 2: { cellWidth: 40, halign: "center" }, 3: { cellWidth: 45, halign: "center" }, 4: { cellWidth: 72, halign: "right" }, 5: { cellWidth: 93, halign: "right" } },
     margin: { left: M, right: M },
+    didParseCell: (data) => cjkCell(doc, data),
     // The colour is part of the cell text so the row is sized for it, but it must print in red.
     // autoTable applies the cell's styles BEFORE willDrawCell runs, so a colour change here is
     // too late — the description would print dark and then again in didDrawCell (the overlapping

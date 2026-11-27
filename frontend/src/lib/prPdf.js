@@ -8,6 +8,7 @@
 // If a file is missing, the PDF falls back to a clean text header/footer.
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { enableCjk, cjkCell } from "./pdfCjk";
 
 const COMPANY = [
   "8 Jalan Kilang Barat #01-02 Singapore 159351",
@@ -67,7 +68,7 @@ export async function exportPrPdf(pr) {
   const H = doc.internal.pageSize.getHeight();
   const M = 40;
 
-  const [logo, certs] = await Promise.all([loadImage("/bdb-logo.png"), loadImage("/bdb-certs.png")]);
+  const [logo, certs] = await Promise.all([loadImage("/bdb-logo.png"), loadImage("/bdb-certs.png"), enableCjk(doc, pr)]);
 
   // ── Header: title + logo ──
   if (logo) {
@@ -235,6 +236,7 @@ export async function exportPrPdf(pr) {
         data.cell.styles.textColor = [200, 30, 30];
         data.cell.styles.fontStyle = "bold";
       }
+      cjkCell(doc, data); // last: Chinese text prints regular (red is kept)
     },
     didDrawPage: () => {
       // company footer on every page

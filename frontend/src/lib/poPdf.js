@@ -8,6 +8,7 @@
 // Logo/cert images load at runtime from /public (text fallback if missing).
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { enableCjk, cjkCell } from "./pdfCjk";
 import { hasGst, gstAmount, grossAmount, gstRatePct } from "./gst";
 
 const COMPANY = [
@@ -76,7 +77,7 @@ export async function exportPoPdf(po, opts = {}) {
   const H = doc.internal.pageSize.getHeight();
   const M = 40;
 
-  const [logo, certs] = await Promise.all([loadImage("/bdb-logo.png"), loadImage("/bdb-certs.png")]);
+  const [logo, certs] = await Promise.all([loadImage("/bdb-logo.png"), loadImage("/bdb-certs.png"), enableCjk(doc, po)]);
 
   // ── Logo (top-right) ──
   if (logo) {
@@ -225,6 +226,7 @@ export async function exportPoPdf(po, opts = {}) {
         data.cell.styles.textColor = RED;
         data.cell.styles.fontStyle = "bold";
       }
+      cjkCell(doc, data); // last: Chinese text prints regular (red is kept)
     },
     didDrawPage: () => {
       let fy = H - 46;
