@@ -961,6 +961,12 @@ router.post("/:prNo/generate-pos", canDo("generate_po"), async (req, res) => {
         poNos.push(poNo);
       }
       await c.query("UPDATE purchase_requests SET status='PO_RAISED' WHERE id=$1", [pr.id]);
+      // Record it in the PR History — every other status change writes an entry, and
+      // without one the PR shows "PO raised" with no step that explains it.
+      await c.query(
+        "INSERT INTO pr_approvals (pr_id, action, from_status, to_status, actor, actor_role, note) VALUES ($1,'CREATE',$2,'PO_RAISED',$3,$4,$5)",
+        [pr.id, pr.status, req.user.name, req.user.role, `Buy PO ${poNos.join(", ")} raised`]
+      );
       // Purchaser acks; FIC picks up the next step; the approving Manager and
       // the drafter who raised the PR both get a tracking note.
       audience = await events.poRaised({ actor: req.user, pr, poNos, poType: "BUY" });
