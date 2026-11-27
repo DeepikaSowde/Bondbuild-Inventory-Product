@@ -97,19 +97,34 @@ async function getPR(prNo, client = db) {
   // Which PO types already exist for this PR — lets the UI show/hide the two
   // purchaser actions independently (Generate Buy PO vs. Send stock to FIC), so
   // raising one doesn't strand the other.
-  let buyPoCreated = false, stockPoCreated = false;
+  let buyPoCreated = false, stockPoCreated = false, stockSendPending = false;
   try {
     const pos = await client.query(
       "SELECT po_type, status FROM purchase_orders WHERE pr_id = $1", [rows[0].id]
     );
     // Cancelled POs don't count: their lines go back to the Purchaser to redo.
     buyPoCreated = pos.rows.some((r) => r.po_type === "BUY" && r.status !== "CANCELLED");
-    // A cancelled Stock PO doesn't count: its lines are back with the Purchaser and
-    // must be re-sendable (the button and reminders depend on this flag).
     stockPoCreated = pos.rows.some((r) => r.po_type === "STOCK" && r.status !== "CANCELLED");
+    // "Send stock to FIC" is needed while some stock line is waiting for the Purchaser
+    // at a location that has no live (OPEN/CLOSED) Stock PO. Checked per location, the
+    // same way send-to-fic groups Stock POs (key = stock_location, blank → 'Stock'), so
+    // cancelling one location's PO while another is still open makes it re-sendable.
+    const pend = await client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM pr_items pi
+          WHERE pi.pr_id = $1 AND pi.stock_qty > 0 AND pi.stock_status = 'AWAITING_PURCHASER'
+            AND NOT EXISTS (
+              SELECT 1 FROM purchase_orders po
+               WHERE po.pr_id = $1 AND po.po_type = 'STOCK' AND po.status <> 'CANCELLED'
+                 AND COALESCE(NULLIF(po.source_location, ''), 'Stock')
+                   = COALESCE(NULLIF(pi.stock_location, ''), 'Stock'))
+       ) AS pending`, [rows[0].id]
+    );
+    stockSendPending = pend.rows[0].pending;
   } catch { /* purchase_orders table always present; guard is belt-and-braces */ }
   return { ...rows[0], items: items.rows, attachments, item_attachments: itemAttachments,
-           buy_po_created: buyPoCreated, stock_po_created: stockPoCreated };
+           buy_po_created: buyPoCreated, stock_po_created: stockPoCreated,
+           stock_send_pending: stockSendPending };
 }
 
 // Everything raised here is a lifecycle message → the 📬 Inbox, never the 🔔 Alerts

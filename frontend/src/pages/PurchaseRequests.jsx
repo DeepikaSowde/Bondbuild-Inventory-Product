@@ -1526,7 +1526,12 @@ function PRView({ pr, user, suppliers, perms = {}, canApprove, canPurchase, canF
           // Each half is "done" once its own PO exists. A PR with both halves needs
           // BOTH actions — the buttons below only disappear once each is truly done.
           const buyPending = hasBuy && !pr.buy_po_created;
-          const stockPending = hasStock && anyAwaiting && !pr.stock_po_created;
+          // Stock is pending while a waiting stock line sits at a location with no live
+          // Stock PO (server-computed per location — see getPR). Falls back to the old
+          // whole-PR check if the server doesn't send the flag.
+          const stockPending = hasStock && (pr.stock_send_pending !== undefined
+            ? !!pr.stock_send_pending
+            : anyAwaiting && !pr.stock_po_created);
           const showSendFic = pSendFic && stockPending;
           // Gate 1 (enhancement #3): Generate Buy PO only after QS approves the PR.
           const showGenerate = pGenerate && buyPending && ["QS_APPROVED", "PO_RAISED"].includes(pr.status);
