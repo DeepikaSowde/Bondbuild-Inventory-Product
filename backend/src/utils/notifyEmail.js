@@ -311,7 +311,7 @@ const Email = {
     sendSlaEmail({
       toEmails, subject, title, lines: [body], prNo, fromEmail,
       attachments: files, attachedNames: files.map((f) => f.name), skipped,
-      items, greeting: `Dear ${roles[0]},`, signName,
+      items, greeting: `Dear ${roles.join(" and ")},`, signName,
     });
   },
   prRejected: async (pr, sentBack, reason) => {

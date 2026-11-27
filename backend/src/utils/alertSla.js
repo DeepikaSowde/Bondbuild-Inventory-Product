@@ -148,18 +148,34 @@ async function rulePoInitiation() {
 }
 
 // Shared body for the four PO-stage rules.
-async function firePoStageAlert({ rule, po, interval, title, body, includeFic }) {
+// The Purchaser side of a PO alert. The person who prepared the PO gets it
+// personally; if that person is NOT a Purchaser (an Admin/Manager raised it) or
+// can't be matched to a user, the whole Purchaser role gets it too — otherwise no
+// Purchaser would ever hear about the PO. `skipRoles` lists roles the caller
+// already broadcasts to, so their members aren't sent a second, personal copy.
+// Returns the email addresses to include.
+async function notifyPoPurchaser(po, { title, body, type, skipRoles = [] }) {
   const owner = await userByName(po.prepared_by);
-  await insertNotification({ role: owner?.role || "Purchaser", targetUserId: owner?.id || null,
-    title, body, type: "warning", refPr: po.pr_no, refPo: po.po_no });
-  await insertNotification({ role: "Manager", title, body, type: "warning", refPr: po.pr_no, refPo: po.po_no });
-  const emailRoles = ["Manager"];
-  if (includeFic) {
-    await insertNotification({ role: "Factory In-charge", title, body, type: "warning", refPr: po.pr_no, refPo: po.po_no });
-    emailRoles.push("Factory In-charge");
+  const emails = [];
+  if (owner && !skipRoles.includes(owner.role)) {
+    await insertNotification({ role: owner.role, targetUserId: owner.id,
+      title, body, type, refPr: po.pr_no, refPo: po.po_no });
+    if (owner.email) emails.push(owner.email);
   }
-  if (!owner) emailRoles.push("Purchaser"); // owner unknown → broadcast to role
-  sendSlaEmail({ toEmails: [owner?.email, ...(await emailsForRoles(emailRoles))],
+  if (owner?.role !== "Purchaser") {
+    await insertNotification({ role: "Purchaser", title, body, type, refPr: po.pr_no, refPo: po.po_no });
+    emails.push(...(await emailsForRoles(["Purchaser"])));
+  }
+  return emails;
+}
+
+async function firePoStageAlert({ rule, po, interval, title, body, includeFic }) {
+  const broadcastRoles = includeFic ? ["Manager", "Factory In-charge"] : ["Manager"];
+  const purchaserEmails = await notifyPoPurchaser(po, { title, body, type: "warning", skipRoles: broadcastRoles });
+  await insertNotification({ role: "Manager", title, body, type: "warning", refPr: po.pr_no, refPo: po.po_no });
+  if (includeFic)
+    await insertNotification({ role: "Factory In-charge", title, body, type: "warning", refPr: po.pr_no, refPo: po.po_no });
+  sendSlaEmail({ toEmails: [...purchaserEmails, ...(await emailsForRoles(broadcastRoles))],
     subject: title, title: "Purchase order needs attention", lines: [body], prNo: po.pr_no, poNo: po.po_no });
   await stampLedger(rule, "PO", po.id);
 }
@@ -242,10 +258,8 @@ async function ruleStockNotCollected() {
     const title = `Internal PO ${po.po_no}: not collected after ${n} days — consider cancelling`;
     const body = `Internal inventory PO ${po.po_no} has not been collected ${n} days after it was raised. Purchaser: please collect it or cancel the PO. Repeats every ${interval} days until collected or cancelled.`;
     // Purchaser only (cancel prompt) — no Manager/FIC broadcast for this one.
-    const owner = await userByName(po.prepared_by);
-    await insertNotification({ role: owner?.role || "Purchaser", targetUserId: owner?.id || null,
-      title, body, type: "error", refPr: po.pr_no, refPo: po.po_no });
-    sendSlaEmail({ toEmails: owner?.email ? [owner.email] : await emailsForRoles(["Purchaser"]),
+    const toEmails = await notifyPoPurchaser(po, { title, body, type: "error" });
+    sendSlaEmail({ toEmails,
       subject: title, title: "Internal PO not collected", lines: [body], prNo: po.pr_no, poNo: po.po_no });
     await stampLedger(rule, "PO", po.id);
   }
